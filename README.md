@@ -238,3 +238,6 @@ sudo pacman -S --noconfirm --needed gcc make git ripgrep fd unzip neovim
 ```
 </details>
 
+## Attribution
+
+This configuration started from [kickstart.nvim](https://github.com/nvim-lua/kickstart.nvim), a documented Neovim starter configuration. It has since been customized for my own workflow.

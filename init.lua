@@ -92,6 +92,23 @@ vim.g.maplocalleader = ' '
 
 -- Set to true if you have a Nerd Font installed and selected in the terminal
 vim.g.have_nerd_font = false
+-- Neovide-only visuals (ignored in terminal Neovim)
+if vim.g.neovide then
+  -- Smooth cursor interpolation
+  vim.g.neovide_cursor_animation_length = 0.06
+
+  -- Disable Neovide's built-in smooth scrolling so mousewheel stays responsive
+  vim.g.neovide_scroll_animation_length = 0.0
+
+  -- Cursor trail size (0.0 disables trail)
+  vim.g.neovide_cursor_trail_size = 0.35
+
+  -- Cursor visual effect
+  vim.g.neovide_cursor_vfx_mode = ''
+
+  -- Neovide expects a *font family* name (not a file name). Monaspace's family is "Monaspace Krypton".
+  vim.o.guifont = 'Monaspace Krypton:h14'
+end
 
 -- [[ Setting options ]]
 -- See `:help vim.opt`
@@ -102,7 +119,7 @@ vim.g.have_nerd_font = false
 vim.opt.number = true
 -- You can also add relative line numbers, to help with jumping.
 --  Experiment for yourself to see if you like it!
--- vim.opt.relativenumber = true
+vim.opt.relativenumber = true
 
 -- Enable mouse mode, can be useful for resizing splits for example!
 vim.opt.mouse = 'a'
@@ -161,12 +178,52 @@ vim.opt.scrolloff = 10
 -- See `:help 'confirm'`
 vim.opt.confirm = true
 
+-- Enable concealment for plugins like obsidian.nvim (hides markup, renders checkboxes, etc.)
+vim.opt.conceallevel = 2
+
+-- Disable automatic comment continuation on newline / o / O
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = '*',
+  callback = function()
+    -- r: continue comments when pressing Enter
+    -- o: continue comments when using o or O
+    -- c: auto-wrap comments (also remove, to be safe)
+    vim.opt_local.formatoptions:remove { 'r', 'o', 'c' }
+  end,
+})
+
+-- Open file explorer on startup (left) when starting in a directory / empty buffer
+vim.api.nvim_create_autocmd('VimEnter', {
+  callback = function(data)
+    -- If a file was specified on the command line, don't force open.
+    local buf = data.buf
+    local name = vim.api.nvim_buf_get_name(buf)
+
+    -- If started with a directory: open it and show the tree
+    local stat = (vim.uv or vim.loop).fs_stat(name)
+    if stat and stat.type == 'directory' then
+      vim.cmd.cd(name)
+      vim.cmd 'Neotree show left'
+      return
+    end
+
+    -- If started with an empty buffer: show the tree
+    if name == '' then
+      vim.cmd 'Neotree show left'
+    end
+  end,
+})
+
 -- [[ Basic Keymaps ]]
 --  See `:help vim.keymap.set()`
 
 -- Clear highlights on search when pressing <Esc> in normal mode
 --  See `:help hlsearch`
 vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
+
+-- Mousewheel: scroll viewport without moving cursor (no smoothing)
+vim.keymap.set({ 'n', 'i', 'v' }, '<ScrollWheelUp>', '<C-y><C-y><C-y>', { silent = true })
+vim.keymap.set({ 'n', 'i', 'v' }, '<ScrollWheelDown>', '<C-e><C-e><C-e>', { silent = true })
 
 -- Diagnostic keymaps
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
@@ -224,6 +281,7 @@ if not (vim.uv or vim.loop).fs_stat(lazypath) then
     error('Error cloning lazy.nvim:\n' .. out)
   end
 end ---@diagnostic disable-next-line: undefined-field
+
 vim.opt.rtp:prepend(lazypath)
 
 -- [[ Configure and install plugins ]]
@@ -240,6 +298,142 @@ vim.opt.rtp:prepend(lazypath)
 require('lazy').setup({
   -- NOTE: Plugins can be added with a link (or for a github repo: 'owner/repo' link).
   'tpope/vim-sleuth', -- Detect tabstop and shiftwidth automatically
+  { -- VSCode-like multi-cursor
+    'mg979/vim-visual-multi',
+    branch = 'master',
+    init = function()
+      -- Match VSCode muscle memory
+      vim.g.VM_maps = {
+        ['Find Under'] = '<C-n>',
+        ['Find Subword Under'] = '<C-n>',
+      }
+
+      -- Sensible defaults
+      vim.g.VM_default_mappings = 1
+      vim.g.VM_silent_exit = 1
+    end,
+  },
+  { -- File explorer (left file tree)
+    'nvim-neo-tree/neo-tree.nvim',
+    branch = 'v3.x',
+    dependencies = {
+      'nvim-lua/plenary.nvim',
+      'nvim-tree/nvim-web-devicons',
+      'MunifTanjim/nui.nvim',
+    },
+    cmd = 'Neotree',
+    keys = {
+      { '<leader>e', '<cmd>Neotree toggle left<CR>', desc = 'Toggle file explorer' },
+      { '<leader>o', '<cmd>Neotree focus left<CR>', desc = 'Focus file explorer' },
+    },
+    opts = {
+      close_if_last_window = true,
+      popup_border_style = 'rounded',
+      enable_git_status = true,
+      enable_diagnostics = true,
+      filesystem = {
+        filtered_items = {
+          hide_dotfiles = false,
+          hide_gitignored = false,
+        },
+        follow_current_file = {
+          enabled = true,
+        },
+        hijack_netrw_behavior = 'open_default',
+      },
+      window = {
+        position = 'left',
+        width = 32,
+        mappings = {
+          ['<space>'] = 'toggle_node',
+          ['<cr>'] = 'open',
+          ['l'] = 'open',
+          ['h'] = 'close_node',
+        },
+      },
+    },
+  },
+
+  { -- Integrated terminal as a panel
+    'akinsho/toggleterm.nvim',
+    version = '*',
+    opts = {
+      size = function(term)
+        if term.direction == 'horizontal' then
+          return 15 -- bottom panel height
+        elseif term.direction == 'vertical' then
+          return 80 -- side panel width (if you open one manually)
+        end
+      end,
+      open_mapping = nil,
+      shade_terminals = false,
+      direction = 'horizontal', -- open at the bottom by default
+      close_on_exit = false,
+      shell = vim.o.shell,
+    },
+    keys = {
+      {
+        '<leader>tt',
+        function()
+          -- Toggle a dedicated bottom terminal *under the main code window* (not under Neo-tree).
+          local tab = vim.api.nvim_get_current_tabpage()
+
+          -- If the terminal window is already visible in this tab, close it.
+          for _, win in ipairs(vim.api.nvim_tabpage_list_wins(tab)) do
+            local buf = vim.api.nvim_win_get_buf(win)
+            if vim.bo[buf].buftype == 'terminal' and vim.b[buf].ds_bottom_term == true then
+              vim.api.nvim_win_close(win, true)
+              return
+            end
+          end
+
+          -- Pick a target window to split: prefer a normal code buffer (not neo-tree, not terminal).
+          local target_win = nil
+          local best_width = -1
+          for _, win in ipairs(vim.api.nvim_tabpage_list_wins(tab)) do
+            local buf = vim.api.nvim_win_get_buf(win)
+            local ft = vim.bo[buf].filetype
+            local bt = vim.bo[buf].buftype
+            if bt == '' and ft ~= 'neo-tree' then
+              local w = vim.api.nvim_win_get_width(win)
+              if w > best_width then
+                best_width = w
+                target_win = win
+              end
+            end
+          end
+
+          if not target_win then
+            target_win = vim.api.nvim_get_current_win()
+          end
+
+          vim.api.nvim_win_call(target_win, function()
+            -- Split below *this* window only.
+            vim.cmd 'belowright 15split'
+
+            -- Reuse an existing dedicated terminal buffer if we have one.
+            local buf = vim.g.ds_bottom_term_buf
+            if buf and vim.api.nvim_buf_is_valid(buf) then
+              vim.api.nvim_win_set_buf(0, buf)
+              vim.cmd 'startinsert'
+              return
+            end
+
+            -- Otherwise create a real terminal buffer in this split.
+            vim.cmd 'terminal'
+            buf = vim.api.nvim_get_current_buf()
+            vim.b.ds_bottom_term = true
+            vim.bo.bufhidden = 'hide'
+            vim.g.ds_bottom_term_buf = buf
+            vim.cmd 'startinsert'
+          end)
+        end,
+        desc = 'Toggle terminal (bottom of code panel)',
+      },
+      { '<leader>tb', '<leader>tt', remap = true, desc = 'Toggle terminal (bottom)' },
+      { '<leader>tf', '<cmd>ToggleTerm direction=float<CR>', desc = 'Toggle terminal (float)' },
+    },
+  },
 
   -- NOTE: Plugins can also be added by using a table,
   -- with the first argument being the link and the following
@@ -274,6 +468,45 @@ require('lazy').setup({
         changedelete = { text = '~' },
       },
     },
+  },
+  {
+    -- Rainbow brackets
+    'HiPhish/rainbow-delimiters.nvim',
+    enabled = false,
+    event = 'BufReadPost',
+    config = function()
+      local rd = require 'rainbow-delimiters'
+
+      vim.g.rainbow_delimiters = {
+        strategy = {
+          -- Default: highlight everything
+          [''] = rd.strategy.global,
+          -- C/C++: only highlight the scope containing the cursor (enclosing delimiters)
+          c = rd.strategy['local'],
+          cpp = rd.strategy['local'],
+        },
+        query = { [''] = 'rainbow-delimiters' },
+        highlight = {
+          'RainbowDelimiterRed',
+          'RainbowDelimiterYellow',
+          'RainbowDelimiterBlue',
+          'RainbowDelimiterOrange',
+          'RainbowDelimiterGreen',
+          'RainbowDelimiterViolet',
+          'RainbowDelimiterCyan',
+        },
+      }
+
+      -- Ensure the highlight groups are actually distinct/visible in your colorscheme.
+      -- (We link to existing diagnostic groups instead of hardcoding colors.)
+      vim.api.nvim_set_hl(0, 'RainbowDelimiterRed', { link = 'DiagnosticError' })
+      vim.api.nvim_set_hl(0, 'RainbowDelimiterYellow', { link = 'DiagnosticWarn' })
+      vim.api.nvim_set_hl(0, 'RainbowDelimiterBlue', { link = 'DiagnosticInfo' })
+      vim.api.nvim_set_hl(0, 'RainbowDelimiterOrange', { link = 'DiagnosticWarn' })
+      vim.api.nvim_set_hl(0, 'RainbowDelimiterGreen', { link = 'DiagnosticHint' })
+      vim.api.nvim_set_hl(0, 'RainbowDelimiterViolet', { link = 'DiagnosticInfo' })
+      vim.api.nvim_set_hl(0, 'RainbowDelimiterCyan', { link = 'DiagnosticHint' })
+    end,
   },
 
   -- NOTE: Plugins can also be configured to run Lua code when they are loaded.
@@ -343,6 +576,7 @@ require('lazy').setup({
         { '<leader>w', group = '[W]orkspace' },
         { '<leader>t', group = '[T]oggle' },
         { '<leader>h', group = 'Git [H]unk', mode = { 'n', 'v' } },
+        { '<leader>o', group = '[O]bsidian' },
       },
     },
   },
@@ -426,6 +660,8 @@ require('lazy').setup({
       vim.keymap.set('n', '<leader>sh', builtin.help_tags, { desc = '[S]earch [H]elp' })
       vim.keymap.set('n', '<leader>sk', builtin.keymaps, { desc = '[S]earch [K]eymaps' })
       vim.keymap.set('n', '<leader>sf', builtin.find_files, { desc = '[S]earch [F]iles' })
+      -- Explicit mapping for <leader>ff to find_files
+      vim.keymap.set('n', '<leader>ff', builtin.find_files, { desc = '[F]ind [F]iles' })
       vim.keymap.set('n', '<leader>ss', builtin.builtin, { desc = '[S]earch [S]elect Telescope' })
       vim.keymap.set('n', '<leader>sw', builtin.grep_string, { desc = '[S]earch current [W]ord' })
       vim.keymap.set('n', '<leader>sg', builtin.live_grep, { desc = '[S]earch by [G]rep' })
@@ -487,7 +723,7 @@ require('lazy').setup({
       { 'j-hui/fidget.nvim', opts = {} },
 
       -- Allows extra capabilities provided by nvim-cmp
-      'hrsh7th/cmp-nvim-lsp',
+      -- 'hrsh7th/cmp-nvim-lsp',
     },
     config = function()
       -- Brief aside: **What is LSP?**
@@ -588,6 +824,10 @@ require('lazy').setup({
           --
           -- When you move your cursor, the highlights will be cleared (the second autocommand).
           local client = vim.lsp.get_client_by_id(event.data.client_id)
+          -- Disable LSP semantic token highlighting for C/C++ (it will re-color identifiers like std::, variables, etc.)
+          if client and (vim.bo[event.buf].filetype == 'c' or vim.bo[event.buf].filetype == 'cpp') then
+            client.server_capabilities.semanticTokensProvider = nil
+          end
           if client and client_supports_method(client, vim.lsp.protocol.Methods.textDocument_documentHighlight, event.buf) then
             local highlight_augroup = vim.api.nvim_create_augroup('kickstart-lsp-highlight', { clear = false })
             vim.api.nvim_create_autocmd({ 'CursorHold', 'CursorHoldI' }, {
@@ -659,78 +899,53 @@ require('lazy').setup({
       local capabilities = vim.lsp.protocol.make_client_capabilities()
       capabilities = vim.tbl_deep_extend('force', capabilities, require('cmp_nvim_lsp').default_capabilities())
 
-      -- Enable the following language servers
-      --  Feel free to add/remove any LSPs that you want here. They will automatically be installed.
-      --
-      --  Add any additional override configuration in the following tables. Available keys are:
-      --  - cmd (table): Override the default command used to start the server
-      --  - filetypes (table): Override the default list of associated filetypes for the server
-      --  - capabilities (table): Override fields in capabilities. Can be used to disable certain LSP features.
-      --  - settings (table): Override the default settings passed when initializing the server.
-      --        For example, to see the options for `lua_ls`, you could go to: https://luals.github.io/wiki/settings/
       local servers = {
-        -- clangd = {},
-        -- gopls = {},
-        -- pyright = {},
-        -- rust_analyzer = {},
-        -- ... etc. See `:help lspconfig-all` for a list of all the pre-configured LSPs
-        --
-        -- Some languages (like typescript) have entire language plugins that can be useful:
-        --    https://github.com/pmizio/typescript-tools.nvim
-        --
-        -- But for many setups, the LSP (`ts_ls`) will work just fine
-        -- ts_ls = {},
-        --
+        -- NOTE: clangd re-enabled for hover (type reveal) and format-on-save.
+        -- Autocomplete is disabled separately via nvim-cmp FileType autocmd below.
+        clangd = {
+          cmd = {
+            '/opt/homebrew/opt/llvm/bin/clangd',
+            '--background-index',
+          },
+        },
 
         lua_ls = {
-          -- cmd = { ... },
-          -- filetypes = { ... },
-          -- capabilities = {},
           settings = {
             Lua = {
               completion = {
                 callSnippet = 'Replace',
               },
-              -- You can toggle below to ignore Lua_LS's noisy `missing-fields` warnings
-              -- diagnostics = { disable = { 'missing-fields' } },
             },
           },
         },
       }
 
-      -- Ensure the servers and tools above are installed
-      --
-      -- To check the current status of installed tools and/or manually install
-      -- other tools, you can run
-      --    :Mason
-      --
-      -- You can press `g?` for help in this menu.
-      --
-      -- `mason` had to be setup earlier: to configure its options see the
-      -- `dependencies` table for `nvim-lspconfig` above.
-      --
-      -- You can add other tools here that you want Mason to install
-      -- for you, so that they are available from within Neovim.
-      local ensure_installed = vim.tbl_keys(servers or {})
-      vim.list_extend(ensure_installed, {
-        'stylua', -- Used to format Lua code
-      })
+      -- Ensure the servers and tools above are installed (clangd intentionally not managed by mason here)
+      local ensure_installed = {
+        'lua_ls',
+        'stylua',
+      }
       require('mason-tool-installer').setup { ensure_installed = ensure_installed }
-
       require('mason-lspconfig').setup {
-        ensure_installed = {}, -- explicitly set to an empty table (Kickstart populates installs via mason-tool-installer)
+        ensure_installed = {},
         automatic_installation = false,
         handlers = {
           function(server_name)
+            if server_name == 'clangd' then
+              return
+            end
             local server = servers[server_name] or {}
-            -- This handles overriding only values explicitly passed
-            -- by the server configuration above. Useful when disabling
-            -- certain features of an LSP (for example, turning off formatting for ts_ls)
             server.capabilities = vim.tbl_deep_extend('force', {}, capabilities, server.capabilities or {})
-            require('lspconfig')[server_name].setup(server)
+            vim.lsp.config(server_name, server)
+            vim.lsp.enable(server_name)
           end,
         },
       }
+
+      local clangd = servers.clangd or {}
+      clangd.capabilities = vim.tbl_deep_extend('force', {}, capabilities, clangd.capabilities or {})
+      vim.lsp.config('clangd', clangd)
+      vim.lsp.enable 'clangd'
     end,
   },
 
@@ -751,18 +966,21 @@ require('lazy').setup({
     opts = {
       notify_on_error = false,
       format_on_save = function(bufnr)
-        -- Disable "format_on_save lsp_fallback" for languages that don't
-        -- have a well standardized coding style. You can add additional
-        -- languages here or re-enable it for the disabled ones.
-        local disable_filetypes = { c = true, cpp = true }
-        if disable_filetypes[vim.bo[bufnr].filetype] then
-          return nil
-        else
+        local ft = vim.bo[bufnr].filetype
+
+        -- Always format C/C++ via clangd on save
+        if ft == 'c' or ft == 'cpp' then
           return {
-            timeout_ms = 500,
-            lsp_format = 'fallback',
+            timeout_ms = 1000,
+            lsp_format = 'always',
           }
         end
+
+        -- Default behavior for other filetypes
+        return {
+          timeout_ms = 500,
+          lsp_format = 'fallback',
+        }
       end,
       formatters_by_ft = {
         lua = { 'stylua' },
@@ -775,123 +993,283 @@ require('lazy').setup({
     },
   },
 
+  { -- Debug Adapter Protocol client
+    'mfussenegger/nvim-dap',
+    dependencies = {
+      { -- UI for DAP
+        'rcarriga/nvim-dap-ui',
+        dependencies = { 'nvim-neotest/nvim-nio' },
+      },
+      { -- Inline variable values
+        'theHamsta/nvim-dap-virtual-text',
+        opts = {
+          enabled = true,
+          enabled_commands = true,
+          highlight_changed_variables = false,
+          show_stop_reason = false,
+          commented = true, -- prefix virtual text with comment markers
+          virt_text_pos = 'eol',
+          virt_text_win_col = nil,
+          all_frames = false,
+          virt_lines = false,
+          virt_text_priority = 200,
+        },
+      },
+      { -- Install debug adapters via Mason
+        'jay-babu/mason-nvim-dap.nvim',
+        dependencies = { 'williamboman/mason.nvim' },
+        opts = {
+          automatic_installation = true,
+          handlers = {},
+          ensure_installed = { 'codelldb' },
+        },
+      },
+    },
+    config = function()
+      local dap = require 'dap'
+      local dapui = require 'dapui'
+
+      dapui.setup()
+
+      -- Subtle gray highlighting for DAP virtual text (debugger inlay values)
+      vim.api.nvim_set_hl(0, 'DapVirtualText', { fg = '#6b7280', italic = false })
+      vim.api.nvim_set_hl(0, 'DapVirtualTextChanged', { fg = '#9ca3af', italic = false })
+      vim.api.nvim_set_hl(0, 'DapVirtualTextError', { fg = '#9ca3af', italic = false })
+
+      -- Force override of DAP breakpoint signs with a red disc emoji
+      vim.fn.sign_define('DapBreakpoint', {
+        text = '🔴',
+        texthl = '',
+        linehl = '',
+        numhl = '',
+      })
+
+      vim.fn.sign_define('DapBreakpointCondition', {
+        text = '🔴',
+        texthl = '',
+        linehl = '',
+        numhl = '',
+      })
+
+      vim.fn.sign_define('DapBreakpointRejected', {
+        text = '🔴',
+        texthl = '',
+        linehl = '',
+        numhl = '',
+      })
+
+      -- Open/close the UI automatically
+      dap.listeners.after.event_initialized['dapui_config'] = function()
+        dapui.open()
+      end
+      dap.listeners.before.event_terminated['dapui_config'] = function()
+        dapui.close()
+      end
+      dap.listeners.before.event_exited['dapui_config'] = function()
+        dapui.close()
+      end
+
+      -- Prefer CodeLLDB (best experience on macOS). Fall back to lldb-dap if needed.
+      local mason_data = vim.fn.stdpath 'data'
+      local codelldb_adapter = mason_data .. '/mason/packages/codelldb/extension/adapter/codelldb'
+      local lldb_dap_mason = mason_data .. '/mason/bin/lldb-dap'
+      local lldb_dap_homebrew = '/opt/homebrew/opt/llvm/bin/lldb-dap'
+
+      if vim.fn.executable(codelldb_adapter) == 1 then
+        -- CodeLLDB runs as a server; nvim-dap spawns it and connects via a chosen port.
+        dap.adapters.codelldb = {
+          type = 'server',
+          port = '${port}',
+          executable = {
+            command = codelldb_adapter,
+            args = { '--port', '${port}' },
+          },
+        }
+      else
+        -- Fallback: use lldb-dap (DAP provided by LLVM).
+        local lldb_dap = (vim.fn.executable(lldb_dap_mason) == 1 and lldb_dap_mason)
+          or (vim.fn.executable(lldb_dap_homebrew) == 1 and lldb_dap_homebrew)
+          or 'lldb-dap'
+
+        dap.adapters.lldb = {
+          type = 'executable',
+          command = lldb_dap,
+          name = 'lldb',
+        }
+      end
+
+      local function default_program()
+        -- Your build script produces build/main
+        return vim.fn.getcwd() .. '/build/main'
+      end
+
+      local function split_args(s)
+        if s == nil or s == '' then
+          return {}
+        end
+        return vim.split(s, '%s+')
+      end
+
+      -- If CodeLLDB is available, prefer it; otherwise use the lldb-dap adapter.
+      local preferred_type = (dap.adapters.codelldb ~= nil) and 'codelldb' or 'lldb'
+
+      dap.configurations.cpp = {
+        {
+          name = 'Launch build/main',
+          type = preferred_type,
+          request = 'launch',
+          program = default_program,
+          cwd = '${workspaceFolder}',
+          stopOnEntry = false,
+          args = {},
+          terminal = 'integrated',
+        },
+        {
+          name = 'Launch (prompt)',
+          type = preferred_type,
+          request = 'launch',
+          program = function()
+            return vim.fn.input('Path to executable: ', default_program(), 'file')
+          end,
+          cwd = '${workspaceFolder}',
+          stopOnEntry = false,
+          args = function()
+            return split_args(vim.fn.input 'Args (space-separated): ')
+          end,
+          terminal = 'integrated',
+        },
+        {
+          name = 'Attach to process',
+          type = preferred_type,
+          request = 'attach',
+          pid = require('dap.utils').pick_process,
+          cwd = '${workspaceFolder}',
+        },
+      }
+      dap.configurations.c = dap.configurations.cpp
+
+      -- Keymaps
+      vim.keymap.set('n', '<F5>', dap.continue, { desc = 'DAP: Continue' })
+      vim.keymap.set('n', '<F10>', dap.step_over, { desc = 'DAP: Step over' })
+      vim.keymap.set('n', '<F11>', dap.step_into, { desc = 'DAP: Step into' })
+      vim.keymap.set('n', '<F12>', dap.step_out, { desc = 'DAP: Step out' })
+      vim.keymap.set('n', '<leader>db', dap.toggle_breakpoint, { desc = 'DAP: Toggle breakpoint' })
+      vim.keymap.set('n', '<leader>dB', function()
+        dap.set_breakpoint(vim.fn.input 'Breakpoint condition: ')
+      end, { desc = 'DAP: Conditional breakpoint' })
+      vim.keymap.set('n', '<leader>dr', dap.repl.open, { desc = 'DAP: Open REPL' })
+      vim.keymap.set('n', '<leader>dl', dap.run_last, { desc = 'DAP: Run last' })
+      vim.keymap.set('n', '<leader>du', dapui.toggle, { desc = 'DAP: Toggle UI' })
+    end,
+  },
+
   { -- Autocompletion
     'hrsh7th/nvim-cmp',
     event = 'InsertEnter',
     dependencies = {
-      -- Snippet Engine & its associated nvim-cmp source
-      {
-        'L3MON4D3/LuaSnip',
-        build = (function()
-          -- Build Step is needed for regex support in snippets.
-          -- This step is not supported in many windows environments.
-          -- Remove the below condition to re-enable on windows.
-          if vim.fn.has 'win32' == 1 or vim.fn.executable 'make' == 0 then
-            return
-          end
-          return 'make install_jsregexp'
-        end)(),
-        dependencies = {
-          -- `friendly-snippets` contains a variety of premade snippets.
-          --    See the README about individual language/framework/plugin snippets:
-          --    https://github.com/rafamadriz/friendly-snippets
-          -- {
-          --   'rafamadriz/friendly-snippets',
-          --   config = function()
-          --     require('luasnip.loaders.from_vscode').lazy_load()
-          --   end,
-          -- },
-        },
-      },
-      'saadparwaiz1/cmp_luasnip',
-
       -- Adds other completion capabilities.
       --  nvim-cmp does not ship with all sources by default. They are split
       --  into multiple repos for maintenance purposes.
       'hrsh7th/cmp-nvim-lsp',
+      'hrsh7th/cmp-buffer',
       'hrsh7th/cmp-path',
       'hrsh7th/cmp-nvim-lsp-signature-help',
+      {
+        'L3MON4D3/LuaSnip',
+        version = 'v2.*',
+        build = 'make install_jsregexp',
+      },
+      'saadparwaiz1/cmp_luasnip',
     },
     config = function()
       -- See `:help cmp`
       local cmp = require 'cmp'
-      local luasnip = require 'luasnip'
-      luasnip.config.setup {}
+
+      local lsp_completion_enabled = false
+
+      local quiet_sources = {
+        { name = 'buffer' },
+        { name = 'path' },
+      }
+
+      local lsp_sources = {
+        {
+          name = 'lazydev',
+          -- set group index to 0 to skip loading LuaLS completions as lazydev recommends it
+          group_index = 0,
+        },
+        { name = 'nvim_lsp' },
+        { name = 'luasnip' },
+        { name = 'path' },
+        { name = 'buffer' },
+        { name = 'nvim_lsp_signature_help' },
+      }
+
+      local function active_sources()
+        if lsp_completion_enabled then
+          return lsp_sources
+        end
+        return quiet_sources
+      end
+
+      local function apply_completion_sources()
+        cmp.setup { sources = active_sources() }
+      end
+
+      vim.keymap.set('n', '<leader>tc', function()
+        lsp_completion_enabled = not lsp_completion_enabled
+        apply_completion_sources()
+        local state = lsp_completion_enabled and 'on' or 'off'
+        vim.notify('LSP completion ' .. state, vim.log.levels.INFO)
+      end, { desc = '[T]oggle LSP [C]ompletion' })
 
       cmp.setup {
-        snippet = {
-          expand = function(args)
-            luasnip.lsp_expand(args.body)
-          end,
-        },
         completion = { completeopt = 'menu,menuone,noinsert' },
 
-        -- For an understanding of why these mappings were
-        -- chosen, you will need to read `:help ins-completion`
-        --
-        -- No, but seriously. Please read `:help ins-completion`, it is really good!
-        mapping = cmp.mapping.preset.insert {
-          -- Select the [n]ext item
-          ['<C-n>'] = cmp.mapping.select_next_item(),
-          -- Select the [p]revious item
-          ['<C-p>'] = cmp.mapping.select_prev_item(),
+        snippet = {
+          expand = function(args)
+            require('luasnip').lsp_expand(args.body)
+          end,
+        },
 
-          -- Scroll the documentation window [b]ack / [f]orward
+        mapping = cmp.mapping.preset.insert {
+          ['<C-n>'] = cmp.mapping.select_next_item(),
+          ['<C-p>'] = cmp.mapping.select_prev_item(),
           ['<C-b>'] = cmp.mapping.scroll_docs(-4),
           ['<C-f>'] = cmp.mapping.scroll_docs(4),
-
-          -- Accept ([y]es) the completion.
-          --  This will auto-import if your LSP supports it.
-          --  This will expand snippets if the LSP sent a snippet.
           ['<C-y>'] = cmp.mapping.confirm { select = true },
+          ['<CR>'] = cmp.mapping.confirm { select = true },
 
-          -- If you prefer more traditional completion keymaps,
-          -- you can uncomment the following lines
-          --['<CR>'] = cmp.mapping.confirm { select = true },
-          --['<Tab>'] = cmp.mapping.select_next_item(),
-          --['<S-Tab>'] = cmp.mapping.select_prev_item(),
-
-          -- Manually trigger a completion from nvim-cmp.
-          --  Generally you don't need this, because nvim-cmp will display
-          --  completions whenever it has completion options available.
-          ['<C-Space>'] = cmp.mapping.complete {},
-
-          -- Think of <c-l> as moving to the right of your snippet expansion.
-          --  So if you have a snippet that's like:
-          --  function $name($args)
-          --    $body
-          --  end
-          --
-          -- <c-l> will move you to the right of each of the expansion locations.
-          -- <c-h> is similar, except moving you backwards.
-          ['<C-l>'] = cmp.mapping(function()
-            if luasnip.expand_or_locally_jumpable() then
+          ['<Tab>'] = cmp.mapping(function(fallback)
+            local luasnip = require 'luasnip'
+            if cmp.visible() then
+              cmp.select_next_item()
+            elseif luasnip.expand_or_jumpable() then
               luasnip.expand_or_jump()
-            end
-          end, { 'i', 's' }),
-          ['<C-h>'] = cmp.mapping(function()
-            if luasnip.locally_jumpable(-1) then
-              luasnip.jump(-1)
+            else
+              fallback()
             end
           end, { 'i', 's' }),
 
-          -- For more advanced Luasnip keymaps (e.g. selecting choice nodes, expansion) see:
-          --    https://github.com/L3MON4D3/LuaSnip?tab=readme-ov-file#keymaps
+          ['<S-Tab>'] = cmp.mapping(function(fallback)
+            local luasnip = require 'luasnip'
+            if cmp.visible() then
+              cmp.select_prev_item()
+            elseif luasnip.jumpable(-1) then
+              luasnip.jump(-1)
+            else
+              fallback()
+            end
+          end, { 'i', 's' }),
+
+          ['<C-Space>'] = cmp.mapping.complete {},
         },
-        sources = {
-          {
-            name = 'lazydev',
-            -- set group index to 0 to skip loading LuaLS completions as lazydev recommends it
-            group_index = 0,
-          },
-          { name = 'nvim_lsp' },
-          { name = 'luasnip' },
-          { name = 'path' },
-          { name = 'nvim_lsp_signature_help' },
-        },
+        sources = active_sources(),
       }
     end,
   },
+
+  { 'rafamadriz/friendly-snippets' },
 
   { -- You can easily change to a different colorscheme.
     -- Change the name of the colorscheme plugin below, and then
@@ -955,34 +1333,352 @@ require('lazy').setup({
       --  Check out: https://github.com/echasnovski/mini.nvim
     end,
   },
-  { -- Highlight, edit, and navigate code
+  { -- VSCode-like sticky scope header (Tree-sitter context)
+    'nvim-treesitter/nvim-treesitter-context',
+    ft = { 'c', 'cpp' },
+    main = 'treesitter-context',
+    opts = {
+      enable = true,
+      max_lines = 1, -- keep only the top-most scope line
+      trim_scope = 'outer',
+      mode = 'topline', -- show context at the very top of the window
+      separator = nil,
+      zindex = 20,
+      on_attach = function(bufnr)
+        local ft = vim.bo[bufnr].filetype
+        return ft == 'c' or ft == 'cpp'
+      end,
+    },
+  },
+  { -- Treesitter (keep parser features; suppress highlights for C/C++)
     'nvim-treesitter/nvim-treesitter',
     build = ':TSUpdate',
-    main = 'nvim-treesitter.configs', -- Sets main module to use for opts
-    -- [[ Configure Treesitter ]] See `:help nvim-treesitter`
+    main = 'nvim-treesitter.configs',
     opts = {
-      ensure_installed = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' },
-      -- Autoinstall languages that are not installed
+      ensure_installed = { 'bash', 'c', 'cpp', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' },
       auto_install = true,
       highlight = {
         enable = true,
-        -- Some languages depend on vim's regex highlighting system (such as Ruby) for indent rules.
-        --  If you are experiencing weird indenting issues, add the language to
-        --  the list of additional_vim_regex_highlighting and disabled languages for indent.
+        -- Disable TS highlighting only for C/C++
+        disable = function(_, bufnr)
+          local ft = vim.bo[bufnr].filetype
+          return ft == 'c' or ft == 'cpp'
+        end,
         additional_vim_regex_highlighting = { 'ruby' },
       },
       indent = { enable = true, disable = { 'ruby' } },
     },
-    -- There are additional nvim-treesitter modules that you can use to interact
-    -- with nvim-treesitter. You should go explore a few and see what interests you:
-    --
-    --    - Incremental selection: Included, see `:help nvim-treesitter-incremental-selection-mod`
-    --    - Show your current context: https://github.com/nvim-treesitter/nvim-treesitter-context
-    --    - Treesitter + textobjects: https://github.com/nvim-treesitter/nvim-treesitter-textobjects
+    config = function(_, opts)
+      require('nvim-treesitter.configs').setup(opts)
+
+      -- Highlight the enclosing `{ ... }` braces for the current cursor position (C/C++ only).
+      -- This is independent of syntax/LSP highlighting and relies only on Tree-sitter parsing.
+      local brace_ns = vim.api.nvim_create_namespace 'ds_enclosing_brace'
+
+      -- Define a dedicated highlight group (link to an existing visible group; no hardcoded colors).
+      vim.api.nvim_set_hl(0, 'EnclosingBrace', { link = 'MatchParen' })
+      vim.api.nvim_set_hl(0, 'InnerDelimiter', { link = 'DiagnosticInfo' })
+
+      ---Find the nearest enclosing node that represents a braced block.
+      ---@param node userdata
+      ---@return userdata|nil
+      local function find_enclosing_brace_node(node)
+        while node do
+          local t = node:type()
+          -- Common braced constructs in C/C++ Tree-sitter grammars
+          if
+            t == 'compound_statement'
+            or t == 'initializer_list'
+            or t == 'namespace_definition'
+            or t == 'class_specifier'
+            or t == 'struct_specifier'
+            or t == 'enum_specifier'
+            or t == 'lambda_expression'
+          then
+            return node
+          end
+          node = node:parent()
+        end
+        return nil
+      end
+
+      ---Search forward from a (row,col) for the next '{' within a limited window.
+      local function find_open_brace(bufnr, start_row, start_col, max_rows)
+        local last_row = math.min(start_row + max_rows, vim.api.nvim_buf_line_count(bufnr) - 1)
+        for r = start_row, last_row do
+          local line = vim.api.nvim_buf_get_lines(bufnr, r, r + 1, true)[1] or ''
+          local c0 = (r == start_row) and start_col or 0
+          local idx = line:find('{', c0 + 1, true)
+          if idx then
+            return r, idx - 1
+          end
+        end
+        return nil
+      end
+
+      ---Search backward from a (row,col) for the previous '}' within a limited window.
+      local function find_close_brace(bufnr, end_row, end_col, max_rows)
+        local first_row = math.max(0, end_row - max_rows)
+        for r = end_row, first_row, -1 do
+          local line = vim.api.nvim_buf_get_lines(bufnr, r, r + 1, true)[1] or ''
+          local c1
+          if r == end_row then
+            c1 = math.min(end_col, #line)
+          else
+            c1 = #line
+          end
+          for i = c1, 1, -1 do
+            if line:sub(i, i) == '}' then
+              return r, i - 1
+            end
+          end
+        end
+        return nil
+      end
+
+      ---Update enclosing brace highlight for one buffer.
+      local function update_enclosing_braces(bufnr)
+        if not vim.api.nvim_buf_is_valid(bufnr) then
+          return
+        end
+        if vim.bo[bufnr].filetype ~= 'c' and vim.bo[bufnr].filetype ~= 'cpp' then
+          return
+        end
+
+        -- Clear previous marks
+        vim.api.nvim_buf_clear_namespace(bufnr, brace_ns, 0, -1)
+
+        local ok_parser, parser = pcall(vim.treesitter.get_parser, bufnr)
+        if not ok_parser or not parser then
+          return
+        end
+
+        local trees = parser:parse()
+        local tree = trees and trees[1]
+        if not tree then
+          return
+        end
+        local root = tree:root()
+
+        local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+        row = row - 1
+
+        local node = root:named_descendant_for_range(row, col, row, col)
+        node = find_enclosing_brace_node(node)
+        if not node then
+          return
+        end
+
+        local sr, sc, er, ec = node:range()
+
+        -- Heuristic: braces are very close to the node boundaries. Search a small window.
+        local open_r, open_c = find_open_brace(bufnr, sr, sc, 3)
+        local close_r, close_c = find_close_brace(bufnr, er, ec, 3)
+        if not (open_r and close_r) then
+          return
+        end
+
+        vim.api.nvim_buf_set_extmark(bufnr, brace_ns, open_r, open_c, {
+          end_col = open_c + 1,
+          hl_group = 'EnclosingBrace',
+          priority = 200,
+        })
+
+        vim.api.nvim_buf_set_extmark(bufnr, brace_ns, close_r, close_c, {
+          end_col = close_c + 1,
+          hl_group = 'EnclosingBrace',
+          priority = 200,
+        })
+
+        -- Highlight all inner delimiters within the current scope in blue.
+        -- This intentionally does not highlight anything outside of the current `{ ... }`.
+        local max_lines = 2000
+        if (close_r - open_r) > max_lines then
+          return
+        end
+
+        for r = open_r, close_r do
+          local line = vim.api.nvim_buf_get_lines(bufnr, r, r + 1, true)[1] or ''
+          local start_c = 0
+          local end_c = #line
+
+          if r == open_r then
+            start_c = open_c + 1
+          end
+          if r == close_r then
+            end_c = close_c
+          end
+
+          if end_c > start_c then
+            for i = start_c + 1, end_c do
+              local ch = line:sub(i, i)
+              if ch == '{' or ch == '}' or ch == '(' or ch == ')' or ch == '[' or ch == ']' then
+                vim.api.nvim_buf_set_extmark(bufnr, brace_ns, r, i - 1, {
+                  end_col = (i - 1) + 1,
+                  hl_group = 'InnerDelimiter',
+                  priority = 150,
+                })
+              end
+            end
+          end
+        end
+      end
+
+      -- Keep it responsive: update on movement and edits.
+      vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'TextChanged', 'TextChangedI', 'BufEnter' }, {
+        group = vim.api.nvim_create_augroup('ds-enclosing-brace', { clear = true }),
+        callback = function(ev)
+          update_enclosing_braces(ev.buf)
+        end,
+      })
+
+      -- C/C++: keep classic syntax, but neutralize almost all groups except strings.
+      vim.api.nvim_create_autocmd('FileType', {
+        pattern = { 'c', 'cpp' },
+        callback = function(ev)
+          -- Reset filetype syntax definitions, then re-enable.
+          vim.cmd 'syntax clear'
+          vim.cmd 'syntax on'
+
+          local function link(group, target)
+            pcall(vim.api.nvim_set_hl, 0, group, { link = target })
+          end
+
+          -- Flatten common highlight groups
+          for _, g in ipairs {
+            'Comment',
+            'Constant',
+            'Number',
+            'Boolean',
+            'Float',
+            'Identifier',
+            'Function',
+            'Statement',
+            'Conditional',
+            'Repeat',
+            'Label',
+            'Operator',
+            'Keyword',
+            'Exception',
+            'PreProc',
+            'Include',
+            'Define',
+            'Macro',
+            'PreCondit',
+            'Type',
+            'StorageClass',
+            'Structure',
+            'Typedef',
+            'Special',
+            'SpecialChar',
+            'Tag',
+            'Delimiter',
+            'SpecialComment',
+            'Debug',
+            'Underlined',
+            'Ignore',
+            'Error',
+            'Todo',
+          } do
+            link(g, 'Normal')
+          end
+
+          -- Flatten common C/C++-specific syntax groups (these often carry most of the coloring)
+          for _, g in ipairs {
+            'cType',
+            'cStorageClass',
+            'cStructure',
+            'cConstant',
+            'cOperator',
+            'cppType',
+            'cppStatement',
+            'cppStorageClass',
+            'cppStructure',
+            'cppConstant',
+            'cppOperator',
+            'cppAccess',
+            'cppModifier',
+            'cppExceptions',
+            'cppBoolean',
+          } do
+            link(g, 'Normal')
+          end
+
+          -- Flatten Neovim LSP semantic highlight groups (these are what typically color std::, namespaces, variables, args, etc.)
+          for _, g in ipairs {
+            '@lsp.type.namespace',
+            '@lsp.type.type',
+            '@lsp.type.class',
+            '@lsp.type.struct',
+            '@lsp.type.enum',
+            '@lsp.type.interface',
+            '@lsp.type.parameter',
+            '@lsp.type.variable',
+            '@lsp.type.property',
+            '@lsp.type.function',
+            '@lsp.type.method',
+            '@lsp.type.macro',
+            '@lsp.type.enumMember',
+            '@lsp.type.member',
+            '@lsp.typemod.variable.defaultLibrary',
+            '@lsp.typemod.function.defaultLibrary',
+            '@lsp.typemod.namespace.defaultLibrary',
+            '@lsp.mod.defaultLibrary',
+            '@lsp.mod.readonly',
+            '@lsp.mod.constant',
+            '@lsp.mod.static',
+          } do
+            link(g, 'Normal')
+          end
+
+          -- Also flatten legacy LSP highlight groups if present
+          for _, g in ipairs {
+            'LspSemanticNamespace',
+            'LspSemanticType',
+            'LspSemanticClass',
+            'LspSemanticStruct',
+            'LspSemanticEnum',
+            'LspSemanticInterface',
+            'LspSemanticParameter',
+            'LspSemanticVariable',
+            'LspSemanticProperty',
+            'LspSemanticFunction',
+            'LspSemanticMethod',
+            'LspSemanticMacro',
+            'LspSemanticEnumMember',
+            'LspSemanticMember',
+          } do
+            link(g, 'Normal')
+          end
+
+          -- Keep strings (and chars) highlighted
+          link('String', 'String')
+          link('Character', 'String')
+
+          -- Keep comments gray (use Krypton italic)
+          vim.api.nvim_set_hl(0, 'Comment', { fg = '#6b7280', italic = true })
+
+          -- Ensure preprocessor-disabled blocks are dimmed
+          vim.api.nvim_set_hl(0, 'PreProc', { fg = '#6b7280' })
+          vim.api.nvim_set_hl(0, 'cppPreCondit', { fg = '#6b7280' })
+          vim.api.nvim_set_hl(0, 'cPreCondit', { fg = '#6b7280' })
+
+          -- Treesitter inactive regions (best-effort across grammars)
+          for _, g in ipairs {
+            '@comment',
+            '@preproc',
+            '@conditional',
+            '@conditional.inactive',
+          } do
+            pcall(vim.api.nvim_set_hl, 0, g, { fg = '#6b7280' })
+          end
+        end,
+      })
+    end,
   },
 
   -- The following comments only work if you have downloaded the kickstart repo, not just copy pasted the
-  -- init.lua. If you want these files, they are in the repository, so you can just download them and
+  -- init.lua. If you want these files, they are in the repository, sotyou can just download them and
   -- place them in the correct locations.
 
   -- NOTE: Next step on your Neovim journey: Add/Configure additional plugins for Kickstart
@@ -1001,7 +1697,7 @@ require('lazy').setup({
   --    This is the easiest way to modularize your config.
   --
   --  Uncomment the following line and add your plugins to `lua/custom/plugins/*.lua` to get going.
-  -- { import = 'custom.plugins' },
+  { import = 'custom.plugins' },
   --
   -- For additional information with loading, sourcing and examples see `:help lazy.nvim-🔌-plugin-spec`
   -- Or use telescope!
@@ -1029,5 +1725,189 @@ require('lazy').setup({
   },
 })
 
--- The line beneath this is called `modeline`. See `:help modeline`
--- vim: ts=2 sts=2 sw=2 et
+-- Load VSCode-style snippet collections (friendly-snippets)
+pcall(function()
+  require('luasnip.loaders.from_vscode').lazy_load()
+end)
+
+-- Custom C++ snippet: type `vloop` then <Tab> to expand
+pcall(function()
+  local ls = require 'luasnip'
+  local s = ls.snippet
+  local t = ls.text_node
+  local i = ls.insert_node
+  local rep = require('luasnip.extras').rep
+
+  ls.add_snippets('cpp', {
+    -- Class skeleton (rule of zero: prefer this when possible)
+    s('dsk_class0', {
+      t 'class ',
+      i(1, 'MyClass'),
+      t { ' {', 'public:', '\t' },
+      i(0),
+      t { '', '};' },
+    }),
+
+    -- Class skeleton (rule of three: copyable)
+    s('dsk_class3', {
+      t 'class ',
+      i(1, 'MyClass'),
+      t { ' {', 'public:', '\t' },
+      rep(1),
+      t '() = default;',
+      t { '', '\t~' },
+      rep(1),
+      t '() = default;',
+      t { '', '\t' },
+      rep(1),
+      t '(',
+      t 'const ',
+      rep(1),
+      t '&) = default;',
+      t { '', '\t' },
+      rep(1),
+      t '& operator=(',
+      t 'const ',
+      rep(1),
+      t '&) = default;',
+      t { '', '', 'private:', '\t' },
+      i(0),
+      t { '', '};' },
+    }),
+
+    -- Class skeleton (rule of five: movable + copyable)
+    s('dsk_class5', {
+      t 'class ',
+      i(1, 'MyClass'),
+      t { ' {', 'public:', '\t' },
+      rep(1),
+      t '() = default;',
+      t { '', '\t~' },
+      rep(1),
+      t '() = default;',
+      t { '', '\t' },
+      rep(1),
+      t '(',
+      t 'const ',
+      rep(1),
+      t '&) = default;',
+      t { '', '\t' },
+      rep(1),
+      t '& operator=(',
+      t 'const ',
+      rep(1),
+      t '&) = default;',
+      t { '', '\t' },
+      rep(1),
+      t '(',
+      rep(1),
+      t '&&) noexcept = default;',
+      t { '', '\t' },
+      rep(1),
+      t '& operator=(',
+      rep(1),
+      t '&&) noexcept = default;',
+      t { '', '', 'private:', '\t' },
+      i(0),
+      t { '', '};' },
+    }),
+
+    -- Indexed range loop over container
+    s('dsk_irange', {
+      t 'for(usize i{0zu}; i < ',
+      i(1, 'vec'),
+      t { '.size(); ++i) {', '' },
+      t { '', '}' },
+    }),
+
+    -- Indexed range loop over container (j index)
+    s('dsk_jrange', {
+      t 'for(usize j{0zu}; j < ',
+      i(1, 'vec'),
+      t { '.size(); ++j) {', '' },
+      t { '', '}' },
+    }),
+
+    -- Indexed range loop over container (k index)
+    s('dsk_krange', {
+      t 'for(usize k{0zu}; k < ',
+      i(1, 'vec'),
+      t { '.size(); ++k) {', '' },
+      t { '', '}' },
+    }),
+
+    -- Range-based loop by reference
+    s('dsk_forx', {
+      t 'for(auto& ',
+      i(1, 'x'),
+      t ' : ',
+      i(2, 'container'),
+      t { ') {', '' },
+      t '\t',
+      i(0),
+      t { '', '}' },
+    }),
+
+    -- Plain println
+    s('dsk_println', {
+      t 'std::println("{}", ',
+      i(1, 'value'),
+      t ');',
+    }),
+
+    -- println with name=value formatting (single identifier)
+    s('dsk_printx', {
+      t 'std::println("',
+      i(1, 'x'),
+      t '={}", ',
+      rep(1),
+      t ');',
+    }),
+
+    -- std::vector<int> with 5 elements
+    s('dsk_vec5i', {
+      t 'std::vector<int> ',
+      i(1, 'v'),
+      t '{',
+      i(2, 'a'),
+      t ', ',
+      i(3, 'b'),
+      t ', ',
+      i(4, 'c'),
+      t ', ',
+      i(5, 'd'),
+      t ', ',
+      i(6, 'e'),
+      t '}',
+    }),
+
+    -- CUDA kernel launch: kernel<<<grid, block, sharedMem, stream>>>(args);
+    s('dsk_cudalaunch', {
+      i(1, 'kernel'),
+      t '<<<',
+      i(2, 'grid'),
+      t ', ',
+      i(3, 'block'),
+      t ', ',
+      i(4, '0'),
+      t ', ',
+      i(5, 'stream'),
+      t '>>>(',
+      i(0, 'args'),
+      t ');',
+    }),
+  })
+end)
+
+-- Tabs become 4 spaces
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = { 'cpp', 'c', 'h', 'hpp' },
+  callback = function()
+    vim.opt_local.tabstop = 4
+    vim.opt_local.shiftwidth = 4
+    vim.opt_local.expandtab = true
+  end,
+})
+
+-- Note: clang-tidy diagnostics are provided by clangd (with --clang-tidy).
+-- Configure project-wide checks in a .clang-tidy file at the repository root.
