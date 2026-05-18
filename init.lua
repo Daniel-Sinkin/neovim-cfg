@@ -1730,13 +1730,22 @@ pcall(function()
   require('luasnip.loaders.from_vscode').lazy_load()
 end)
 
--- Custom C++ snippet: type `vloop` then <Tab> to expand
+-- Custom snippets
 pcall(function()
   local ls = require 'luasnip'
   local s = ls.snippet
   local t = ls.text_node
   local i = ls.insert_node
   local rep = require('luasnip.extras').rep
+
+  ls.config.setup { enable_autosnippets = true }
+
+  ls.add_snippets('all', {
+    -- Type `$mut` to expand to a C-style mutability marker.
+    s({ trig = '$mut', wordTrig = false, snippetType = 'autosnippet' }, {
+      t '/*mut*/',
+    }),
+  })
 
   ls.add_snippets('cpp', {
     -- Class skeleton (rule of zero: prefer this when possible)
