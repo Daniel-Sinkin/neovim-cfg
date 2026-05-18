@@ -6,3 +6,5 @@ nvim
 spell/
 # Local safety backups created before config edits
 *.bak-*
+
+private/
