@@ -1899,5 +1899,15 @@ vim.api.nvim_create_autocmd('FileType', {
   end,
 })
 
+-- Experimental: hide leading `const` noise in C/C++ buffers without changing files.
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = { 'cpp', 'c', 'h', 'hpp' },
+  callback = function()
+    vim.opt_local.conceallevel = 2
+    vim.opt_local.concealcursor = 'nc'
+    vim.fn.matchadd('Conceal', [[^\s*\zsconst\>\s*]], 10, -1, { conceal = '' })
+  end,
+})
+
 -- Note: clang-tidy diagnostics are provided by clangd (with --clang-tidy).
 -- Configure project-wide checks in a .clang-tidy file at the repository root.
