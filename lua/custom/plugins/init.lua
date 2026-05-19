@@ -88,14 +88,14 @@ return {
   },
 
   {
-    name = 'ds-dev-marker-tidy-local',
+    name = 'dans-dev-marker-tidy-local',
     dir = vim.fn.stdpath 'config',
     lazy = false,
     config = function()
-      local script = '/Users/danielsinkin/GitHub_private/ds-tools/scripts/ds-dev-marker-tidy.sh'
-      local namespace = vim.api.nvim_create_namespace 'ds-dev-marker-tidy'
+      local script = '/Users/danielsinkin/GitHub_private/dans-tools/scripts/dans-dev-marker-tidy.sh'
+      local namespace = vim.api.nvim_create_namespace 'dans-dev-marker-tidy'
 
-      local function ds_dev_root_for(path)
+      local function dans_dev_root_for(path)
         if path == nil or path == '' then
           return nil
         end
@@ -106,7 +106,7 @@ return {
           search_start = vim.fs.dirname(path)
         end
 
-        local match = vim.fs.find('.ds_dev', {
+        local match = vim.fs.find('.dans_dev', {
           path = search_start,
           upward = true,
           type = 'file',
@@ -119,8 +119,8 @@ return {
         return vim.fs.dirname(match)
       end
 
-      local function ds_dev_config_value(root, key)
-        local handle = io.open(root .. '/.ds_dev', 'r')
+      local function dans_dev_config_value(root, key)
+        local handle = io.open(root .. '/.dans_dev', 'r')
         if handle == nil then
           return nil
         end
@@ -138,7 +138,7 @@ return {
         return nil
       end
 
-      local function ds_dev_truthy(value)
+      local function dans_dev_truthy(value)
         if value == nil then
           return false
         end
@@ -175,14 +175,14 @@ return {
       local function parse_clang_tidy_output(output)
         local diagnostics_by_file = {}
         for line in output:gmatch '[^\r\n]+' do
-          local file, lnum, col, severity, message = line:match '^([^:]+):(%d+):(%d+): (%w+): (.-) %[ds%-dev%-marker%-tidy'
-          if file ~= nil then
+          local file, lnum, col, severity, message, check = line:match '^([^:]+):(%d+):(%d+): (%w+): (.-) %[([^,%]]+)'
+          if file ~= nil and (check == 'dans-dev-marker-tidy') then
             diagnostics_by_file[file] = diagnostics_by_file[file] or {}
             table.insert(diagnostics_by_file[file], {
               lnum = tonumber(lnum) - 1,
               col = tonumber(col) - 1,
               severity = severity_from_text(severity),
-              source = 'ds-dev-marker-tidy',
+              source = check,
               message = message,
             })
           end
@@ -190,13 +190,13 @@ return {
         return diagnostics_by_file
       end
 
-      local function run_ds_dev_marker_tidy()
+      local function run_dans_dev_marker_tidy()
         local current_file = vim.api.nvim_buf_get_name(0)
-        local repo_root = ds_dev_root_for(current_file)
+        local repo_root = dans_dev_root_for(current_file)
         if repo_root == nil then
           return
         end
-        if not ds_dev_truthy(ds_dev_config_value(repo_root, 'marker_tidy')) then
+        if not dans_dev_truthy(dans_dev_config_value(repo_root, 'marker_tidy')) then
           clear_repo_diagnostics(repo_root)
           return
         end
@@ -220,9 +220,9 @@ return {
         end)
       end
 
-      vim.api.nvim_create_user_command('DsDevMarkerTidy', run_ds_dev_marker_tidy, {})
+      vim.api.nvim_create_user_command('DansDevMarkerTidy', run_dans_dev_marker_tidy, {})
 
-      local group = vim.api.nvim_create_augroup('ds-dev-marker-tidy', { clear = true })
+      local group = vim.api.nvim_create_augroup('dans-dev-marker-tidy', { clear = true })
       vim.api.nvim_create_autocmd('BufWritePost', {
         group = group,
         pattern = {
@@ -233,7 +233,7 @@ return {
           '*.h',
           '*.hpp',
         },
-        callback = run_ds_dev_marker_tidy,
+        callback = run_dans_dev_marker_tidy,
       })
     end,
   },
