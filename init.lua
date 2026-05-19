@@ -92,6 +92,11 @@ vim.g.maplocalleader = ' '
 
 -- Set to true if you have a Nerd Font installed and selected in the terminal
 vim.g.have_nerd_font = false
+
+-- Treat `.h` headers as C, not C++. Must be set before any filetype detection
+-- runs so plain C headers (e.g. dans-util/src/types.h) don't get C++ clang-tidy
+-- checks (modernize-deprecated-headers, modernize-use-using, etc.).
+vim.g.c_syntax_for_h = 1
 -- Neovide-only visuals (ignored in terminal Neovim)
 if vim.g.neovide then
   -- Smooth cursor interpolation
