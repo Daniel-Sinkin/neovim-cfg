@@ -1740,9 +1740,11 @@ pcall(function()
   ls.config.setup { enable_autosnippets = true }
 
   ls.add_snippets('all', {
-    -- Type `$mut` to expand to a C-style mutability marker.
-    s({ trig = '$mut', wordTrig = false, snippetType = 'autosnippet' }, {
-      t '/*mut*/',
+    -- Type `$//` to expand to a C-style block comment with the cursor inside.
+    s({ trig = '$//', wordTrig = false, snippetType = 'autosnippet' }, {
+      t '/* ',
+      i(0),
+      t ' */',
     }),
   })
 
