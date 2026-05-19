@@ -899,6 +899,21 @@ require('lazy').setup({
       local capabilities = vim.lsp.protocol.make_client_capabilities()
       capabilities = vim.tbl_deep_extend('force', capabilities, require('cmp_nvim_lsp').default_capabilities())
 
+      -- Filter clang-tidy diagnostics out of plain C buffers. `.clang-tidy`
+      -- in the repo is intended for C++ (.cpp/.hpp); C files should only see
+      -- the compiler's own diagnostics from clangd.
+      local function filter_clang_tidy_for_c(err, result, ctx, config)
+        if result and result.diagnostics then
+          local bufnr = vim.uri_to_bufnr(result.uri)
+          if vim.api.nvim_buf_is_loaded(bufnr) and vim.bo[bufnr].filetype == 'c' then
+            result.diagnostics = vim.tbl_filter(function(d)
+              return d.source ~= 'clang-tidy'
+            end, result.diagnostics)
+          end
+        end
+        return vim.lsp.handlers['textDocument/publishDiagnostics'](err, result, ctx, config)
+      end
+
       local servers = {
         -- NOTE: clangd re-enabled for hover (type reveal) and format-on-save.
         -- Autocomplete is disabled separately via nvim-cmp FileType autocmd below.
@@ -907,6 +922,9 @@ require('lazy').setup({
             '/opt/homebrew/opt/llvm/bin/clangd',
             '--background-index',
             '--clang-tidy',
+          },
+          handlers = {
+            ['textDocument/publishDiagnostics'] = filter_clang_tidy_for_c,
           },
         },
 
@@ -1911,3 +1929,6 @@ vim.api.nvim_create_autocmd('FileType', {
 
 -- Note: clang-tidy diagnostics are provided by clangd (with --clang-tidy).
 -- Configure project-wide checks in a .clang-tidy file at the repository root.
+-- Plain C buffers (filetype == 'c') strip clang-tidy diagnostics via a
+-- publishDiagnostics handler override on the clangd client; .h files detected
+-- as C are excluded too. C++ buffers (cpp) are unaffected.
