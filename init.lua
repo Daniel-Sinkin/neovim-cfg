@@ -1931,6 +1931,7 @@ vim.api.nvim_create_autocmd('FileType', {
     vim.opt_local.conceallevel = 2
     vim.opt_local.concealcursor = 'nc'
     vim.fn.matchadd('Conceal', [[^\s*\zsconst\>\s*]], 10, -1, { conceal = '' })
+    vim.fn.matchadd('Conceal', [[\<dans_]], 10, -1, { conceal = '' })
   end,
 })
 
