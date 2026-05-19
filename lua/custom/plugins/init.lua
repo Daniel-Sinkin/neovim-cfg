@@ -226,11 +226,9 @@ return {
       vim.api.nvim_create_autocmd('BufWritePost', {
         group = group,
         pattern = {
-          '*.c',
           '*.cc',
           '*.cpp',
           '*.cxx',
-          '*.h',
           '*.hpp',
         },
         callback = run_dans_dev_marker_tidy,
