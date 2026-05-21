@@ -1349,7 +1349,7 @@ require('lazy').setup({
   },
   { -- VSCode-like sticky scope header (Tree-sitter context)
     'nvim-treesitter/nvim-treesitter-context',
-    ft = { 'c', 'cpp' },
+    ft = { 'c', 'cpp', 'cuda' },
     main = 'treesitter-context',
     opts = {
       enable = true,
@@ -1360,7 +1360,7 @@ require('lazy').setup({
       zindex = 20,
       on_attach = function(bufnr)
         local ft = vim.bo[bufnr].filetype
-        return ft == 'c' or ft == 'cpp'
+        return ft == 'c' or ft == 'cpp' or ft == 'cuda'
       end,
     },
   },
@@ -1369,14 +1369,14 @@ require('lazy').setup({
     build = ':TSUpdate',
     main = 'nvim-treesitter.configs',
     opts = {
-      ensure_installed = { 'bash', 'c', 'cpp', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' },
+      ensure_installed = { 'bash', 'c', 'cpp', 'cuda', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' },
       auto_install = true,
       highlight = {
         enable = true,
-        -- Disable TS highlighting only for C/C++
+        -- Disable TS highlighting only for C/C++/CUDA
         disable = function(_, bufnr)
           local ft = vim.bo[bufnr].filetype
-          return ft == 'c' or ft == 'cpp'
+          return ft == 'c' or ft == 'cpp' or ft == 'cuda'
         end,
         additional_vim_regex_highlighting = { 'ruby' },
       },
@@ -1455,7 +1455,8 @@ require('lazy').setup({
         if not vim.api.nvim_buf_is_valid(bufnr) then
           return
         end
-        if vim.bo[bufnr].filetype ~= 'c' and vim.bo[bufnr].filetype ~= 'cpp' then
+        local ft = vim.bo[bufnr].filetype
+        if ft ~= 'c' and ft ~= 'cpp' and ft ~= 'cuda' then
           return
         end
 
@@ -1546,9 +1547,9 @@ require('lazy').setup({
         end,
       })
 
-      -- C/C++: keep classic syntax, but neutralize almost all groups except strings.
+      -- C/C++/CUDA: keep classic syntax, but neutralize almost all groups except strings.
       vim.api.nvim_create_autocmd('FileType', {
-        pattern = { 'c', 'cpp' },
+        pattern = { 'c', 'cpp', 'cuda' },
         callback = function(ev)
           -- Reset filetype syntax definitions, then re-enable.
           vim.cmd 'syntax clear'
@@ -1685,6 +1686,27 @@ require('lazy').setup({
             '@conditional.inactive',
           } do
             pcall(vim.api.nvim_set_hl, 0, g, { fg = '#6b7280' })
+          end
+
+          -- CUDA: the C++ around it stays monochrome, but re-assert color on
+          -- the CUDA-specific constructs so they stand out.
+          if ev.match == 'cuda' then
+            -- __device__ / __host__ / __global__ / ... and __CUDA_ARCH__ etc.
+            vim.api.nvim_set_hl(0, 'cudaStorageClass', { fg = '#9ece6a', bold = true })
+            vim.api.nvim_set_hl(0, 'cudaConstant', { fg = '#9ece6a', bold = true })
+            -- dim3, vector types, cudaError_t, ...
+            vim.api.nvim_set_hl(0, 'cudaType', { fg = '#7dcfff' })
+            -- gridDim, blockIdx, blockDim, threadIdx, warpSize
+            vim.api.nvim_set_hl(0, 'cudaVariable', { fg = '#ff9e64' })
+            -- kernel launch: the <<< >>> brackets and the launch config inside
+            vim.api.nvim_set_hl(0, 'cudaKernelBrackets', { fg = '#bb9af7', bold = true })
+            vim.api.nvim_set_hl(0, 'cudaKernelConfig', { fg = '#e0af68' })
+            vim.api.nvim_set_hl(0, 'cudaDunder', { link = 'cudaStorageClass' })
+
+            -- Catch any __identifier__ the bundled syntax misses.
+            vim.cmd [[syntax match cudaDunder /\<__\w\+__\>/]]
+            -- Kernel launch config: <<< grid, block, sharedMem, stream >>>
+            vim.cmd [[syntax region cudaKernelConfig matchgroup=cudaKernelBrackets start=/<<</ end=/>>>/ oneline keepend contains=NONE]]
           end
         end,
       })
