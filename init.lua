@@ -97,6 +97,18 @@ vim.g.have_nerd_font = false
 -- runs so plain C headers (e.g. dans-util/src/types.h) don't get C++ clang-tidy
 -- checks (modernize-deprecated-headers, modernize-use-using, etc.).
 vim.g.c_syntax_for_h = 1
+
+-- macOS: `cc` resolves to the raw Xcode toolchain compiler (its bin dir sits in
+-- PATH ahead of /usr/bin/cc, the xcrun shim that injects -isysroot). The raw
+-- compiler has no sysroot, so nvim-treesitter parser builds fail with
+-- "'stdlib.h' file not found". Exporting SDKROOT gives clang the SDK.
+if vim.fn.has 'mac' == 1 and (vim.env.SDKROOT == nil or vim.env.SDKROOT == '') then
+  local sdk = vim.trim(vim.fn.system 'xcrun --show-sdk-path 2>/dev/null')
+  if vim.v.shell_error == 0 and sdk ~= '' and vim.fn.isdirectory(sdk) == 1 then
+    vim.env.SDKROOT = sdk
+  end
+end
+
 -- Neovide-only visuals (ignored in terminal Neovim)
 if vim.g.neovide then
   -- Smooth cursor interpolation
