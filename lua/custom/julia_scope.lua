@@ -17,6 +17,29 @@ local function set_highlights()
   vim.api.nvim_set_hl(0, 'JuliaInnerDelimiter', { link = 'DiagnosticInfo' })
 end
 
+-- Captures that mark regions for spell/conceal rather than coloring.
+local SKIP_CAPTURE = { spell = true, nospell = true, conceal = true, none = true }
+
+-- Flatten Julia treesitter highlighting to monochrome, keeping only comments
+-- colored (mirrors the aggressive C/C++ monochrome treatment). Scope and
+-- bracket coloring come from extmarks, which draw on top and are unaffected.
+local function set_mono()
+  local ok, q = pcall(vim.treesitter.query.get, 'julia', 'highlights')
+  if not ok or not q or not q.captures then
+    return
+  end
+  for _, name in ipairs(q.captures) do
+    if not SKIP_CAPTURE[name] and name:sub(1, 1) ~= '_' then
+      local hl = '@' .. name .. '.julia'
+      if name == 'comment' or name:match '^comment%.' then
+        vim.api.nvim_set_hl(0, hl, { link = 'Comment' })
+      else
+        vim.api.nvim_set_hl(0, hl, { link = 'Normal' })
+      end
+    end
+  end
+end
+
 -- Keywords that open a block terminated by `end`. `mutable struct` is handled
 -- separately (first token `mutable`, second token `struct`).
 local OPENERS = {
@@ -222,6 +245,7 @@ end
 
 function M.setup()
   set_highlights()
+  set_mono()
 
   local group = vim.api.nvim_create_augroup('ds-julia-scope', { clear = true })
 
@@ -234,13 +258,17 @@ function M.setup()
 
   vim.api.nvim_create_autocmd('ColorScheme', {
     group = group,
-    callback = set_highlights,
+    callback = function()
+      set_highlights()
+      set_mono()
+    end,
   })
 
   vim.api.nvim_create_autocmd('FileType', {
     group = group,
     pattern = 'julia',
     callback = function(ev)
+      set_mono()
       vim.keymap.set({ 'x', 'o' }, 'ib', function()
         M.select_block(false)
       end, { buffer = ev.buf, desc = 'inner Julia scope' })
