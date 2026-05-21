@@ -1,5 +1,16 @@
 -- Custom plugins for Kickstart.nvim
 return {
+  { -- Tokyo Night colorscheme
+    'folke/tokyonight.nvim',
+    lazy = false,
+    priority = 1000,
+    opts = { style = 'night' },
+    config = function(_, opts)
+      vim.opt.termguicolors = true
+      require('tokyonight').setup(opts)
+      vim.cmd.colorscheme 'tokyonight'
+    end,
+  },
   { -- Obsidian integration for Neovim
     'epwalsh/obsidian.nvim',
     version = '*', -- use latest release instead of latest commit

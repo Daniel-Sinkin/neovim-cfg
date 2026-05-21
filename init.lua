@@ -1727,8 +1727,6 @@ require('lazy').setup({
   },
 })
 
-require('custom.cp_monochrome').apply()
-
 require('custom.julia_scope').setup()
 
 -- Load VSCode-style snippet collections (friendly-snippets)
