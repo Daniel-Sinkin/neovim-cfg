@@ -969,12 +969,28 @@ require('lazy').setup({
           },
         },
 
-        -- Julia: LanguageServer.jl. The cmd/root markers come from
-        -- nvim-lspconfig's shipped lsp/julials.lua. Requires LanguageServer,
-        -- SymbolServer and StaticLint installed in
-        -- ~/.julia/environments/nvim-lspconfig (see :h lspconfig-julials).
-        -- Not a mason server, so it is configured directly below like clangd.
-        julials = {},
+        -- Julia: LanguageServer.jl. The cmd comes from nvim-lspconfig's
+        -- shipped lsp/julials.lua. Requires LanguageServer, SymbolServer and
+        -- StaticLint installed in ~/.julia/environments/nvim-lspconfig (see
+        -- :h lspconfig-julials). Not a mason server, configured directly below.
+        julials = {
+          -- Root at the OUTERMOST Project.toml. A dev-environment layout nests
+          -- the package's Project.toml inside the driver's; rooting at the
+          -- nearest one would spawn a separate julials per nested project
+          -- (double startup, duplicated diagnostics). One root = one client.
+          root_dir = function(bufnr, on_dir)
+            local fname = vim.api.nvim_buf_get_name(bufnr)
+            if fname == '' then
+              return
+            end
+            local found = vim.fs.find({ 'Project.toml', 'JuliaProject.toml' }, {
+              upward = true,
+              path = fname,
+              limit = math.huge,
+            })
+            on_dir(#found > 0 and vim.fs.dirname(found[#found]) or vim.fs.dirname(fname))
+          end,
+        },
       }
 
       -- Ensure the servers and tools above are installed (clangd intentionally not managed by mason here)
