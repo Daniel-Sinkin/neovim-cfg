@@ -1,6 +1,11 @@
 -- Scope highlighting + block text objects for Julia.
 -- Mirrors the C/C++ enclosing-brace plugin: Julia has no `{ }` scopes, so the
--- "scope" is the keyword..end construct (function/if/struct/for/...).
+-- "scope" is the keyword..end construct (function/if/struct/module/for/...).
+--
+-- Block matching is done by counting openers vs `end`, not by indentation:
+-- a `module` body is conventionally unindented, so indentation cannot tell a
+-- module's `end` apart from a nested function's `end`. Only first-token
+-- keywords (and bare `do`) count, which keeps `a[end]` indexing harmless.
 --
 -- Highlights the enclosing opener keyword and its matching `end`, plus the
 -- bracket delimiters within that scope. For `if`, only the keyword of the
@@ -40,8 +45,8 @@ local function set_mono()
   end
 end
 
--- Keywords that open a block terminated by `end`. `mutable struct` is handled
--- separately (first token `mutable`, second token `struct`).
+-- First-token keywords that open a block terminated by `end`. `mutable struct`
+-- is handled separately (first token `mutable`, second token `struct`).
 local OPENERS = {
   ['function'] = true,
   ['macro'] = true,
@@ -60,58 +65,131 @@ local OPENERS = {
 local MAX_SCAN = 5000
 local MAX_FILE = 20000
 
----Precompute per (1-indexed) line: indent width, first/second token, and
----whether the line starts inside a triple-quoted string (docstring).
+---Scan a line's code (comment stripped) tracking bracket depth and "..."
+---strings. Returns whether a bare `end` word sits at depth 0, and the
+---1-indexed byte position of a bare `do` word at depth 0 (or nil).
+local function scan_code(line)
+  local hash = line:find('#', 1, true)
+  if hash then
+    line = line:sub(1, hash - 1)
+  end
+  local depth = 0
+  local in_str = false
+  local i, n = 1, #line
+  local bare_end = false
+  local do_pos = nil
+  while i <= n do
+    local c = line:sub(i, i)
+    if in_str then
+      if c == '\\' then
+        i = i + 1
+      elseif c == '"' then
+        in_str = false
+      end
+      i = i + 1
+    elseif c == '"' then
+      in_str = true
+      i = i + 1
+    elseif c == '(' or c == '[' or c == '{' then
+      depth = depth + 1
+      i = i + 1
+    elseif c == ')' or c == ']' or c == '}' then
+      depth = depth - 1
+      i = i + 1
+    elseif c:match '[%a_]' then
+      local s = i
+      while i <= n and line:sub(i, i):match '[%w_!]' do
+        i = i + 1
+      end
+      if depth == 0 then
+        local w = line:sub(s, i - 1)
+        if w == 'end' then
+          bare_end = true
+        elseif w == 'do' and not do_pos then
+          do_pos = s
+        end
+      end
+    else
+      i = i + 1
+    end
+  end
+  return bare_end, do_pos
+end
+
+---Precompute per (1-indexed) line: indent, first/second token, whether the
+---line starts inside a triple-quoted string, and its block role:
+---  kind = 'open'   line opens a block (depth +1)
+---         'close'  line is a bare `end` (depth -1)
+---         'single' opens and closes on the same line (depth 0, ignored)
+---         'plain'  no effect
+---For 'open' lines, `okw`/`ocol` give the keyword to highlight and its column.
 local function scan_lines(lines)
   local info = {}
   local in_tstring = false
   for idx, line in ipairs(lines) do
-    local started_in_string = in_tstring
-    local count = 0
-    for _ in line:gmatch '"""' do
-      count = count + 1
+    if in_tstring then
+      -- a line that starts inside a triple string is not code
+      local quotes = select(2, line:gsub('"""', ''))
+      if quotes % 2 == 1 then
+        in_tstring = false
+      end
+      info[idx] = { str = true, kind = 'plain', indent = 0 }
+    else
+      local quotes = select(2, line:gsub('"""', ''))
+      if quotes % 2 == 1 then
+        in_tstring = true
+      end
+
+      local indent = #(line:match '^%s*' or '')
+      local first = line:match '^%s*([%a_][%w_]*)'
+      local second = first and line:match '^%s*[%a_][%w_]*%s+([%a_][%w_]*)' or nil
+      local bare_end, do_pos = scan_code(line)
+
+      local first_opener = first ~= nil
+        and (OPENERS[first] or (first == 'mutable' and second == 'struct'))
+      local opens = first_opener or (do_pos ~= nil)
+
+      local kind, okw, ocol = 'plain', nil, nil
+      if first == 'end' then
+        kind = 'close'
+      elseif opens and bare_end then
+        kind = 'single'
+      elseif opens then
+        kind = 'open'
+        if first_opener then
+          okw, ocol = first, indent
+        else
+          okw, ocol = 'do', do_pos - 1
+        end
+      end
+
+      info[idx] = {
+        str = false,
+        indent = indent,
+        first = first,
+        kind = kind,
+        okw = okw,
+        ocol = ocol,
+      }
     end
-    if count % 2 == 1 then
-      in_tstring = not in_tstring
-    end
-    local indent = #(line:match '^%s*' or '')
-    local first = line:match '^%s*([%a_][%w_]*)'
-    local second
-    if first then
-      second = line:match '^%s*[%a_][%w_]*%s+([%a_][%w_]*)'
-    end
-    info[idx] = { indent = indent, first = first, second = second, str = started_in_string }
   end
   return info
 end
 
-local function is_opener(li)
-  if li.str or not li.first then
-    return false
-  end
-  if OPENERS[li.first] then
-    return true
-  end
-  return li.first == 'mutable' and li.second == 'struct'
-end
-
-local function is_end(li)
-  return li.first == 'end' and not li.str
-end
-
----Matching `end` of the opener at row `r` (indent `indent`): the first line
----below at the same indent whose first token is `end`. Relies on conventional
----Julia indentation, which sidesteps the `a[end]` indexing pitfall entirely.
-local function match_end(info, r, indent)
+---Matching `end` of the opener at row `r`: count nested openers vs `end`.
+local function match_end(info, r)
+  local depth = 1
   local last = math.min(#info, r + MAX_SCAN)
   for k = r + 1, last do
     local li = info[k]
-    if is_end(li) then
-      if li.indent == indent then
-        return k
-      end
-      if li.indent < indent then
-        return nil
+    if not li.str then
+      if li.kind == 'open' then
+        depth = depth + 1
+      elseif li.kind == 'close' then
+        depth = depth - 1
+        if depth == 0 then
+          return k
+        end
       end
     end
   end
@@ -123,8 +201,8 @@ local function find_enclosing(info, cur)
   local stop = math.max(1, cur - MAX_SCAN)
   for r = cur, stop, -1 do
     local li = info[r]
-    if li and is_opener(li) then
-      local e = match_end(info, r, li.indent)
+    if li and li.kind == 'open' then
+      local e = match_end(info, r)
       if e and e >= cur then
         return r, e, li
       end
@@ -134,15 +212,23 @@ local function find_enclosing(info, cur)
 end
 
 ---For an `if` block, the branch keyword row whose section contains the cursor.
-local function if_branch_row(info, r, e, indent, cur)
+---`elseif`/`else` count only when they sit directly inside this `if`.
+local function if_branch_row(info, r, e, cur)
   local row = r
+  local depth = 1
   for k = r + 1, e - 1 do
     local li = info[k]
-    if li and not li.str and li.indent == indent and (li.first == 'elseif' or li.first == 'else') then
-      if k <= cur then
-        row = k
-      else
-        break
+    if not li.str then
+      if li.kind == 'open' then
+        depth = depth + 1
+      elseif li.kind == 'close' then
+        depth = depth - 1
+      elseif depth == 1 and (li.first == 'elseif' or li.first == 'else') then
+        if k <= cur then
+          row = k
+        else
+          break
+        end
       end
     end
   end
@@ -176,15 +262,15 @@ local function update(bufnr)
   end
 
   -- Opener keyword.
-  if li.first == 'if' then
-    local brow = if_branch_row(info, r, e, li.indent, cur)
+  if li.okw == 'if' then
+    local brow = if_branch_row(info, r, e, cur)
     local bi = info[brow]
     hl_keyword(bufnr, brow, bi.indent, bi.indent + #bi.first)
-  elseif li.first == 'mutable' then
-    local ss = lines[r]:find('struct', 1, true)
-    hl_keyword(bufnr, r, li.indent, (ss or li.indent + 1) - 1 + 6)
+  elseif li.okw == 'mutable' then
+    local ss = lines[r]:find('struct', 1, true) or (li.ocol + 1)
+    hl_keyword(bufnr, r, li.ocol, ss - 1 + 6)
   else
-    hl_keyword(bufnr, r, li.indent, li.indent + #li.first)
+    hl_keyword(bufnr, r, li.ocol, li.ocol + #li.okw)
   end
 
   -- Matching `end`.
