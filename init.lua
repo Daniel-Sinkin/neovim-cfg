@@ -109,6 +109,16 @@ if vim.fn.has 'mac' == 1 and (vim.env.SDKROOT == nil or vim.env.SDKROOT == '') t
   end
 end
 
+-- GUI launches (Neovide, dock) don't inherit the shell PATH, so juliaup's
+-- `julia` goes missing and the Julia LSP / debug adapter can't spawn. Put it
+-- on PATH explicitly.
+do
+  local juliaup_bin = vim.fn.expand '~/.juliaup/bin'
+  if vim.fn.isdirectory(juliaup_bin) == 1 and not (vim.env.PATH or ''):find(juliaup_bin, 1, true) then
+    vim.env.PATH = juliaup_bin .. ':' .. (vim.env.PATH or '')
+  end
+end
+
 -- Neovide-only visuals (ignored in terminal Neovim)
 if vim.g.neovide then
   -- Smooth cursor interpolation
@@ -954,6 +964,13 @@ require('lazy').setup({
             },
           },
         },
+
+        -- Julia: LanguageServer.jl. The cmd/root markers come from
+        -- nvim-lspconfig's shipped lsp/julials.lua. Requires LanguageServer,
+        -- SymbolServer and StaticLint installed in
+        -- ~/.julia/environments/nvim-lspconfig (see :h lspconfig-julials).
+        -- Not a mason server, so it is configured directly below like clangd.
+        julials = {},
       }
 
       -- Ensure the servers and tools above are installed (clangd intentionally not managed by mason here)
@@ -982,6 +999,11 @@ require('lazy').setup({
       clangd.capabilities = vim.tbl_deep_extend('force', {}, capabilities, clangd.capabilities or {})
       vim.lsp.config('clangd', clangd)
       vim.lsp.enable 'clangd'
+
+      local julials = servers.julials or {}
+      julials.capabilities = vim.tbl_deep_extend('force', {}, capabilities, julials.capabilities or {})
+      vim.lsp.config('julials', julials)
+      vim.lsp.enable 'julials'
     end,
   },
 
