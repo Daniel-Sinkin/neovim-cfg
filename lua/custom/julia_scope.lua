@@ -1,17 +1,20 @@
 -- Scope highlighting + block text objects for Julia.
 -- Mirrors the C/C++ enclosing-brace plugin: Julia has no `{ }` scopes, so the
--- "scope" is the keyword..end construct (function/if/struct/module/for/...).
+-- "scope" is the keyword..end construct (function/if/struct/module/let/...).
 --
--- Block matching is done by counting openers vs `end`, not by indentation:
--- a `module` body is conventionally unindented, so indentation cannot tell a
--- module's `end` apart from a nested function's `end`. Only first-token
--- keywords (and bare `do`) count, which keeps `a[end]` indexing harmless.
+-- Block matching counts openers vs `end`, not indentation: a `module` body is
+-- conventionally unindented, so indentation cannot tell a module's `end` apart
+-- from a nested function's `end`. Opener keywords are detected at bracket
+-- depth 0 anywhere on a statement line (not just the first token), so a block
+-- keyword used as an expression - `x = let ... end` - still counts; `a[end]`
+-- indexing and `[expr for x in ...]` comprehensions sit at depth > 0 and stay
+-- harmless.
 --
 -- Highlights the enclosing opener keyword and its matching `end`, plus the
 -- bracket delimiters within that scope. For `if`, only the keyword of the
--- branch the cursor sits in is highlighted (`if`/`elseif`/`else`) together
--- with `end`. Also provides `ib`/`ab` text objects so `yib`/`dib`/`vib`
--- copy/wipe a Julia scope the way they do in C/C++.
+-- branch the cursor sits in is highlighted (`if`/`elseif`/`else`) with `end`.
+-- `ib`/`ab` text objects select that scope - except when the cursor is inside
+-- `(...)`, where they select the paren contents instead (like `ib` in C/C++).
 
 local M = {}
 
@@ -46,9 +49,12 @@ local function set_mono()
   end
 end
 
--- First-token keywords that open a block terminated by `end`. `mutable struct`
--- is handled separately (first token `mutable`, second token `struct`).
-local OPENERS = {
+-- Reserved keywords that open a block terminated by `end`. All are reserved
+-- words (never identifiers), so detecting them anywhere at bracket depth 0 is
+-- safe. `mutable struct` is handled separately (`mutable` is NOT reserved, so
+-- it must not be scanned for - only matched as the first token before
+-- `struct`).
+local OPENER_WORDS = {
   ['function'] = true,
   ['macro'] = true,
   ['if'] = true,
@@ -61,15 +67,17 @@ local OPENERS = {
   ['module'] = true,
   ['baremodule'] = true,
   ['try'] = true,
+  ['do'] = true,
 }
 
 local MAX_SCAN = 5000
 local MAX_FILE = 20000
 
 ---Scan a line's code (comment stripped) starting at bracket depth
----`start_depth`, tracking brackets and "..." strings. Returns whether a bare
----`end` word sits at statement level (depth 0), the 1-indexed byte position
----of a bare `do` word at depth 0 (or nil), and the bracket depth at line end.
+---`start_depth`, tracking brackets and "..." strings. Returns: whether a bare
+---`end` word sits at statement level (depth 0); the first opener keyword found
+---at depth 0 and its 1-indexed byte position (or nil); the bracket depth at
+---line end.
 local function scan_code(line, start_depth)
   local hash = line:find('#', 1, true)
   if hash then
@@ -79,7 +87,7 @@ local function scan_code(line, start_depth)
   local in_str = false
   local i, n = 1, #line
   local bare_end = false
-  local do_pos = nil
+  local open_kw, open_pos = nil, nil
   while i <= n do
     local c = line:sub(i, i)
     if in_str then
@@ -107,19 +115,20 @@ local function scan_code(line, start_depth)
         local w = line:sub(s, i - 1)
         if w == 'end' then
           bare_end = true
-        elseif w == 'do' and not do_pos then
-          do_pos = s
+        elseif not open_kw and OPENER_WORDS[w] and line:sub(s - 1, s - 1) ~= ':' then
+          -- the `:` guard skips `:if`, `:let`, ... used as Symbols
+          open_kw, open_pos = w, s
         end
       end
     else
       i = i + 1
     end
   end
-  return bare_end, do_pos, depth
+  return bare_end, open_kw, open_pos, depth
 end
 
----Precompute per (1-indexed) line: indent, first/second token, whether the
----line starts inside a triple-quoted string, and its block role:
+---Precompute per (1-indexed) line: indent, first token, whether the line
+---starts inside a triple-quoted string, and its block role:
 ---  kind = 'open'   line opens a block (depth +1)
 ---         'close'  line is a bare `end` (depth -1)
 ---         'single' opens and closes on the same line (depth 0, ignored)
@@ -142,34 +151,29 @@ local function scan_lines(lines)
       -- a line that starts inside a triple string is not code
       info[idx] = { str = true, kind = 'plain', indent = 0 }
     else
-      local bare_end, do_pos, new_depth = scan_code(line, depth)
+      local bare_end, open_kw, open_pos, new_depth = scan_code(line, depth)
       depth = new_depth
       local indent = #(line:match '^%s*' or '')
 
       if started_in_bracket then
         -- a continuation line inside a multi-line bracketed expression (e.g.
-        -- the `for` of a `[expr for x in ...]` comprehension): its first
-        -- token is not a block keyword, so do not treat it as one.
+        -- the `for` of a `[expr for x in ...]` comprehension): its tokens are
+        -- not statement-level keywords, so do not treat them as block words.
         info[idx] = { str = false, kind = 'plain', indent = indent }
       else
         local first = line:match '^%s*([%a_][%w_]*)'
         local second = first and line:match '^%s*[%a_][%w_]*%s+([%a_][%w_]*)' or nil
-        local first_opener = first ~= nil
-          and (OPENERS[first] or (first == 'mutable' and second == 'struct'))
-        local opens = first_opener or (do_pos ~= nil)
 
         local kind, okw, ocol = 'plain', nil, nil
         if first == 'end' then
           kind = 'close'
-        elseif opens and bare_end then
-          kind = 'single'
-        elseif opens then
-          kind = 'open'
-          if first_opener then
-            okw, ocol = first, indent
-          else
-            okw, ocol = 'do', do_pos - 1
-          end
+        elseif first == 'mutable' and second == 'struct' then
+          -- `mutable` is not reserved; only the first-token form is a block
+          kind = bare_end and 'single' or 'open'
+          okw, ocol = 'mutable', indent
+        elseif open_kw then
+          kind = bare_end and 'single' or 'open'
+          okw, ocol = open_kw, open_pos - 1
         end
 
         info[idx] = {
@@ -273,11 +277,16 @@ local function update(bufnr)
     return
   end
 
-  -- Opener keyword.
+  -- Opener keyword (highlighted at its real position, which is not the line
+  -- indent when the keyword is used as an expression, e.g. `x = let`).
   if li.okw == 'if' then
     local brow = if_branch_row(info, r, e, cur)
-    local bi = info[brow]
-    hl_keyword(bufnr, brow, bi.indent, bi.indent + #bi.first)
+    if brow == r then
+      hl_keyword(bufnr, r, li.ocol, li.ocol + #li.okw)
+    else
+      local bi = info[brow]
+      hl_keyword(bufnr, brow, bi.indent, bi.indent + #bi.first)
+    end
   elseif li.okw == 'mutable' then
     local ss = lines[r]:find('struct', 1, true) or (li.ocol + 1)
     hl_keyword(bufnr, r, li.ocol, ss - 1 + 6)
@@ -310,8 +319,32 @@ end
 
 local esc = vim.api.nvim_replace_termcodes('<Esc>', true, false, true)
 
----`ib`/`ab` text object: select the enclosing Julia scope linewise.
+---`ib`/`ab` text object. Inside `(...)` it selects the paren contents
+---(charwise), like `ib` in C/C++; otherwise it selects the enclosing Julia
+---keyword scope (linewise).
 function M.select_block(around)
+  -- Innermost enclosing `(...)` wins, mirroring C/C++ where `ib` is the paren.
+  local op = vim.fn.searchpairpos('(', '', ')', 'nbW')
+  local cp = vim.fn.searchpairpos('(', '', ')', 'nW')
+  if op[1] > 0 and cp[1] > 0 then
+    local sl, sc, el, ec
+    if around then
+      sl, sc, el, ec = op[1], op[2], cp[1], cp[2]
+    else
+      sl, sc, el, ec = op[1], op[2] + 1, cp[1], cp[2] - 1
+      if sl > el or (sl == el and sc > ec) then
+        -- empty () : select the parens themselves
+        sl, sc, el, ec = op[1], op[2], cp[1], cp[2]
+      end
+    end
+    if vim.fn.mode():match '[vV\22]' then
+      vim.api.nvim_feedkeys(esc, 'nx', false)
+    end
+    vim.cmd(('normal! %dG%d|v%dG%d|'):format(sl, sc, el, ec))
+    return
+  end
+
+  -- Otherwise: the enclosing keyword scope, selected linewise.
   local bufnr = vim.api.nvim_get_current_buf()
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   if #lines > MAX_FILE then
