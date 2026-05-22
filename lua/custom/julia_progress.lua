@@ -3,22 +3,22 @@
 -- julials runs several $/progress cycles on startup and sends spurious `end`s
 -- mid-load, which makes fidget flicker open/closed and show misleading
 -- "complete"s. This collapses all of it into one status line: the live
--- message plus elapsed time since julials attached. No "ready"/"done" text is
--- shown - the widget simply vanishes once julials is genuinely idle, so it can
--- never claim to be finished while work is still happening. fidget is told to
--- ignore julials (see init.lua) so only this widget renders it.
+-- message plus elapsed time. The widget opens the instant a Julia file starts
+-- a fresh julials (not 9s later when the first report arrives), and simply
+-- vanishes once julials is genuinely idle - it never shows a "ready"/"done"
+-- text, so it can't claim to be finished while work continues. fidget is told
+-- to ignore julials (see init.lua) so only this widget renders it.
 
 local M = {}
 
 local GRACE_MS = 5000 -- linger after `end`; a follow-up report cancels the close
-local CAP_MS = 120000 -- safety: dismiss if something never sends a final `end`
+local CAP_MS = 120000 -- safety: dismiss if a final `end` never arrives
 
 local state = {
   buf = nil,
   win = nil,
   tick = nil, -- repeating redraw timer (elapsed counter)
   closer = nil, -- one-shot grace-close timer
-  attach = nil, -- uv.now() ms when julials attached
   start = 0, -- uv.now() ms the widget is counting from
   frozen = nil, -- elapsed ms frozen while idle (between `end` and next report)
   msg = '',
@@ -49,7 +49,6 @@ local function destroy()
     vim.api.nvim_win_close(state.win, true)
   end
   state.win = nil
-  state.attach = nil
   state.start = 0
   state.frozen = nil
   state.msg = ''
@@ -96,10 +95,10 @@ end
 
 local tick_scheduled = vim.schedule_wrap(tick)
 
----A progress event arrived: (re)open the widget and keep it alive.
+---Open the widget (if not already) and keep it alive.
 local function activity()
   if state.start == 0 then
-    state.start = state.attach or vim.uv.now()
+    state.start = vim.uv.now()
   end
   state.frozen = nil
   if state.closer then
@@ -152,14 +151,18 @@ function M.setup()
 
   local group = vim.api.nvim_create_augroup('ds-julia-progress', { clear = true })
 
-  -- Anchor the elapsed counter to when julials attached, so the widget shows
-  -- the real wait rather than starting from 0 when reports begin.
-  vim.api.nvim_create_autocmd('LspAttach', {
+  -- Open the widget the instant a Julia file triggers a fresh julials, so it
+  -- is visible for the whole startup. Skip when julials is already running
+  -- (this is just another buffer) or the widget is already up.
+  vim.api.nvim_create_autocmd('FileType', {
     group = group,
-    callback = function(ev)
-      if is_julials(ev.data.client_id) then
-        state.attach = vim.uv.now()
+    pattern = 'julia',
+    callback = function()
+      if state.start ~= 0 or #vim.lsp.get_clients { name = 'julials' } > 0 then
+        return
       end
+      state.msg = ''
+      activity()
     end,
   })
 
