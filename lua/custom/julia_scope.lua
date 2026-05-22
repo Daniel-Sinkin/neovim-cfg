@@ -27,6 +27,9 @@ local function set_highlights()
   -- nested current/parent pair reads apart
   vim.api.nvim_set_hl(0, 'JuliaParentScope', { link = 'DiagnosticInfo' })
   vim.api.nvim_set_hl(0, 'JuliaInnerDelimiter', { link = 'DiagnosticInfo' })
+  -- innermost enclosing () or {} - painted constantly so the pair the cursor
+  -- is in (and `ib`/`ab` will select) is visible without moving onto a brace
+  vim.api.nvim_set_hl(0, 'JuliaEnclosingBracket', { fg = '#ff9e64' })
 end
 
 -- Captures that mark regions for spell/conceal rather than coloring.
@@ -308,11 +311,52 @@ local function hl_scope(bufnr, info, lines, r, e, li, group, branch_cur)
   hl_keyword(bufnr, e, info[e].indent, info[e].indent + 3, group)
 end
 
+---Innermost `()` or `{}` pair enclosing the cursor (or at the cursor).
+---Returns (open_pos, close_pos) as 1-indexed {line, col}, or nil.
+local function enclosing_bracket()
+  local p_open = vim.fn.searchpairpos('(', '', ')', 'nbcW')
+  local p_close = vim.fn.searchpairpos('(', '', ')', 'ncW')
+  local c_open = vim.fn.searchpairpos('{', '', '}', 'nbcW')
+  local c_close = vim.fn.searchpairpos('{', '', '}', 'ncW')
+  local p_ok = p_open[1] > 0 and p_close[1] > 0
+  local c_ok = c_open[1] > 0 and c_close[1] > 0
+  if not p_ok and not c_ok then
+    return nil
+  end
+  if not c_ok then
+    return p_open, p_close
+  end
+  if not p_ok then
+    return c_open, c_close
+  end
+  -- both enclose; innermost has the later (larger) open position
+  if c_open[1] > p_open[1] or (c_open[1] == p_open[1] and c_open[2] > p_open[2]) then
+    return c_open, c_close
+  end
+  return p_open, p_close
+end
+
+local function hl_enclosing_bracket(bufnr, pos)
+  vim.api.nvim_buf_set_extmark(bufnr, ns, pos[1] - 1, pos[2] - 1, {
+    end_col = pos[2],
+    hl_group = 'JuliaEnclosingBracket',
+    priority = 250,
+  })
+end
+
 local function update(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) or vim.bo[bufnr].filetype ~= 'julia' then
     return
   end
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+
+  -- Innermost enclosing () or {} pair: paint both braces orange. Done first
+  -- so it applies even on huge files (where the scope work below bails out).
+  local bop, bcp = enclosing_bracket()
+  if bop then
+    hl_enclosing_bracket(bufnr, bop)
+    hl_enclosing_bracket(bufnr, bcp)
+  end
 
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   if #lines > MAX_FILE then
@@ -357,8 +401,9 @@ end
 
 -- Debounce update across rapid CursorMoved / TextChanged events so heavy
 -- typing or scrolling doesn't pay a full rescan per keystroke. The scope
--- catches up ~200ms after the last event.
-local DEBOUNCE_MS = 200
+-- catches up ~50ms after the last event - below perception, still coalesces
+-- bursts.
+local DEBOUNCE_MS = 50
 local pending_update = {}
 
 local function schedule_update(bufnr)
@@ -382,10 +427,10 @@ local esc = vim.api.nvim_replace_termcodes('<Esc>', true, false, true)
 ---(charwise), like `ib` in C/C++; otherwise it selects the enclosing Julia
 ---keyword scope (linewise).
 function M.select_block(around)
-  -- Innermost enclosing `(...)` wins, mirroring C/C++ where `ib` is the paren.
-  local op = vim.fn.searchpairpos('(', '', ')', 'nbW')
-  local cp = vim.fn.searchpairpos('(', '', ')', 'nW')
-  if op[1] > 0 and cp[1] > 0 then
+  -- Innermost enclosing `()` or `{}` wins, mirroring C/C++ where `ib` is the
+  -- nearest bracket pair.
+  local op, cp = enclosing_bracket()
+  if op then
     local sl, sc, el, ec
     if around then
       sl, sc, el, ec = op[1], op[2], cp[1], cp[2]
