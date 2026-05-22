@@ -66,15 +66,16 @@ local OPENERS = {
 local MAX_SCAN = 5000
 local MAX_FILE = 20000
 
----Scan a line's code (comment stripped) tracking bracket depth and "..."
----strings. Returns whether a bare `end` word sits at depth 0, and the
----1-indexed byte position of a bare `do` word at depth 0 (or nil).
-local function scan_code(line)
+---Scan a line's code (comment stripped) starting at bracket depth
+---`start_depth`, tracking brackets and "..." strings. Returns whether a bare
+---`end` word sits at statement level (depth 0), the 1-indexed byte position
+---of a bare `do` word at depth 0 (or nil), and the bracket depth at line end.
+local function scan_code(line, start_depth)
   local hash = line:find('#', 1, true)
   if hash then
     line = line:sub(1, hash - 1)
   end
-  local depth = 0
+  local depth = start_depth
   local in_str = false
   local i, n = 1, #line
   local bare_end = false
@@ -95,7 +96,7 @@ local function scan_code(line)
       depth = depth + 1
       i = i + 1
     elseif c == ')' or c == ']' or c == '}' then
-      depth = depth - 1
+      depth = depth > 0 and depth - 1 or 0
       i = i + 1
     elseif c:match '[%a_]' then
       local s = i
@@ -114,7 +115,7 @@ local function scan_code(line)
       i = i + 1
     end
   end
-  return bare_end, do_pos
+  return bare_end, do_pos, depth
 end
 
 ---Precompute per (1-indexed) line: indent, first/second token, whether the
@@ -127,51 +128,59 @@ end
 local function scan_lines(lines)
   local info = {}
   local in_tstring = false
+  local depth = 0 -- cumulative bracket depth carried across lines
   for idx, line in ipairs(lines) do
-    if in_tstring then
+    local started_in_string = in_tstring
+    local started_in_bracket = depth > 0
+
+    local quotes = select(2, line:gsub('"""', ''))
+    if quotes % 2 == 1 then
+      in_tstring = not in_tstring
+    end
+
+    if started_in_string then
       -- a line that starts inside a triple string is not code
-      local quotes = select(2, line:gsub('"""', ''))
-      if quotes % 2 == 1 then
-        in_tstring = false
-      end
       info[idx] = { str = true, kind = 'plain', indent = 0 }
     else
-      local quotes = select(2, line:gsub('"""', ''))
-      if quotes % 2 == 1 then
-        in_tstring = true
-      end
-
+      local bare_end, do_pos, new_depth = scan_code(line, depth)
+      depth = new_depth
       local indent = #(line:match '^%s*' or '')
-      local first = line:match '^%s*([%a_][%w_]*)'
-      local second = first and line:match '^%s*[%a_][%w_]*%s+([%a_][%w_]*)' or nil
-      local bare_end, do_pos = scan_code(line)
 
-      local first_opener = first ~= nil
-        and (OPENERS[first] or (first == 'mutable' and second == 'struct'))
-      local opens = first_opener or (do_pos ~= nil)
+      if started_in_bracket then
+        -- a continuation line inside a multi-line bracketed expression (e.g.
+        -- the `for` of a `[expr for x in ...]` comprehension): its first
+        -- token is not a block keyword, so do not treat it as one.
+        info[idx] = { str = false, kind = 'plain', indent = indent }
+      else
+        local first = line:match '^%s*([%a_][%w_]*)'
+        local second = first and line:match '^%s*[%a_][%w_]*%s+([%a_][%w_]*)' or nil
+        local first_opener = first ~= nil
+          and (OPENERS[first] or (first == 'mutable' and second == 'struct'))
+        local opens = first_opener or (do_pos ~= nil)
 
-      local kind, okw, ocol = 'plain', nil, nil
-      if first == 'end' then
-        kind = 'close'
-      elseif opens and bare_end then
-        kind = 'single'
-      elseif opens then
-        kind = 'open'
-        if first_opener then
-          okw, ocol = first, indent
-        else
-          okw, ocol = 'do', do_pos - 1
+        local kind, okw, ocol = 'plain', nil, nil
+        if first == 'end' then
+          kind = 'close'
+        elseif opens and bare_end then
+          kind = 'single'
+        elseif opens then
+          kind = 'open'
+          if first_opener then
+            okw, ocol = first, indent
+          else
+            okw, ocol = 'do', do_pos - 1
+          end
         end
-      end
 
-      info[idx] = {
-        str = false,
-        indent = indent,
-        first = first,
-        kind = kind,
-        okw = okw,
-        ocol = ocol,
-      }
+        info[idx] = {
+          str = false,
+          indent = indent,
+          first = first,
+          kind = kind,
+          okw = okw,
+          ocol = ocol,
+        }
+      end
     end
   end
   return info
