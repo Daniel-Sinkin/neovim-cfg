@@ -618,7 +618,9 @@ require('lazy').setup({
   { -- Fuzzy Finder (files, lsp, etc)
     'nvim-telescope/telescope.nvim',
     event = 'VimEnter',
-    branch = '0.1.x',
+    -- master (not the stale 0.1.x branch) so the LSP pickers use the
+    -- Neovim 0.11 APIs and don't emit make_position_params/jump_to_location
+    -- deprecation warnings.
     dependencies = {
       'nvim-lua/plenary.nvim',
       { -- If encountering errors, see telescope-fzf-native README for installation instructions

@@ -197,13 +197,15 @@ local function match_end(info, r)
 end
 
 ---Innermost opener..end block containing the cursor (1-indexed rows).
+---`module`/`baremodule` are still counted (so the `end` tally stays balanced)
+---but never returned as a scope: highlighting a whole module is not useful.
 local function find_enclosing(info, cur)
   local stop = math.max(1, cur - MAX_SCAN)
   for r = cur, stop, -1 do
     local li = info[r]
     if li and li.kind == 'open' then
       local e = match_end(info, r)
-      if e and e >= cur then
+      if e and e >= cur and li.okw ~= 'module' and li.okw ~= 'baremodule' then
         return r, e, li
       end
     end
