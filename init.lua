@@ -887,19 +887,6 @@ require('lazy').setup({
               vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled { bufnr = event.buf })
             end, '[T]oggle Inlay [H]ints')
           end
-
-          -- Julia: julials picks its project from Neovim's launch directory.
-          -- Activate the environment of the file's nearest project instead, so
-          -- type/dispatch resolution is correct no matter where Neovim started.
-          if client and client.name == 'julials' then
-            local proj = vim.fs.find({ 'Project.toml', 'JuliaProject.toml' }, {
-              upward = true,
-              path = vim.api.nvim_buf_get_name(event.buf),
-            })[1]
-            if proj then
-              client:notify('julia/activateenvironment', { envPath = vim.fs.dirname(proj) })
-            end
-          end
         end,
       })
 
