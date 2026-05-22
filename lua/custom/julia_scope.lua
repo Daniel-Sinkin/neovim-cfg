@@ -346,6 +346,27 @@ local function update(bufnr)
   end
 end
 
+-- Debounce update across rapid CursorMoved / TextChanged events so heavy
+-- typing or scrolling doesn't pay a full rescan per keystroke. The scope
+-- catches up ~200ms after the last event.
+local DEBOUNCE_MS = 200
+local pending_update = {}
+
+local function schedule_update(bufnr)
+  local t = pending_update[bufnr]
+  if t then
+    t:stop()
+  else
+    t = vim.uv.new_timer()
+    pending_update[bufnr] = t
+  end
+  t:start(DEBOUNCE_MS, 0, vim.schedule_wrap(function()
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      update(bufnr)
+    end
+  end))
+end
+
 local esc = vim.api.nvim_replace_termcodes('<Esc>', true, false, true)
 
 ---`ib`/`ab` text object. Inside `(...)` it selects the paren contents
@@ -412,7 +433,7 @@ function M.setup()
   vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'TextChanged', 'TextChangedI', 'BufEnter' }, {
     group = group,
     callback = function(ev)
-      update(ev.buf)
+      schedule_update(ev.buf)
     end,
   })
 
