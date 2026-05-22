@@ -1054,6 +1054,16 @@ require('lazy').setup({
           }
         end
 
+        -- Julia: julials formats via its bundled JuliaFormatter.jl, which
+        -- honors a project-root .JuliaFormatter.toml on its own. Allow extra
+        -- time for the first format of a session (JuliaFormatter JIT warmup).
+        if ft == 'julia' then
+          return {
+            timeout_ms = 3000,
+            lsp_format = 'fallback',
+          }
+        end
+
         -- Default behavior for other filetypes
         return {
           timeout_ms = 500,
