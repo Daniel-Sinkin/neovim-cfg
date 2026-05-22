@@ -21,7 +21,11 @@ local M = {}
 local ns = vim.api.nvim_create_namespace 'ds_julia_scope'
 
 local function set_highlights()
+  -- current scope keyword..end
   vim.api.nvim_set_hl(0, 'JuliaScopeKeyword', { link = 'MatchParen' })
+  -- parent scope keyword..end - the cyan also used for inner delimiters, so a
+  -- nested current/parent pair reads apart
+  vim.api.nvim_set_hl(0, 'JuliaParentScope', { link = 'DiagnosticInfo' })
   vim.api.nvim_set_hl(0, 'JuliaInnerDelimiter', { link = 'DiagnosticInfo' })
 end
 
@@ -227,6 +231,22 @@ local function find_enclosing(info, cur)
   return nil
 end
 
+---The scope that immediately encloses the scope opened at row `r` / closed at
+---`e` - i.e. the parent. Same module/baremodule skip as find_enclosing.
+local function find_parent(info, r, e)
+  local stop = math.max(1, r - MAX_SCAN)
+  for pr = r - 1, stop, -1 do
+    local li = info[pr]
+    if li and li.kind == 'open' then
+      local pe = match_end(info, pr)
+      if pe and pe >= e and li.okw ~= 'module' and li.okw ~= 'baremodule' then
+        return pr, pe, li
+      end
+    end
+  end
+  return nil
+end
+
 ---For an `if` block, the branch keyword row whose section contains the cursor.
 ---`elseif`/`else` count only when they sit directly inside this `if`.
 local function if_branch_row(info, r, e, cur)
@@ -251,12 +271,32 @@ local function if_branch_row(info, r, e, cur)
   return row
 end
 
-local function hl_keyword(bufnr, row, col, end_col)
+local function hl_keyword(bufnr, row, col, end_col, group)
   vim.api.nvim_buf_set_extmark(bufnr, ns, row - 1, col, {
     end_col = end_col,
-    hl_group = 'JuliaScopeKeyword',
+    hl_group = group,
     priority = 200,
   })
+end
+
+---Highlight a scope's opener keyword and its matching `end` in `group`. For an
+---`if`, the branch keyword whose section contains `branch_cur` is used.
+local function hl_scope(bufnr, info, lines, r, e, li, group, branch_cur)
+  if li.okw == 'if' then
+    local brow = if_branch_row(info, r, e, branch_cur)
+    if brow == r then
+      hl_keyword(bufnr, r, li.ocol, li.ocol + #li.okw, group)
+    else
+      local bi = info[brow]
+      hl_keyword(bufnr, brow, bi.indent, bi.indent + #bi.first, group)
+    end
+  elseif li.okw == 'mutable' then
+    local ss = lines[r]:find('struct', 1, true) or (li.ocol + 1)
+    hl_keyword(bufnr, r, li.ocol, ss - 1 + 6, group)
+  else
+    hl_keyword(bufnr, r, li.ocol, li.ocol + #li.okw, group)
+  end
+  hl_keyword(bufnr, e, info[e].indent, info[e].indent + 3, group)
 end
 
 local function update(bufnr)
@@ -277,25 +317,14 @@ local function update(bufnr)
     return
   end
 
-  -- Opener keyword (highlighted at its real position, which is not the line
-  -- indent when the keyword is used as an expression, e.g. `x = let`).
-  if li.okw == 'if' then
-    local brow = if_branch_row(info, r, e, cur)
-    if brow == r then
-      hl_keyword(bufnr, r, li.ocol, li.ocol + #li.okw)
-    else
-      local bi = info[brow]
-      hl_keyword(bufnr, brow, bi.indent, bi.indent + #bi.first)
-    end
-  elseif li.okw == 'mutable' then
-    local ss = lines[r]:find('struct', 1, true) or (li.ocol + 1)
-    hl_keyword(bufnr, r, li.ocol, ss - 1 + 6)
-  else
-    hl_keyword(bufnr, r, li.ocol, li.ocol + #li.okw)
-  end
+  -- Current scope: opener keyword + matching `end`.
+  hl_scope(bufnr, info, lines, r, e, li, 'JuliaScopeKeyword', cur)
 
-  -- Matching `end`.
-  hl_keyword(bufnr, e, info[e].indent, info[e].indent + 3)
+  -- Parent scope, in the dimmer cyan, so two nested levels read apart.
+  local pr, pe, pli = find_parent(info, r, e)
+  if pr then
+    hl_scope(bufnr, info, lines, pr, pe, pli, 'JuliaParentScope', r)
+  end
 
   -- Bracket delimiters within the scope.
   if (e - r) <= 3000 then
