@@ -749,7 +749,9 @@ require('lazy').setup({
       'WhoIsSethDaniel/mason-tool-installer.nvim',
 
       -- Useful status updates for LSP.
-      { 'j-hui/fidget.nvim', opts = {} },
+      -- julials is rendered by custom.julia_progress instead (one stable
+      -- widget); fidget still handles every other LSP.
+      { 'j-hui/fidget.nvim', opts = { progress = { ignore = { 'julials' } } } },
 
       -- Allows extra capabilities provided by nvim-cmp
       -- 'hrsh7th/cmp-nvim-lsp',
@@ -1796,6 +1798,8 @@ require('lazy').setup({
 })
 
 require('custom.julia_scope').setup()
+
+require('custom.julia_progress').setup()
 
 -- Load VSCode-style snippet collections (friendly-snippets)
 pcall(function()
