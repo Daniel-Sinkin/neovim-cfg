@@ -25,9 +25,10 @@ end
 -- Captures that mark regions for spell/conceal rather than coloring.
 local SKIP_CAPTURE = { spell = true, nospell = true, conceal = true, none = true }
 
--- Flatten Julia treesitter highlighting to monochrome, keeping only comments
--- colored (mirrors the aggressive C/C++ monochrome treatment). Scope and
--- bracket coloring come from extmarks, which draw on top and are unaffected.
+-- Flatten Julia treesitter highlighting to monochrome, keeping comments and
+-- docstrings (`"""..."""`) gray (mirrors the aggressive C/C++ monochrome
+-- treatment). Scope and bracket coloring come from extmarks, which draw on
+-- top and are unaffected.
 local function set_mono()
   local ok, q = pcall(vim.treesitter.query.get, 'julia', 'highlights')
   if not ok or not q or not q.captures then
@@ -36,7 +37,7 @@ local function set_mono()
   for _, name in ipairs(q.captures) do
     if not SKIP_CAPTURE[name] and name:sub(1, 1) ~= '_' then
       local hl = '@' .. name .. '.julia'
-      if name == 'comment' or name:match '^comment%.' then
+      if name == 'comment' or name:match '^comment%.' or name == 'string.documentation' then
         vim.api.nvim_set_hl(0, hl, { link = 'Comment' })
       else
         vim.api.nvim_set_hl(0, hl, { link = 'Normal' })
