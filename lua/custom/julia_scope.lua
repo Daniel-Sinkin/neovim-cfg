@@ -311,29 +311,84 @@ local function hl_scope(bufnr, info, lines, r, e, li, group, branch_cur)
   hl_keyword(bufnr, e, info[e].indent, info[e].indent + 3, group)
 end
 
----Innermost `()` or `{}` pair enclosing the cursor (or at the cursor).
----Returns (open_pos, close_pos) as 1-indexed {line, col}, or nil.
+local CLOSE_OF = { ['('] = ')', ['{'] = '}', ['['] = ']' }
+local OPEN_OF = { [')'] = '(', ['}'] = '{', [']'] = '[' }
+
+---Innermost `()`, `{}` or `[]` pair enclosing the cursor (or at the cursor).
+---Returns (open_pos, close_pos), each {line, col} 1-indexed, or nil. Manual
+---walk over buffer chars - avoids the Vim regex quirks `searchpairpos` hits
+---on `{` and `[`, and treats all three bracket types uniformly.
 local function enclosing_bracket()
-  local p_open = vim.fn.searchpairpos('(', '', ')', 'nbcW')
-  local p_close = vim.fn.searchpairpos('(', '', ')', 'ncW')
-  local c_open = vim.fn.searchpairpos('{', '', '}', 'nbcW')
-  local c_close = vim.fn.searchpairpos('{', '', '}', 'ncW')
-  local p_ok = p_open[1] > 0 and p_close[1] > 0
-  local c_ok = c_open[1] > 0 and c_close[1] > 0
-  if not p_ok and not c_ok then
+  local bufnr = vim.api.nvim_get_current_buf()
+  local cur_row, cur_col = unpack(vim.api.nvim_win_get_cursor(0))
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+
+  -- Walk backward from the cursor (cursor position inclusive) to find the
+  -- nearest unbalanced opener of any kind. Depth is tracked per bracket type.
+  local depths = { ['('] = 0, ['{'] = 0, ['['] = 0 }
+  local open_row, open_col, open_ch
+
+  local row = cur_row
+  local col = cur_col + 1 -- 1-indexed; the cursor's own column
+  local lim_back = math.max(1, cur_row - MAX_SCAN)
+  while row >= lim_back do
+    local line = lines[row] or ''
+    if col > #line then
+      col = #line
+    end
+    while col >= 1 do
+      local ch = line:sub(col, col)
+      local close_for = OPEN_OF[ch]
+      local open_for = CLOSE_OF[ch]
+      if close_for then
+        depths[close_for] = depths[close_for] + 1
+      elseif open_for then
+        if depths[ch] > 0 then
+          depths[ch] = depths[ch] - 1
+        else
+          open_row, open_col, open_ch = row, col, ch
+          break
+        end
+      end
+      col = col - 1
+    end
+    if open_row then
+      break
+    end
+    row = row - 1
+    if row >= 1 then
+      col = #(lines[row] or '')
+    end
+  end
+
+  if not open_row then
     return nil
   end
-  if not c_ok then
-    return p_open, p_close
+
+  -- Forward search from just after the opener for the matching closer.
+  local close_char = CLOSE_OF[open_ch]
+  local depth = 1
+  row = open_row
+  col = open_col + 1
+  local lim_fwd = math.min(#lines, cur_row + MAX_SCAN)
+  while row <= lim_fwd do
+    local line = lines[row] or ''
+    while col <= #line do
+      local ch = line:sub(col, col)
+      if ch == open_ch then
+        depth = depth + 1
+      elseif ch == close_char then
+        depth = depth - 1
+        if depth == 0 then
+          return { open_row, open_col }, { row, col }
+        end
+      end
+      col = col + 1
+    end
+    row = row + 1
+    col = 1
   end
-  if not p_ok then
-    return c_open, c_close
-  end
-  -- both enclose; innermost has the later (larger) open position
-  if c_open[1] > p_open[1] or (c_open[1] == p_open[1] and c_open[2] > p_open[2]) then
-    return c_open, c_close
-  end
-  return p_open, p_close
+  return nil
 end
 
 local function hl_enclosing_bracket(bufnr, pos)
