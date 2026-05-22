@@ -247,10 +247,17 @@ local function find_parent(info, r, e)
   return nil
 end
 
----For an `if` block, the branch keyword row whose section contains the cursor.
----`elseif`/`else` count only when they sit directly inside this `if`.
-local function if_branch_row(info, r, e, cur)
-  local row = r
+---For an `if` block, the bounds of the section (if / elseif / else) that
+---contains the cursor. `elseif`/`else` count only when they sit directly
+---inside this `if`. Returns (start_row, last_line, is_last):
+---  start_row - the row of the section's opening keyword (if / elseif / else)
+---  last_line - the last line of the section (the line before the next
+---              branch keyword, or `e` for the last section)
+---  is_last   - true if this is the last section (its last_line == e)
+local function if_section_bounds(info, r, e, cur)
+  local start_row = r
+  local last_line = e
+  local is_last = true
   local depth = 1
   for k = r + 1, e - 1 do
     local li = info[k]
@@ -261,14 +268,16 @@ local function if_branch_row(info, r, e, cur)
         depth = depth - 1
       elseif depth == 1 and (li.first == 'elseif' or li.first == 'else') then
         if k <= cur then
-          row = k
+          start_row = k
         else
+          last_line = k - 1
+          is_last = false
           break
         end
       end
     end
   end
-  return row
+  return start_row, last_line, is_last
 end
 
 local function hl_keyword(bufnr, row, col, end_col, group)
@@ -283,7 +292,7 @@ end
 ---`if`, the branch keyword whose section contains `branch_cur` is used.
 local function hl_scope(bufnr, info, lines, r, e, li, group, branch_cur)
   if li.okw == 'if' then
-    local brow = if_branch_row(info, r, e, branch_cur)
+    local brow = if_section_bounds(info, r, e, branch_cur)
     if brow == r then
       hl_keyword(bufnr, r, li.ocol, li.ocol + #li.okw, group)
     else
@@ -403,13 +412,25 @@ function M.select_block(around)
   local info = scan_lines(lines)
   local cur = vim.api.nvim_win_get_cursor(0)[1]
 
-  local r, e = find_enclosing(info, cur)
+  local r, e, li = find_enclosing(info, cur)
   if not r then
     return
   end
 
   local sline, eline
-  if around then
+  if li.okw == 'if' then
+    -- target just the cursor's branch (if / elseif / else), not the whole
+    -- if..end - matches what the scope highlight already shows.
+    local sr, ll, is_last = if_section_bounds(info, r, e, cur)
+    if around then
+      sline, eline = sr, ll
+    else
+      sline, eline = sr + 1, is_last and ll - 1 or ll
+      if sline > eline then
+        sline, eline = sr, ll
+      end
+    end
+  elseif around then
     sline, eline = r, e
   else
     sline, eline = r + 1, e - 1
