@@ -1060,6 +1060,11 @@ require('lazy').setup({
           ensure_installed = { 'codelldb' },
         },
       },
+      { -- Julia debug adapter (wraps DebugAdapter.jl)
+        'kdheepak/nvim-dap-julia',
+        -- Install DebugAdapter.jl into the plugin's pinned Julia env.
+        build = "julia --project=. -e 'using Pkg; Pkg.instantiate()'",
+      },
     },
     config = function()
       local dap = require 'dap'
@@ -1183,6 +1188,11 @@ require('lazy').setup({
         },
       }
       dap.configurations.c = dap.configurations.cpp
+
+      -- Julia: registers dap.adapters.julia + dap.configurations.julia.
+      pcall(function()
+        require('nvim-dap-julia').setup()
+      end)
 
       -- Keymaps
       vim.keymap.set('n', '<F5>', dap.continue, { desc = 'DAP: Continue' })
