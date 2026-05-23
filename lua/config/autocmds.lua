@@ -56,16 +56,23 @@ vim.api.nvim_create_autocmd('FileType', {
   end,
 })
 
--- Experimental: hide leading `const` and the `dans_` prefix in C/C++ buffers
--- without modifying the file. Pair with the monochrome theme in
--- custom/plugins/treesitter.lua so `const` reads as visual default and `mut`
--- stands out as the exception.
+-- Hide visual noise in C/C++/CUDA buffers without modifying files:
+--   - leading `const` (applies to c/cpp/cuda) so `mut` stands out as the
+--     exception (pair with the monochrome theme in treesitter.lua)
+--   - the `dans_` prefix on identifiers (c/cpp/cuda)
+--   - the `std::` qualifier (cpp/cuda only; pointless in plain C)
+-- Note: filetype pattern matches the *filetype* string, not extension.
+-- .h -> c, .hpp -> cpp, .cu/.cuh -> cuda. With vim.g.c_syntax_for_h = 1,
+-- .h stays as c (so std:: hiding skips it).
 vim.api.nvim_create_autocmd('FileType', {
-  pattern = { 'cpp', 'c', 'h', 'hpp' },
-  callback = function()
+  pattern = { 'c', 'cpp', 'cuda' },
+  callback = function(ev)
     vim.opt_local.conceallevel = 2
     vim.opt_local.concealcursor = 'nc'
     vim.fn.matchadd('Conceal', [[^\s*\zsconst\>\s*]], 10, -1, { conceal = '' })
     vim.fn.matchadd('Conceal', [[\<dans_]], 10, -1, { conceal = '' })
+    if ev.match == 'cpp' or ev.match == 'cuda' then
+      vim.fn.matchadd('Conceal', [[\<std::]], 10, -1, { conceal = '' })
+    end
   end,
 })
