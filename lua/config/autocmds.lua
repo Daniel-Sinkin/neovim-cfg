@@ -27,6 +27,16 @@ vim.api.nvim_create_autocmd('VimEnter', {
   end,
 })
 
+-- Clear diagnostics for buffers being wiped out. Without this, closing a file
+-- with errors leaves them cached in vim.diagnostic forever and Neo-tree keeps
+-- showing it as orange.
+vim.api.nvim_create_autocmd({ 'BufDelete', 'BufWipeout' }, {
+  group = vim.api.nvim_create_augroup('ds-diagnostic-cleanup', { clear = true }),
+  callback = function(ev)
+    vim.diagnostic.reset(nil, ev.buf)
+  end,
+})
+
 -- Highlight when yanking.
 vim.api.nvim_create_autocmd('TextYankPost', {
   desc = 'Highlight when yanking (copying) text',
