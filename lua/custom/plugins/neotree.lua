@@ -15,7 +15,7 @@ return {
   opts = {
     close_if_last_window = true,
     popup_border_style = 'rounded',
-    enable_git_status = true,
+    enable_git_status = false,
     enable_diagnostics = true,
     filesystem = {
       filtered_items = {
