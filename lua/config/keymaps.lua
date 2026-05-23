@@ -10,6 +10,13 @@ vim.keymap.set({ 'n', 'i', 'v' }, '<ScrollWheelDown>', '<C-e><C-e><C-e>', { sile
 
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
+-- Nuke stale diagnostics and refresh Neo-tree's view. Use when a closed file
+-- is still marked orange in the tree.
+vim.keymap.set('n', '<leader>dc', function()
+  vim.diagnostic.reset()
+  pcall(vim.cmd, 'Neotree refresh')
+end, { desc = '[D]iagnostics [C]lear (reset all, refresh tree)' })
+
 -- Easier terminal-mode exit (<C-\><C-n> is unguessable).
 vim.keymap.set('t', '<Esc><Esc>', '<C-\\><C-n>', { desc = 'Exit terminal mode' })
 
