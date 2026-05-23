@@ -42,6 +42,13 @@ return {
 
     dapui.setup()
 
+    -- Auto-load .vscode/launch.json from the project root if present, so DAP
+    -- configurations defined there show up in the F5 picker without manually
+    -- calling load_launchjs().
+    pcall(function()
+      require('dap.ext.vscode').load_launchjs(nil, {})
+    end)
+
     vim.api.nvim_set_hl(0, 'DapVirtualText', { fg = '#6b7280', italic = false })
     vim.api.nvim_set_hl(0, 'DapVirtualTextChanged', { fg = '#9ca3af', italic = false })
     vim.api.nvim_set_hl(0, 'DapVirtualTextError', { fg = '#9ca3af', italic = false })
