@@ -10,3 +10,4 @@ require 'config.snippets'
 
 require('custom.julia_scope').setup()
 require('custom.julia_progress').setup()
+require('custom.wpm').setup()
