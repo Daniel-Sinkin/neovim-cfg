@@ -40,7 +40,28 @@ return {
     local dap = require 'dap'
     local dapui = require 'dapui'
 
-    dapui.setup()
+    dapui.setup {
+      layouts = {
+        {
+          position = 'left',
+          size = 40,
+          elements = {
+            { id = 'scopes', size = 0.45 },
+            { id = 'watches', size = 0.30 },
+            { id = 'stacks', size = 0.20 },
+            { id = 'breakpoints', size = 0.05 },
+          },
+        },
+        {
+          position = 'bottom',
+          size = 10,
+          elements = {
+            { id = 'repl', size = 0.5 },
+            { id = 'console', size = 0.5 },
+          },
+        },
+      },
+    }
 
     vim.api.nvim_set_hl(0, 'DapVirtualText', { fg = '#6b7280', italic = false })
     vim.api.nvim_set_hl(0, 'DapVirtualTextChanged', { fg = '#9ca3af', italic = false })
