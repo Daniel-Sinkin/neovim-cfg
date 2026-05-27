@@ -314,7 +314,7 @@ end
 ---Highlight a scope's opener keyword and its matching `end` in `group`. For an
 ---`if`, every branch keyword (`if` / `elseif` / `else`) is highlighted so the
 ---branches the cursor is *not* in still get colored as part of the same scope.
-local function hl_scope(bufnr, info, lines, r, e, li, group, branch_cur)
+local function hl_scope(bufnr, info, lines, r, e, li, group)
   if li.okw == 'if' then
     for _, b in ipairs(if_all_branches(info, r, e)) do
       hl_keyword(bufnr, b.row, b.col, b.col + #b.kw, group)
@@ -456,12 +456,12 @@ local function update(bufnr)
   end
 
   -- Current scope: opener keyword + matching `end`.
-  hl_scope(bufnr, info, lines, r, e, li, 'JuliaScopeKeyword', cur)
+  hl_scope(bufnr, info, lines, r, e, li, 'JuliaScopeKeyword')
 
   -- Parent scope, in the dimmer cyan, so two nested levels read apart.
   local pr, pe, pli = find_parent(info, r, e)
   if pr then
-    hl_scope(bufnr, info, lines, pr, pe, pli, 'JuliaParentScope', r)
+    hl_scope(bufnr, info, lines, pr, pe, pli, 'JuliaParentScope')
   end
 
   -- Bracket delimiters within the scope.
