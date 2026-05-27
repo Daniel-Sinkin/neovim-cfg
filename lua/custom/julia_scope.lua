@@ -392,7 +392,15 @@ local function enclosing_bracket()
 end
 
 local function hl_enclosing_bracket(bufnr, pos)
-  vim.api.nvim_buf_set_extmark(bufnr, ns, pos[1] - 1, pos[2] - 1, {
+  local row = pos[1] - 1
+  if row < 0 or row >= vim.api.nvim_buf_line_count(bufnr) then
+    return
+  end
+  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, true)[1] or ''
+  if pos[2] < 1 or pos[2] > #line then
+    return
+  end
+  vim.api.nvim_buf_set_extmark(bufnr, ns, row, pos[2] - 1, {
     end_col = pos[2],
     hl_group = 'JuliaEnclosingBracket',
     priority = 250,
@@ -407,10 +415,15 @@ local function update(bufnr)
 
   -- Innermost enclosing () or {} pair: paint both braces orange. Done first
   -- so it applies even on huge files (where the scope work below bails out).
-  local bop, bcp = enclosing_bracket()
-  if bop then
-    hl_enclosing_bracket(bufnr, bop)
-    hl_enclosing_bracket(bufnr, bcp)
+  -- enclosing_bracket() scans the *current* buffer (focused window). Skip if
+  -- the debounced update is firing for a buffer that's no longer focused —
+  -- otherwise positions from buffer Y get applied as extmarks on buffer X.
+  if bufnr == vim.api.nvim_get_current_buf() then
+    local bop, bcp = enclosing_bracket()
+    if bop then
+      hl_enclosing_bracket(bufnr, bop)
+      hl_enclosing_bracket(bufnr, bcp)
+    end
   end
 
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
