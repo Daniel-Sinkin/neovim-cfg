@@ -291,16 +291,33 @@ local function hl_keyword(bufnr, row, col, end_col, group)
   })
 end
 
+---All branch keywords directly inside the `if` block at rows `r`..`e`.
+---Returns a list of { row = N, kw = "if"|"elseif"|"else", col = N }.
+local function if_all_branches(info, r, e)
+  local out = { { row = r, kw = 'if', col = info[r].ocol } }
+  local depth = 1
+  for k = r + 1, e - 1 do
+    local li = info[k]
+    if not li.str then
+      if li.kind == 'open' then
+        depth = depth + 1
+      elseif li.kind == 'close' then
+        depth = depth - 1
+      elseif depth == 1 and (li.first == 'elseif' or li.first == 'else') then
+        out[#out + 1] = { row = k, kw = li.first, col = li.indent }
+      end
+    end
+  end
+  return out
+end
+
 ---Highlight a scope's opener keyword and its matching `end` in `group`. For an
----`if`, the branch keyword whose section contains `branch_cur` is used.
+---`if`, every branch keyword (`if` / `elseif` / `else`) is highlighted so the
+---branches the cursor is *not* in still get colored as part of the same scope.
 local function hl_scope(bufnr, info, lines, r, e, li, group, branch_cur)
   if li.okw == 'if' then
-    local brow = if_section_bounds(info, r, e, branch_cur)
-    if brow == r then
-      hl_keyword(bufnr, r, li.ocol, li.ocol + #li.okw, group)
-    else
-      local bi = info[brow]
-      hl_keyword(bufnr, brow, bi.indent, bi.indent + #bi.first, group)
+    for _, b in ipairs(if_all_branches(info, r, e)) do
+      hl_keyword(bufnr, b.row, b.col, b.col + #b.kw, group)
     end
   elseif li.okw == 'mutable' then
     local ss = lines[r]:find('struct', 1, true) or (li.ocol + 1)
