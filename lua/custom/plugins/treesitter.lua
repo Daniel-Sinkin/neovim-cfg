@@ -331,6 +331,13 @@ return {
             pcall(vim.api.nvim_set_hl, 0, g, { fg = '#6b7280' })
           end
 
+          -- Dim C++ cast expressions. static_cast<T>(x), dynamic_cast<T>(x),
+          -- reinterpret_cast<T>(x), const_cast<T>(x) — all gray, no italic.
+          -- Distinguishable from comments (which are italic) but visually low
+          -- priority so the meaningful code stands out.
+          vim.api.nvim_set_hl(0, 'dansCppCast', { fg = '#6b7280' })
+          vim.cmd [[syntax match dansCppCast /\<\(static\|dynamic\|reinterpret\|const\)_cast\s*<[^>]*>/]]
+
           if ev.match == 'cuda' then
             -- __device__ / __host__ / __global__ markers.
             vim.api.nvim_set_hl(0, 'cudaStorageClass', { fg = '#9ece6a', bold = true })
