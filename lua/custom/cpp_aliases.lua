@@ -1,10 +1,12 @@
--- Render C++ cast keywords as short aliases via inline virt_text + concealment.
--- static_cast       -> $sc
--- dynamic_cast      -> $dc
--- reinterpret_cast  -> $rc
--- const_cast        -> $cc
--- The original text stays in the file (this is purely visual). The `$` prefix
--- signals the rendered form is a shorthand, not real C++.
+-- Render C++ keywords/attributes as short aliases via inline virt_text +
+-- concealment. The original text stays in the file (this is purely visual).
+-- The `$` prefix signals the rendered form is a shorthand, not real C++.
+--   static_cast       -> $sc
+--   dynamic_cast      -> $dc
+--   reinterpret_cast  -> $rc
+--   const_cast        -> $cc
+--   [[nodiscard]]     -> $nd
+--   noexcept          -> $ne
 
 local M = {}
 
@@ -15,6 +17,8 @@ local ALIASES = {
   { 'dynamic_cast', '$dc' },
   { 'reinterpret_cast', '$rc' },
   { 'const_cast', '$cc' },
+  { '[[nodiscard]]', '$nd' },
+  { 'noexcept', '$ne' },
 }
 
 local function is_word_char(c)
