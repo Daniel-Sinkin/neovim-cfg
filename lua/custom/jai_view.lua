@@ -329,7 +329,8 @@ end
 local function enable(bufnr)
   enabled[bufnr] = true
   vim.opt_local.conceallevel = 2
-  vim.opt_local.concealcursor = 'nc'
+  -- Empty: cursor line is raw WYSIWYG, driven by cursor position not mode.
+  vim.opt_local.concealcursor = ''
   refresh(bufnr)
   fetch_hints(bufnr)
 end

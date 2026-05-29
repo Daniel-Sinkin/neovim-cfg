@@ -8,7 +8,8 @@
 
 local M = {}
 
-local MATCH_GROUPS = { DansMarkerMut = true, DansMarkerCpy = true, DansNodiscard = true }
+local MATCH_GROUPS =
+  { DansMarkerMut = true, DansMarkerCpy = true, DansNodiscard = true, DansConst = true }
 
 local function set_hl()
   vim.api.nvim_set_hl(0, 'DansMarkerMut', { fg = '#f7768e', bold = true })
@@ -19,6 +20,10 @@ local function set_hl()
   -- [[nodiscard]] grayed like comments (it's the expected default, shown but
   -- de-emphasized; `discardable` stays Normal/visible as the exception).
   vim.api.nvim_set_hl(0, 'DansNodiscard', { fg = '#6b7280', italic = true })
+  -- `const` grayed wherever it stays visible (function args, trailing const,
+  -- and the leading const when revealed on the cursor line) — const is the
+  -- de-emphasized default, `mut` is the bright exception.
+  vim.api.nvim_set_hl(0, 'DansConst', { fg = '#6b7280' })
 end
 
 local function apply()
@@ -41,6 +46,10 @@ local function apply()
   vim.fn.matchadd('DansMarkerCpy', [[\<copy\>]], 20)
   vim.fn.matchadd('DansMarkerCpy', [[\<cpy\>]], 20)
   vim.fn.matchadd('DansNodiscard', '\\[\\[nodiscard\\]\\]', 20)
+  -- Gray every `const`. The leading-const conceal still hides it on non-cursor
+  -- lines; this grays the ones that stay visible (args, trailing, and the
+  -- leading one revealed on the cursor line).
+  vim.fn.matchadd('DansConst', [[\<const\>]], 20)
 end
 
 function M.setup()
