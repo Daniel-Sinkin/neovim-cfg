@@ -71,7 +71,10 @@ vim.api.nvim_create_autocmd('FileType', {
   pattern = { 'c', 'cpp', 'cuda' },
   callback = function(ev)
     vim.opt_local.conceallevel = 2
-    vim.opt_local.concealcursor = 'nc'
+    -- Empty concealcursor: the cursor line never conceals (raw WYSIWYG view of
+    -- const/std::/dans_), every other line stays concealed. Reveal is driven by
+    -- cursor position only — insert mode has no effect. Matches jai_view.
+    vim.opt_local.concealcursor = ''
     vim.fn.matchadd('Conceal', [[^\s*\zsconst\>\s*]], 10, -1, { conceal = '' })
     vim.fn.matchadd('Conceal', [[\<dans_]], 10, -1, { conceal = '' })
     if ev.match == 'cpp' or ev.match == 'cuda' then
