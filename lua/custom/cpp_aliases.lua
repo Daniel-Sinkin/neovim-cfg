@@ -5,8 +5,10 @@
 --   dynamic_cast      -> $dc
 --   reinterpret_cast  -> $rc
 --   const_cast        -> $cc
---   [[nodiscard]]     -> $nd
 --   noexcept          -> $ne
+-- [[nodiscard]] is hidden entirely (concealed, not aliased) in
+-- config/autocmds.lua, same as leading `const` — it's the expected default
+-- so it should be invisible; `discardable` is the visible exception.
 
 local M = {}
 
@@ -17,7 +19,6 @@ local ALIASES = {
   { 'dynamic_cast', '$dc' },
   { 'reinterpret_cast', '$rc' },
   { 'const_cast', '$cc' },
-  { '[[nodiscard]]', '$nd' },
   { 'noexcept', '$ne' },
 }
 
