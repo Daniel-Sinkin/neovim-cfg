@@ -122,8 +122,17 @@ local function render_core(core)
   return nil
 end
 
--- For a full buffer line, returns (start_col, rendered_text) for the overlay,
--- or nil if the line isn't a transformable declaration.
+-- Marker word -> highlight group, shared with cpp_markers.lua so the marker
+-- pops the same way inside an overlay as it does in plain (revealed) text.
+local MARKER_HL = {
+  mut = 'DansMarkerMut',
+  mut_unchecked = 'DansMarkerMut',
+  cpy = 'DansMarkerCpy',
+}
+
+-- For a full buffer line, returns (start_col, virt_text_chunks) for the
+-- overlay, or nil if the line isn't a transformable declaration. The marker
+-- prefix (if any) is emitted as its own colored chunk.
 local function render_line(line)
   local indent = line:match '^%s*'
   local body = line:sub(#indent + 1)
@@ -137,11 +146,14 @@ local function render_line(line)
   if not rendered then
     return nil
   end
-  local out = prefix .. rendered
-  if had_semi then
-    out = out .. ';'
+  local tail = rendered .. (had_semi and ';' or '')
+  local chunks = {}
+  if prefix ~= '' then
+    local first = prefix:match '^(%S+)'
+    chunks[#chunks + 1] = { prefix, MARKER_HL[first] or 'Normal' }
   end
-  return #indent, out
+  chunks[#chunks + 1] = { tail, 'Normal' }
+  return #indent, chunks
 end
 
 local function clear(bufnr)
@@ -170,12 +182,12 @@ local function set_row(bufnr, row0, reveal)
   if not line then
     return
   end
-  local start_col, rendered = render_line(line)
+  local start_col, chunks = render_line(line)
   if start_col then
     pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, start_col, {
       end_col = #line,
       conceal = '',
-      virt_text = { { rendered, 'Normal' } },
+      virt_text = chunks,
       virt_text_pos = 'inline',
     })
   end
@@ -191,12 +203,12 @@ local function refresh(bufnr)
   for row, line in ipairs(lines) do
     local row0 = row - 1
     if row0 ~= cur then
-      local start_col, rendered = render_line(line)
+      local start_col, chunks = render_line(line)
       if start_col then
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, start_col, {
           end_col = #line,
           conceal = '',
-          virt_text = { { rendered, 'Normal' } },
+          virt_text = chunks,
           virt_text_pos = 'inline',
         })
       end

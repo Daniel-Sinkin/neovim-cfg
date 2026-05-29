@@ -11,4 +11,5 @@ require 'config.snippets'
 require('custom.julia_scope').setup()
 require('custom.julia_progress').setup()
 require('custom.cpp_aliases').setup()
+require('custom.cpp_markers').setup()
 require('custom.jai_view').setup()
