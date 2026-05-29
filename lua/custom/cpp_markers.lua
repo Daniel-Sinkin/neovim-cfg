@@ -11,6 +11,8 @@ local M = {}
 local function set_hl()
   vim.api.nvim_set_hl(0, 'DansMarkerMut', { fg = '#f7768e', bold = true })
   vim.api.nvim_set_hl(0, 'DansMarkerCpy', { fg = '#e0af68', bold = true })
+  -- Deduced-type inlay text inside jai_view overlays (clangd auto types).
+  vim.api.nvim_set_hl(0, 'DansInlayType', { fg = '#7dcfff' })
 end
 
 local function apply()

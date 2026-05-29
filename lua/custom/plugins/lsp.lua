@@ -85,16 +85,12 @@ return {
           end
 
           if client and client_supports_method(client, vim.lsp.protocol.Methods.textDocument_inlayHint, event.buf) then
+            -- Toggles the *built-in* renderer (end-of-line hints). For C/C++ the
+            -- deduced auto types are instead pulled and placed by custom.jai_view
+            -- (rendered between the `:` and `=`), so leave the built-in off here.
             map('<leader>th', function()
               vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled { bufnr = event.buf })
             end, '[T]oggle Inlay [H]ints')
-            -- On by default for C/C++/CUDA: surfaces clangd's deduced `auto`
-            -- types (config in the project .clangd). Experimental; <leader>th
-            -- toggles off. Other languages stay off to avoid call-site noise.
-            local ft = vim.bo[event.buf].filetype
-            if ft == 'c' or ft == 'cpp' or ft == 'cuda' then
-              vim.lsp.inlay_hint.enable(true, { bufnr = event.buf })
-            end
           end
         end,
       })
