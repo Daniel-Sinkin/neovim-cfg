@@ -32,12 +32,12 @@ end
 
 -- Neovide-only visuals (ignored in terminal Neovim)
 if vim.g.neovide then
-  vim.g.neovide_cursor_animation_length = 0.06
+  vim.g.neovide_cursor_animation_length = 0.03
   vim.g.neovide_scroll_animation_length = 0.0
-  vim.g.neovide_cursor_trail_size = 0.35
+  vim.g.neovide_cursor_trail_size = 0.2
   vim.g.neovide_cursor_vfx_mode = ''
   -- Neovide expects a font *family* name, not a file name.
-  vim.o.guifont = 'Monaspace Krypton:h14'
+  vim.o.guifont = 'Monaspace Krypton:h12'
 end
 
 vim.opt.number = true

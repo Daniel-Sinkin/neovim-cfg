@@ -28,7 +28,14 @@ return {
   {
     'nvim-treesitter/nvim-treesitter',
     build = ':TSUpdate',
-    main = 'nvim-treesitter.configs',
+    config = function(_, opts)
+      -- Windows: zig is a hermetic C compiler (ships its own libc headers), so
+      -- parser builds don't need the MSVC/Windows SDK INCLUDE paths set.
+      if vim.fn.has 'win32' == 1 then
+        require('nvim-treesitter.install').compilers = { 'zig' }
+      end
+      require('nvim-treesitter.configs').setup(opts)
+    end,
     opts = {
       ensure_installed = { 'bash', 'c', 'cpp', 'cuda', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' },
       auto_install = true,
