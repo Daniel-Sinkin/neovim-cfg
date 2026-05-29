@@ -123,6 +123,36 @@ local function looks_like_type(t)
   return true
 end
 
+-- Marker keywords that should pop wherever they appear in an expression
+-- (e.g. `copy(x)` in a value), so the overlay matches the matchadd coloring on
+-- real text.
+local EXPR_MARKERS = {
+  copy = 'DansMarkerCpy',
+  cpy = 'DansMarkerCpy',
+  mut = 'DansMarkerMut',
+  mut_unchecked = 'DansMarkerMut',
+}
+
+-- Split `text` into chunks, coloring whole-word marker keywords.
+local function colorize(text)
+  local out = {}
+  local i, n = 1, #text
+  while i <= n do
+    local s, e = text:find('[%a_][%w_]*', i)
+    if not s then
+      out[#out + 1] = { text:sub(i), 'Normal' }
+      break
+    end
+    if s > i then
+      out[#out + 1] = { text:sub(i, s - 1), 'Normal' }
+    end
+    local word = text:sub(s, e)
+    out[#out + 1] = { word, EXPR_MARKERS[word] or 'Normal' }
+    i = e + 1
+  end
+  return out
+end
+
 -- Build the virt_text chunk list for a parsed declaration, or nil if `core`
 -- isn't a recognized declaration form.
 local function build_chunks(prefix, core, had_semi, type_hint)
@@ -143,6 +173,12 @@ local function build_chunks(prefix, core, had_semi, type_hint)
       chunks[#chunks + 1] = { text, hl or 'Normal' }
     end
   end
+  -- Append value text, coloring marker keywords inside it.
+  local function add_value(text)
+    for _, c in ipairs(colorize(text)) do
+      chunks[#chunks + 1] = c
+    end
+  end
 
   if prefix ~= '' then
     add(prefix, MARKER_HL[prefix:match '^(%S+)'] or 'Normal')
@@ -152,15 +188,23 @@ local function build_chunks(prefix, core, had_semi, type_hint)
     if type_hint and name ~= '_' then
       add(name .. ': ')
       add(type_hint, 'DansInlayType')
-      add(' = ' .. expr .. semi)
+      add ' = '
+      add_value(expr)
+      add(semi)
     else
-      add(name .. ' := ' .. ((sigil == '&') and '&' or '') .. expr .. semi)
+      add(name .. ' := ' .. ((sigil == '&') and '&' or ''))
+      add_value(expr)
+      add(semi)
     end
   else
-    -- Explicit type: shown in Normal (it's your written source, not injected),
-    -- so it reads differently from the muted-blue deduced hints. std:: still
-    -- stripped, matching the global std:: hiding.
-    add(nm .. ': ' .. (typ:gsub('std::', '')) .. (init == '' and semi or (' = ' .. init .. semi)))
+    -- Explicit type: shown in Normal (your written source, not injected), so it
+    -- reads apart from the muted-blue deduced hints. std:: stripped.
+    add(nm .. ': ' .. (typ:gsub('std::', '')))
+    if init ~= '' then
+      add ' = '
+      add_value(init)
+    end
+    add(semi)
   end
 
   return chunks
