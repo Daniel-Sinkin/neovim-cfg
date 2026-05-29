@@ -40,7 +40,7 @@ local function apply()
   vim.fn.matchadd('DansMarkerMut', [[\<mut_unchecked\>]], 20)
   vim.fn.matchadd('DansMarkerCpy', [[\<copy\>]], 20)
   vim.fn.matchadd('DansMarkerCpy', [[\<cpy\>]], 20)
-  vim.fn.matchadd('DansNodiscard', [[\[\[nodiscard\]\]]], 20)
+  vim.fn.matchadd('DansNodiscard', '\\[\\[nodiscard\\]\\]', 20)
 end
 
 function M.setup()
