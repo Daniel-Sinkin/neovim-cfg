@@ -28,6 +28,7 @@ local ns = vim.api.nvim_create_namespace 'ds_jai_view'
 local enabled = {}
 local last_row = {}
 local hint_type = {} -- bufnr -> { [row0] = "int *" } from clangd Type inlay hints
+local show_hints = true -- deduced-type hints on/off (toggle with :JaiHints)
 
 local STMT_KEYWORDS = {
   ['return'] = true,
@@ -156,14 +157,10 @@ local function build_chunks(prefix, core, had_semi, type_hint)
       add(name .. ' := ' .. ((sigil == '&') and '&' or '') .. expr .. semi)
     end
   else
-    -- Explicit type: colored like a deduced type, with std:: stripped.
-    add(nm .. ': ')
-    add((typ:gsub('std::', '')), 'DansInlayType')
-    if init == '' then
-      add(semi)
-    else
-      add(' = ' .. init .. semi)
-    end
+    -- Explicit type: shown in Normal (it's your written source, not injected),
+    -- so it reads differently from the muted-blue deduced hints. std:: still
+    -- stripped, matching the global std:: hiding.
+    add(nm .. ': ' .. (typ:gsub('std::', '')) .. (init == '' and semi or (' = ' .. init .. semi)))
   end
 
   return chunks
@@ -201,6 +198,9 @@ local function cursor_row0(bufnr)
 end
 
 local function type_for(bufnr, row0)
+  if not show_hints then
+    return nil
+  end
   local m = hint_type[bufnr]
   return m and m[row0] or nil
 end
@@ -350,8 +350,18 @@ function M.toggle()
   end
 end
 
+-- Toggle the deduced-type inlay hints (global) while keeping the jai overlay.
+function M.toggle_hints()
+  show_hints = not show_hints
+  for bufnr in pairs(enabled) do
+    refresh(bufnr)
+  end
+  vim.notify('JAI type hints ' .. (show_hints and 'on' or 'off'), vim.log.levels.INFO)
+end
+
 function M.setup()
   vim.api.nvim_create_user_command('JaiView', M.toggle, { desc = 'Toggle JAI-style declaration view' })
+  vim.api.nvim_create_user_command('JaiHints', M.toggle_hints, { desc = 'Toggle JAI deduced-type hints' })
 
   local group = vim.api.nvim_create_augroup('ds_jai_view', { clear = true })
   vim.api.nvim_create_autocmd('FileType', {
