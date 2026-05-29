@@ -38,6 +38,10 @@ if vim.g.neovide then
   vim.g.neovide_cursor_vfx_mode = ''
   -- Neovide expects a font *family* name, not a file name.
   vim.o.guifont = 'Monaspace Krypton:h12'
+  -- Follow macOS system appearance: sets &background and updates it live when
+  -- the system switches dark/light. The colorscheme autocmd in
+  -- custom/plugins/colorscheme.lua re-picks tokyonight on change.
+  vim.g.neovide_theme = 'auto'
 end
 
 vim.opt.number = true
