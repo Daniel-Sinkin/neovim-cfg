@@ -155,10 +155,15 @@ local function build_chunks(prefix, core, had_semi, type_hint)
     else
       add(name .. ' := ' .. ((sigil == '&') and '&' or '') .. expr .. semi)
     end
-  elseif init == '' then
-    add(nm .. ': ' .. typ .. semi)
   else
-    add(nm .. ': ' .. typ .. ' = ' .. init .. semi)
+    -- Explicit type: colored like a deduced type, with std:: stripped.
+    add(nm .. ': ')
+    add((typ:gsub('std::', '')), 'DansInlayType')
+    if init == '' then
+      add(semi)
+    else
+      add(' = ' .. init .. semi)
+    end
   end
 
   return chunks
@@ -307,8 +312,9 @@ local function fetch_hints(bufnr)
     end
     local map = {}
     for line, info in pairs(per_line) do
-      -- const is the hidden default; drop it from the deduced type too.
-      local t = info.type:gsub('^const%s+', '')
+      -- const is the hidden default and std:: is hidden everywhere; drop both
+      -- from the deduced type so it matches the rest of the view.
+      local t = info.type:gsub('^const%s+', ''):gsub('std::', '')
       -- Lambdas render as "(lambda at ...)" — useless noise; the lambda is
       -- written inline, so show no type (matches how functions read).
       if t ~= '' and not t:find('lambda', 1, true) then

@@ -32,13 +32,11 @@ local function apply()
   end
 
   -- Window-local matches, priority above the flattened monochrome syntax.
+  -- Only the keyword is colored (not the following type/name).
   vim.fn.matchadd('DansMarkerMut', [[\<mut\>]], 20)
   vim.fn.matchadd('DansMarkerMut', [[\<mut_unchecked\>]], 20)
   vim.fn.matchadd('DansMarkerCpy', [[\<copy\>]], 20)
   vim.fn.matchadd('DansMarkerCpy', [[\<cpy\>]], 20)
-  -- cpy parameter: also color the type and name that follow, up to the next
-  -- `,` or `)` (the parameter's extent in a function signature).
-  vim.fn.matchadd('DansMarkerCpy', [[\<cpy\>\s\+\zs[^,)]\+]], 20)
 end
 
 function M.setup()
