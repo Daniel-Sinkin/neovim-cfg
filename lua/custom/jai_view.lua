@@ -28,7 +28,7 @@ local ns = vim.api.nvim_create_namespace 'ds_jai_view'
 local enabled = {}
 local revealed = {} -- bufnr -> { [row0] = true } lines currently shown raw (cursor / visual selection)
 local hint_type = {} -- bufnr -> { [row0] = "int *" } from clangd Type inlay hints
-local show_hints = true -- deduced-type hints on/off (toggle with :JaiHints)
+local show_hints = true -- deduced-type hints on/off (toggle with :InlineHints)
 
 local STMT_KEYWORDS = {
   ['return'] = true,
@@ -431,7 +431,7 @@ end
 
 function M.setup()
   vim.api.nvim_create_user_command('JaiView', M.toggle, { desc = 'Toggle JAI-style declaration view' })
-  vim.api.nvim_create_user_command('JaiHints', M.toggle_hints, { desc = 'Toggle JAI deduced-type hints' })
+  vim.api.nvim_create_user_command('InlineHints', M.toggle_hints, { desc = 'Toggle deduced-type inline hints' })
 
   local group = vim.api.nvim_create_augroup('ds_jai_view', { clear = true })
   vim.api.nvim_create_autocmd('FileType', {
