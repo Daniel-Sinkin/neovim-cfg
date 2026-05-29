@@ -26,7 +26,7 @@ local M = {}
 
 local ns = vim.api.nvim_create_namespace 'ds_jai_view'
 local enabled = {}
-local last_row = {}
+local revealed = {} -- bufnr -> { [row0] = true } lines currently shown raw (cursor / visual selection)
 local hint_type = {} -- bufnr -> { [row0] = "int *" } from clangd Type inlay hints
 local show_hints = true -- deduced-type hints on/off (toggle with :JaiHints)
 
@@ -205,6 +205,26 @@ local function type_for(bufnr, row0)
   return m and m[row0] or nil
 end
 
+-- Set of rows to show raw (no overlay): the cursor line, or the whole visual
+-- selection while in a visual mode. Reveal is cursor/selection driven.
+local function reveal_set(bufnr)
+  local cur = cursor_row0(bufnr)
+  if cur == nil then
+    return {}
+  end
+  local m = vim.fn.mode():sub(1, 1)
+  if m == 'v' or m == 'V' or m == string.char(22) then
+    local vstart = vim.fn.getpos('v')[2] - 1
+    local lo, hi = math.min(cur, vstart), math.max(cur, vstart)
+    local set = {}
+    for r = lo, hi do
+      set[r] = true
+    end
+    return set
+  end
+  return { [cur] = true }
+end
+
 local function set_row(bufnr, row0, reveal)
   vim.api.nvim_buf_clear_namespace(bufnr, ns, row0, row0 + 1)
   if reveal then
@@ -230,11 +250,11 @@ local function refresh(bufnr)
     return
   end
   clear(bufnr)
-  local cur = cursor_row0(bufnr)
+  local set = reveal_set(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   for row, line in ipairs(lines) do
     local row0 = row - 1
-    if row0 ~= cur then
+    if not set[row0] then
       local start_col, chunks = render_line(line, type_for(bufnr, row0))
       if start_col then
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, start_col, {
@@ -246,23 +266,28 @@ local function refresh(bufnr)
       end
     end
   end
-  last_row[bufnr] = cur
+  revealed[bufnr] = set
 end
 
+-- Incremental: restore overlays on rows that left the reveal set, drop overlays
+-- on rows that entered it. Handles both single-cursor and visual-selection.
 local function on_cursor(bufnr)
   if not (enabled[bufnr] and vim.api.nvim_buf_is_valid(bufnr)) then
     return
   end
-  local new = cursor_row0(bufnr)
-  if new == nil then
-    return
+  local new = reveal_set(bufnr)
+  local old = revealed[bufnr] or {}
+  for row0 in pairs(old) do
+    if not new[row0] then
+      set_row(bufnr, row0, false)
+    end
   end
-  local old = last_row[bufnr]
-  if old ~= nil and old ~= new then
-    set_row(bufnr, old, false)
+  for row0 in pairs(new) do
+    if not old[row0] then
+      set_row(bufnr, row0, true)
+    end
   end
-  set_row(bufnr, new, true)
-  last_row[bufnr] = new
+  revealed[bufnr] = new
 end
 
 -- Request Type inlay hints from clangd directly (not the built-in renderer, so
@@ -337,7 +362,7 @@ end
 
 local function disable(bufnr)
   enabled[bufnr] = nil
-  last_row[bufnr] = nil
+  revealed[bufnr] = nil
   hint_type[bufnr] = nil
   clear(bufnr)
 end
@@ -378,7 +403,9 @@ function M.setup()
       refresh(ev.buf)
     end,
   })
-  vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
+  -- CursorMoved updates the reveal as the cursor/selection moves; ModeChanged
+  -- catches entering/leaving visual mode (which may not move the cursor).
+  vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'ModeChanged' }, {
     group = group,
     callback = function(ev)
       on_cursor(ev.buf)
