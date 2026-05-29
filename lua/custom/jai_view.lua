@@ -158,9 +158,13 @@ end
 local function build_chunks(prefix, core, had_semi, type_hint)
   local semi = had_semi and ';' or ''
 
+  -- structured binding: auto [a, b] = expr  ->  [a, b] := expr (no per-element
+  -- type hints; clangd's binding hints aren't reliable enough).
+  local sb_sigil, sb_binds, sb_expr = core:match '^auto([&*]?)%s*%[(.-)%]%s*=%s*(.+)$'
+
   local sigil, name, expr = core:match '^auto([&*]?)%s+([%w_]+)%s*=%s*(.+)$'
   local typ, nm, init
-  if not name then
+  if not sb_binds and not name then
     typ, nm, init = core:match '^(.-)%s+([%w_]+)%s*{(.*)}$'
     if not (nm and looks_like_type(typ)) then
       return nil
@@ -184,7 +188,11 @@ local function build_chunks(prefix, core, had_semi, type_hint)
     add(prefix, MARKER_HL[prefix:match '^(%S+)'] or 'Normal')
   end
 
-  if name then
+  if sb_binds then
+    add('[' .. sb_binds .. '] := ' .. ((sb_sigil == '&') and '&' or ''))
+    add_value(sb_expr)
+    add(semi)
+  elseif name then
     if type_hint and name ~= '_' then
       add(name .. ': ')
       add(type_hint, 'DansInlayType')
