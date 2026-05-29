@@ -45,6 +45,12 @@ vim.opt.relativenumber = true
 vim.opt.mouse = 'a'
 vim.opt.showmode = false
 
+-- Indentation: 4 spaces, never tabs.
+vim.opt.expandtab = true
+vim.opt.tabstop = 4
+vim.opt.shiftwidth = 4
+vim.opt.softtabstop = 4
+
 -- Sync clipboard between OS and Neovim. Scheduled after UiEnter for startup time.
 vim.schedule(function()
   vim.opt.clipboard = 'unnamedplus'
