@@ -13,14 +13,16 @@
 -- leading `const` is dropped (it's the hidden default, same as the const
 -- concealment in config/autocmds.lua).
 --
--- Insert-mode behavior mirrors the const concealment: overlays are cleared on
--- InsertEnter and restored on InsertLeave, so normal-mode cursor movement never
--- flips the rendering and only insert mode shows the real C++.
+-- Reveal is cursor-line driven: the line the cursor sits on shows the real C++,
+-- every other line shows the JAI overlay. Moving the cursor between lines flips
+-- the line you leave back to JAI and reveals the line you land on. Mode-agnostic
+-- (insert mode has no special effect).
 
 local M = {}
 
 local ns = vim.api.nvim_create_namespace 'ds_jai_view'
 local enabled = {}
+local last_row = {}
 
 -- First-token words that can never be a type in the strict declaration style;
 -- guards the `TYPE NAME{INIT}` pattern against statements like `return Foo{}`.
@@ -148,23 +150,77 @@ local function clear(bufnr)
   end
 end
 
+-- 0-indexed cursor row for `bufnr` if it's the buffer of the current window,
+-- else nil (a background buffer has no "cursor line" to reveal).
+local function cursor_row0(bufnr)
+  if bufnr == vim.api.nvim_get_current_buf() then
+    return vim.api.nvim_win_get_cursor(0)[1] - 1
+  end
+  return nil
+end
+
+-- Re-render a single row: clear its overlay, then (unless `reveal`) place the
+-- JAI overlay if the line is a transformable declaration.
+local function set_row(bufnr, row0, reveal)
+  vim.api.nvim_buf_clear_namespace(bufnr, ns, row0, row0 + 1)
+  if reveal then
+    return
+  end
+  local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
+  if not line then
+    return
+  end
+  local start_col, rendered = render_line(line)
+  if start_col then
+    pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, start_col, {
+      end_col = #line,
+      conceal = '',
+      virt_text = { { rendered, 'Normal' } },
+      virt_text_pos = 'inline',
+    })
+  end
+end
+
 local function refresh(bufnr)
   if not (enabled[bufnr] and vim.api.nvim_buf_is_valid(bufnr)) then
     return
   end
   clear(bufnr)
+  local cur = cursor_row0(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   for row, line in ipairs(lines) do
-    local start_col, rendered = render_line(line)
-    if start_col then
-      pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row - 1, start_col, {
-        end_col = #line,
-        conceal = '',
-        virt_text = { { rendered, 'Normal' } },
-        virt_text_pos = 'inline',
-      })
+    local row0 = row - 1
+    if row0 ~= cur then
+      local start_col, rendered = render_line(line)
+      if start_col then
+        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, start_col, {
+          end_col = #line,
+          conceal = '',
+          virt_text = { { rendered, 'Normal' } },
+          virt_text_pos = 'inline',
+        })
+      end
     end
   end
+  last_row[bufnr] = cur
+end
+
+-- Incremental cursor-move handler: restore the line we left, reveal the line we
+-- landed on. O(1) per move instead of re-rendering the whole buffer.
+local function on_cursor(bufnr)
+  if not (enabled[bufnr] and vim.api.nvim_buf_is_valid(bufnr)) then
+    return
+  end
+  local new = cursor_row0(bufnr)
+  if new == nil then
+    return
+  end
+  local old = last_row[bufnr]
+  if old ~= nil and old ~= new then
+    set_row(bufnr, old, false)
+  end
+  set_row(bufnr, new, true)
+  last_row[bufnr] = new
 end
 
 local function enable(bufnr)
@@ -176,6 +232,7 @@ end
 
 local function disable(bufnr)
   enabled[bufnr] = nil
+  last_row[bufnr] = nil
   clear(bufnr)
 end
 
@@ -200,25 +257,17 @@ function M.setup()
       enable(ev.buf)
     end,
   })
-  vim.api.nvim_create_autocmd({ 'TextChanged', 'BufEnter' }, {
+  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'BufEnter' }, {
     group = group,
     callback = function(ev)
       refresh(ev.buf)
     end,
   })
-  -- Insert mode shows the real C++ (clear overlays), restore on leaving.
-  vim.api.nvim_create_autocmd('InsertEnter', {
+  -- Cursor-line reveal (both normal and insert mode).
+  vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
     group = group,
     callback = function(ev)
-      if enabled[ev.buf] then
-        clear(ev.buf)
-      end
-    end,
-  })
-  vim.api.nvim_create_autocmd('InsertLeave', {
-    group = group,
-    callback = function(ev)
-      refresh(ev.buf)
+      on_cursor(ev.buf)
     end,
   })
 end
