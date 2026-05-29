@@ -380,8 +380,71 @@ function M.export()
   end
 end
 
+-- Build the playground in the current buffer and launch it under the debugger,
+-- with a breakpoint at the `return 0;` in main so the session stops there.
+function M.run()
+  local bufnr = vim.api.nvim_get_current_buf()
+  if vim.bo[bufnr].modified then
+    vim.cmd 'silent write'
+  end
+
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local cmd, ret_line
+  for i, l in ipairs(lines) do
+    local c = l:match '^//%s+(clang%+%+ .+)$'
+    if c then
+      cmd = c
+    end
+    if l:match '^%s*return 0;%s*$' then
+      ret_line = i
+    end
+  end
+  if not cmd then
+    vim.notify('dans_debug_fn: no build command in this buffer — run :DansDebugFn first', vim.log.levels.WARN)
+    return
+  end
+  local binary = cmd:match '%-o%s+(%S+)'
+  if not binary then
+    vim.notify('dans_debug_fn: could not find -o in build command', vim.log.levels.WARN)
+    return
+  end
+
+  -- Breakpoint at main's `return 0;` (binds to the nearest executable line).
+  if ret_line then
+    vim.api.nvim_win_set_cursor(0, { ret_line, 0 })
+    pcall(function()
+      require('dap').set_breakpoint()
+    end)
+  end
+
+  local cwd = vim.fn.getcwd()
+  vim.notify('dans_debug_fn: building...', vim.log.levels.INFO)
+  vim.system({ 'sh', '-c', cmd }, { cwd = cwd, text = true }, function(res)
+    vim.schedule(function()
+      if res.code ~= 0 then
+        local errlines = vim.split((res.stderr or '') .. '\n' .. (res.stdout or ''), '\n', { trimempty = true })
+        vim.fn.setqflist({}, ' ', { title = 'DansDebugFn build', lines = errlines })
+        vim.cmd 'copen'
+        vim.notify('dans_debug_fn: build failed (see quickfix)', vim.log.levels.ERROR)
+        return
+      end
+      local dap = require 'dap'
+      local atype = dap.adapters.codelldb and 'codelldb' or 'lldb'
+      dap.run {
+        name = 'DansDebugFn: ' .. binary,
+        type = atype,
+        request = 'launch',
+        program = cwd .. '/' .. binary,
+        cwd = cwd,
+        stopOnEntry = false,
+      }
+    end)
+  end)
+end
+
 function M.setup()
   vim.api.nvim_create_user_command('DansDebugFn', M.export, { desc = 'Export function under cursor to a debug playground' })
+  vim.api.nvim_create_user_command('DansDebugFnRun', M.run, { desc = 'Build the current playground and debug it' })
 end
 
 return M
