@@ -282,7 +282,9 @@ local function fetch_hints(bufnr)
     if not (enabled[bufnr] and vim.api.nvim_buf_is_valid(bufnr)) then
       return
     end
-    local map = {}
+    -- Keep only the leftmost Type hint per line: that's the declarator's type,
+    -- not e.g. a lambda's return-type hint placed further right on the line.
+    local per_line = {}
     for _, res in pairs(results or {}) do
       for _, hint in ipairs((res or {}).result or {}) do
         if hint.kind == 1 and hint.position then -- 1 = Type
@@ -295,10 +297,22 @@ local function fetch_hints(bufnr)
             label = s
           end
           local t = tostring(label or ''):gsub('^%s*:%s*', ''):gsub('%s+$', '')
-          if t ~= '' then
-            map[hint.position.line] = t
+          local line = hint.position.line
+          local char = hint.position.character
+          if per_line[line] == nil or char < per_line[line].char then
+            per_line[line] = { char = char, type = t }
           end
         end
+      end
+    end
+    local map = {}
+    for line, info in pairs(per_line) do
+      -- const is the hidden default; drop it from the deduced type too.
+      local t = info.type:gsub('^const%s+', '')
+      -- Lambdas render as "(lambda at ...)" — useless noise; the lambda is
+      -- written inline, so show no type (matches how functions read).
+      if t ~= '' and not t:find('lambda', 1, true) then
+        map[line] = t
       end
     end
     hint_type[bufnr] = map
