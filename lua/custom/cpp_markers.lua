@@ -8,14 +8,29 @@
 
 local M = {}
 
+local MATCH_GROUPS = { DansMarkerMut = true, DansMarkerCpy = true }
+
 local function set_hl()
   vim.api.nvim_set_hl(0, 'DansMarkerMut', { fg = '#f7768e', bold = true })
   vim.api.nvim_set_hl(0, 'DansMarkerCpy', { fg = '#e0af68', bold = true })
   -- Deduced-type inlay text inside jai_view overlays (clangd auto types).
-  vim.api.nvim_set_hl(0, 'DansInlayType', { fg = '#7dcfff' })
+  -- Muted blue: distinct from the gray comments, present but not popping.
+  vim.api.nvim_set_hl(0, 'DansInlayType', { fg = '#737aa2' })
 end
 
 local function apply()
+  -- Re-assert the groups here too: `:colorscheme` (e.g. the day/night swap)
+  -- runs `:hi clear`, which would otherwise blank these until a ColorScheme
+  -- event; defining them on FileType guarantees they exist for this buffer.
+  set_hl()
+
+  -- Drop our own previous matches so repeated FileType events don't stack.
+  for _, m in ipairs(vim.fn.getmatches()) do
+    if MATCH_GROUPS[m.group] then
+      pcall(vim.fn.matchdelete, m.id)
+    end
+  end
+
   -- Window-local matches, priority above the flattened monochrome syntax.
   vim.fn.matchadd('DansMarkerMut', [[\<mut\>]], 20)
   vim.fn.matchadd('DansMarkerMut', [[\<mut_unchecked\>]], 20)
