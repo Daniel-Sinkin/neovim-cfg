@@ -1,41 +1,43 @@
 -- Export the function under the cursor into a hermetic debug playground.
 --
--- :DansDebugFn  grabs the enclosing function via treesitter, resolves each
--- signature type's definition location via clangd, and writes
--- _debug/<name>_playground.cpp containing:
---   * a real build command (with this file's include flags)
---   * a stub for every non-builtin signature type, annotated with file:line
---   * the copied function body
---   * a main() skeleton with an arg-entry placeholder
--- then opens it. You fill the stubs (or copy/monkeypatch the real definitions),
--- set the inputs, build with the command at the top, and debug with F5.
---
--- Deliberately NO external #includes (only dans core markers/types) — these
--- functions work best on POD operations; pulling the dependency graph in
--- defeats the point. Body-local types aren't auto-stubbed; add them when a
--- stub-miss fails to compile.
+-- :DansDebugFn grabs the enclosing function (treesitter), crawls it for every
+-- referenced user type (signature AND body) and called function (one level
+-- deep), resolves each via clangd `definition`, and writes
+-- _debug/<name>_playground.cpp:
+--   * a real build command (this file's include flags)
+--   * everything wrapped in `namespace dans` so the dans aliases resolve free
+--   * each referenced definition that lives in YOUR source (not vendor/system)
+--     COPIED VERBATIM, in source order, so it actually compiles
+--   * `// TODO:` notes for library/std definitions (include or stub yourself)
+--   * the copied function under test
+--   * a trailing `def main() -> int` with a per-parameter call template
+-- then opens it.
 
 local M = {}
 
--- Built-in / alias type names that need no stub. The dans aliases come from
--- <dans/types.hpp>, which the playground includes.
 local DANS_ALIASES = {
-  u8 = true,
-  u16 = true,
-  u32 = true,
-  u64 = true,
-  i8 = true,
-  i16 = true,
-  i32 = true,
-  i64 = true,
-  usize = true,
-  isize = true,
-  uptr = true,
-  iptr = true,
-  f32 = true,
-  f64 = true,
-  byte = true,
+  u8 = true, u16 = true, u32 = true, u64 = true,
+  i8 = true, i16 = true, i32 = true, i64 = true,
+  usize = true, isize = true, uptr = true, iptr = true,
+  f32 = true, f64 = true, byte = true,
 }
+
+local function is_user_type(kind, text)
+  if kind == 'primitive_type' or DANS_ALIASES[text] or text:match '^std::' then
+    return false
+  end
+  if text == 'def' then -- the `auto` marker macro, not a type
+    return false
+  end
+  return kind == 'type_identifier' or kind == 'qualified_identifier'
+end
+
+-- A path is "yours" if it's under the project (cwd) and not vendored.
+local function is_user_source(path)
+  local root = vim.fs.normalize(vim.fn.getcwd())
+  local p = vim.fs.normalize(path)
+  return vim.startswith(p, root) and not p:find('/vendor/', 1, true)
+end
 
 local function enclosing_function(bufnr)
   local ok, node = pcall(vim.treesitter.get_node, { bufnr = bufnr })
@@ -64,32 +66,32 @@ local function find_declarator(func)
   return nil
 end
 
--- The function's name (for the file name + main call).
 local function function_name(fdecl, bufnr)
   local id = fdecl:field('declarator')[1]
-  if id then
-    return vim.treesitter.get_node_text(id, bufnr)
-  end
-  return 'fn'
+  return id and vim.treesitter.get_node_text(id, bufnr) or 'fn'
 end
 
--- Signature param type nodes (the `type` field of each parameter_declaration).
-local function param_type_nodes(fdecl)
-  local params = fdecl:field('parameters')[1]
+local function param_texts(fdecl, bufnr)
+  local plist = fdecl:field('parameters')[1]
   local out = {}
-  if not params then
-    return out
-  end
-  for p in params:iter_children() do
-    local t = p:type()
-    if t == 'parameter_declaration' or t == 'optional_parameter_declaration' then
-      local tn = p:field('type')[1]
-      if tn then
-        out[#out + 1] = tn
+  if plist then
+    for p in plist:iter_children() do
+      local t = p:type()
+      if t == 'parameter_declaration' or t == 'optional_parameter_declaration' then
+        out[#out + 1] = vim.treesitter.get_node_text(p, bufnr)
       end
     end
   end
   return out
+end
+
+local function collect(node, wanted, acc)
+  for child in node:iter_children() do
+    if wanted[child:type()] then
+      acc[#acc + 1] = child
+    end
+    collect(child, wanted, acc)
+  end
 end
 
 local function loc_from_results(results)
@@ -101,7 +103,7 @@ local function loc_from_results(results)
         local uri = item.uri or item.targetUri
         local range = item.range or item.targetRange
         if uri and range then
-          return vim.uri_to_fname(uri), range.start.line + 1
+          return vim.uri_to_fname(uri), range.start.line
         end
       end
     end
@@ -109,8 +111,48 @@ local function loc_from_results(results)
   return nil
 end
 
--- Include flags (-I / -isystem) from the file's compile_commands entry, for the
--- build command printed at the top of the playground.
+-- Verbatim text of the definition enclosing (0-indexed) `line` in `path`, plus
+-- the line it starts on (for source-order sorting). Climbs to the outermost
+-- definition node so templates/enclosing declarations come along whole.
+local function definition_text(path, line)
+  local content = vim.fn.readfile(path)
+  if not content or #content == 0 then
+    return nil
+  end
+  local src = table.concat(content, '\n')
+  local ok, parser = pcall(vim.treesitter.get_string_parser, src, 'cpp')
+  if not ok then
+    return nil
+  end
+  local root = parser:parse()[1]:root()
+  local want = {
+    struct_specifier = true,
+    class_specifier = true,
+    enum_specifier = true,
+    union_specifier = true,
+    alias_declaration = true,
+    type_definition = true,
+    function_definition = true,
+    template_declaration = true,
+    declaration = true,
+  }
+  local node = root:descendant_for_range(line, 0, line, 1000)
+  local best
+  while node do
+    if node:type() == 'translation_unit' then
+      break
+    end
+    if want[node:type()] then
+      best = node
+    end
+    node = node:parent()
+  end
+  if not best then
+    return nil
+  end
+  return vim.treesitter.get_node_text(best, src), best:start()
+end
+
 local function include_flags(file)
   local db = vim.fs.find({ 'compile_commands.json' }, { path = vim.fs.dirname(file), upward = true, limit = 1 })[1]
   if not db then
@@ -132,8 +174,7 @@ local function include_flags(file)
   for _, e in ipairs(data) do
     if e.file and vim.fs.normalize(e.file) == vim.fs.normalize(file) then
       local args = e.arguments or vim.split(e.command or '', '%s+', { trimempty = true })
-      local flags = {}
-      local take = false
+      local flags, take = {}, false
       for _, a in ipairs(args) do
         if take then
           flags[#flags + 1] = '-isystem ' .. a
@@ -153,15 +194,15 @@ end
 local function generate(bufnr, ctx)
   local name = ctx.name
   local rel = vim.fn.fnamemodify(ctx.file, ':.')
+  local playground = vim.fn.getcwd() .. '/_debug/' .. name .. '_playground.cpp'
   local out = {}
   local function add(s)
     out[#out + 1] = s or ''
   end
 
-  local playground = vim.fn.getcwd() .. '/_debug/' .. name .. '_playground.cpp'
   add('// Debug playground for `' .. name .. '`, exported from ' .. rel .. ':' .. ctx.line)
   add('//')
-  add('// Build & debug:')
+  add('// Build:')
   add(
     '//   clang++ -std=c++23 -g -O0 '
       .. table.concat(ctx.flags, ' ')
@@ -170,27 +211,33 @@ local function generate(bufnr, ctx)
       .. ' -o _debug/'
       .. name
   )
-  add('//   then set a breakpoint in main and run it under the debugger (F5)')
   add('//')
   add '#include <dans/development_markers.hpp>'
   add '#include <dans/types.hpp>'
   add '#include <print>'
   add ''
+  add 'namespace dans'
+  add '{'
+  add ''
 
-  if #ctx.stubs > 0 then
-    add '// ---- type stubs: fill in, copy the real definition, or monkeypatch ----'
-    for _, s in ipairs(ctx.stubs) do
-      add('// ' .. s.name .. '  —  ' .. s.where)
-      add('struct ' .. s.name)
-      add '{'
-      add '};'
-      add ''
+  if #ctx.notes > 0 then
+    for _, n in ipairs(ctx.notes) do
+      add('// TODO: ' .. n)
     end
+    add ''
   end
-  if #ctx.todo > 0 then
-    add '// ---- types needing manual handling (qualified/templated/std) ----'
-    for _, t in ipairs(ctx.todo) do
-      add('// TODO: ' .. t)
+
+  -- Copied definitions, in source order so dependencies precede dependents.
+  table.sort(ctx.copies, function(a, b)
+    if a.file ~= b.file then
+      return a.file < b.file
+    end
+    return a.line < b.line
+  end)
+  for _, c in ipairs(ctx.copies) do
+    add('// ' .. c.name .. '  —  copied from ' .. c.where)
+    for _, l in ipairs(vim.split(c.text, '\n', { plain = true })) do
+      add(l)
     end
     add ''
   end
@@ -200,9 +247,24 @@ local function generate(bufnr, ctx)
     add(l)
   end
   add ''
-  add 'int main()'
+  add '}  // namespace dans'
+  add ''
+  add 'def main() -> int'
   add '{'
-  add('    // TODO: provide inputs and call ' .. name .. '(...). Breakpoint here, step in.')
+  add '    using namespace dans;'
+  add ''
+  add '    /*'
+  if #ctx.params == 0 then
+    add('    const auto result = ' .. name .. '();')
+  else
+    add('    const auto result = ' .. name .. '(')
+    for _, p in ipairs(ctx.params) do
+      add('        // ' .. p)
+    end
+    add '    )'
+  end
+  add '    */'
+  add ''
   add('    // const auto result = ' .. name .. '(/* ... */);')
   add '    return 0;'
   add '}'
@@ -223,45 +285,57 @@ function M.export()
   end
   local fdecl = find_declarator(func)
   if not fdecl then
-    vim.notify('dans_debug_fn: could not parse function declarator', vim.log.levels.WARN)
+    vim.notify('dans_debug_fn: could not parse declarator', vim.log.levels.WARN)
     return
   end
 
+  local fstart, _, fend = func:start(), nil, func:end_()
   local ctx = {
     file = file,
-    line = func:start() + 1,
+    line = fstart + 1,
     name = function_name(fdecl, bufnr),
     text = vim.treesitter.get_node_text(func, bufnr),
+    params = param_texts(fdecl, bufnr),
     flags = include_flags(file),
-    stubs = {},
-    todo = {},
+    copies = {},
+    notes = {},
   }
 
-  -- Collect distinct types from the signature.
-  local seen = {}
-  local to_resolve = {} -- { text, row, col }
-  for _, tn in ipairs(param_type_nodes(fdecl)) do
-    local kind = tn:type()
-    local text = vim.treesitter.get_node_text(tn, bufnr)
-    if not seen[text] then
-      seen[text] = true
-      if kind == 'primitive_type' or DANS_ALIASES[text] then
-        -- no stub
-      elseif kind == 'type_identifier' then
-        local sr, sc = tn:start()
-        to_resolve[#to_resolve + 1] = { name = text, row = sr, col = sc }
-      else
-        -- qualified_identifier / template_type / std:: / etc.
-        ctx.todo[#ctx.todo + 1] = text
+  -- Referenced types (signature + body) and called functions, one level deep.
+  local type_nodes, call_nodes = {}, {}
+  collect(func, { type_identifier = true, qualified_identifier = true }, type_nodes)
+  collect(func, { call_expression = true }, call_nodes)
+
+  local seen, to_resolve = {}, {}
+  for _, tn in ipairs(type_nodes) do
+    local parent = tn:parent()
+    -- Skip nested parts of a larger qualified name (e.g. `numbers::pi` inside
+    -- `std::numbers::pi`); only the outermost qualified_identifier is judged.
+    if not (parent and parent:type() == 'qualified_identifier') then
+      local kind, text = tn:type(), vim.treesitter.get_node_text(tn, bufnr)
+      if is_user_type(kind, text) and not seen[text] then
+        seen[text] = true
+        local r, c = tn:start()
+        to_resolve[#to_resolve + 1] = { name = text, row = r, col = c }
+      end
+    end
+  end
+  for _, cn in ipairs(call_nodes) do
+    local fn = cn:field('function')[1]
+    if fn then
+      local txt = vim.treesitter.get_node_text(fn, bufnr)
+      local rr, cc = fn:start()
+      if txt:match '^[%a_][%w_]*$' and not seen[txt] then
+        seen[txt] = true
+        to_resolve[#to_resolve + 1] = { name = txt, row = rr, col = cc }
       end
     end
   end
 
   local clients = vim.lsp.get_clients { bufnr = bufnr, method = 'textDocument/definition' }
   if #to_resolve == 0 or #clients == 0 then
-    -- No types to resolve, or no LSP to resolve them: stub without locations.
-    for _, ty in ipairs(to_resolve) do
-      ctx.stubs[#ctx.stubs + 1] = { name = ty.name, where = 'definition unresolved (no clangd?)  (fill in)' }
+    for _, t in ipairs(to_resolve) do
+      ctx.notes[#ctx.notes + 1] = t.name .. ' (unresolved — no clangd?)'
     end
     generate(bufnr, ctx)
     return
@@ -274,14 +348,28 @@ function M.export()
       position = { line = ty.row, character = ty.col },
     }
     vim.lsp.buf_request_all(bufnr, 'textDocument/definition', params, function(results)
-      local where
       local f, ln = loc_from_results(results)
-      if f then
-        where = 'defined at ' .. vim.fn.fnamemodify(f, ':.') .. ':' .. ln .. '  (fill in or copy)'
+      if not f then
+        ctx.notes[#ctx.notes + 1] = ty.name .. ' (definition not found)'
+      elseif vim.fs.normalize(f) == vim.fs.normalize(file) and ln >= fstart and ln <= fend then
+        -- inside the target function itself (recursion / body-local) — already
+        -- present in the copied function text; skip.
+      elseif is_user_source(f) then
+        local text, sl = definition_text(f, ln)
+        if text then
+          ctx.copies[#ctx.copies + 1] = {
+            name = ty.name,
+            text = text,
+            file = f,
+            line = sl or ln,
+            where = vim.fn.fnamemodify(f, ':.') .. ':' .. (ln + 1),
+          }
+        else
+          ctx.notes[#ctx.notes + 1] = ty.name .. ' (could not extract from ' .. vim.fn.fnamemodify(f, ':.') .. ')'
+        end
       else
-        where = 'definition not found by clangd  (fill in)'
+        ctx.notes[#ctx.notes + 1] = ty.name .. ' from ' .. vim.fn.fnamemodify(f, ':.') .. ' (library — include or stub)'
       end
-      ctx.stubs[#ctx.stubs + 1] = { name = ty.name, where = where }
       pending = pending - 1
       if pending == 0 then
         vim.schedule(function()
