@@ -8,14 +8,17 @@
 
 local M = {}
 
-local MATCH_GROUPS = { DansMarkerMut = true, DansMarkerCpy = true }
+local MATCH_GROUPS = { DansMarkerMut = true, DansMarkerCpy = true, DansNodiscard = true }
 
 local function set_hl()
   vim.api.nvim_set_hl(0, 'DansMarkerMut', { fg = '#f7768e', bold = true })
   vim.api.nvim_set_hl(0, 'DansMarkerCpy', { fg = '#e0af68', bold = true })
   -- Deduced-type inlay text inside jai_view overlays (clangd auto types).
-  -- Muted blue: distinct from the gray comments, present but not popping.
-  vim.api.nvim_set_hl(0, 'DansInlayType', { fg = '#737aa2' })
+  -- Clearly blue so it reads apart from the gray comments.
+  vim.api.nvim_set_hl(0, 'DansInlayType', { fg = '#7aa2f7' })
+  -- [[nodiscard]] grayed like comments (it's the expected default, shown but
+  -- de-emphasized; `discardable` stays Normal/visible as the exception).
+  vim.api.nvim_set_hl(0, 'DansNodiscard', { fg = '#6b7280', italic = true })
 end
 
 local function apply()
@@ -37,6 +40,7 @@ local function apply()
   vim.fn.matchadd('DansMarkerMut', [[\<mut_unchecked\>]], 20)
   vim.fn.matchadd('DansMarkerCpy', [[\<copy\>]], 20)
   vim.fn.matchadd('DansMarkerCpy', [[\<cpy\>]], 20)
+  vim.fn.matchadd('DansNodiscard', [[\[\[nodiscard\]\]]], 20)
 end
 
 function M.setup()
