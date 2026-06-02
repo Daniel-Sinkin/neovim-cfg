@@ -83,6 +83,7 @@ vim.api.nvim_create_autocmd('FileType', {
     }
     if ev.match == 'cpp' or ev.match == 'cuda' then
       conceals[#conceals + 1] = { [[\<std::]], 30 }
+      conceals[#conceals + 1] = { [[\<dans::]], 30 }
     end
 
     -- Drop our own previous matches first: matchadd is window-local and these

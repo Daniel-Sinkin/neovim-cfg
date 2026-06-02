@@ -210,7 +210,7 @@ local function build_chunks(prefix, core, had_semi, type_hint)
     -- becomes JAI's constant binding -- `name: T : value` (a `:` in place of the
     -- `=`), since `::` / `: T :` is how JAI spells a compile-time constant.
     local is_constexpr = typ:match '^constexpr%s+' ~= nil
-    local shown_typ = typ:gsub('^constexpr%s+', ''):gsub('std::', '')
+    local shown_typ = typ:gsub('^constexpr%s+', ''):gsub('std::', ''):gsub('dans::', '')
     add(nm .. ': ')
     add(shown_typ, 'DansInlayType')
     if init ~= '' then
@@ -403,9 +403,9 @@ local function fetch_hints(bufnr)
     end
     local map = {}
     for line, info in pairs(per_line) do
-      -- const is the hidden default and std:: is hidden everywhere; drop both
-      -- from the deduced type so it matches the rest of the view.
-      local t = info.type:gsub('^const%s+', ''):gsub('std::', '')
+      -- const is the hidden default and std::/dans:: are hidden everywhere; drop
+      -- them from the deduced type so it matches the rest of the view.
+      local t = info.type:gsub('^const%s+', ''):gsub('std::', ''):gsub('dans::', '')
       -- Lambdas render as "(lambda at ...)" — useless noise; the lambda is
       -- written inline, so show no type (matches how functions read).
       if t ~= '' and not t:find('lambda', 1, true) then
