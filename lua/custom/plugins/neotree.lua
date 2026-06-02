@@ -21,6 +21,8 @@ return {
       filtered_items = {
         hide_dotfiles = false,
         hide_gitignored = false,
+        -- Hidden by default (toggle with H); `build` is the CMake output dir.
+        hide_by_name = { 'build' },
       },
       follow_current_file = { enabled = true },
       hijack_netrw_behavior = 'open_default',
