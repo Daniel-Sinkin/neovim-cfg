@@ -79,7 +79,9 @@ vim.api.nvim_create_autocmd('FileType', {
     vim.fn.matchadd('Conceal', [[^\s*\zsconst\>\s*]], 30, -1, { conceal = '' })
     vim.fn.matchadd('Conceal', [[\<dans_]], 10, -1, { conceal = '' })
     if ev.match == 'cpp' or ev.match == 'cuda' then
-      vim.fn.matchadd('Conceal', [[\<std::]], 10, -1, { conceal = '' })
+      -- Priority 30 (above DansNamespace's gray at 20) so std:: hides off the
+      -- cursor line and only shows, grayed, when revealed on it.
+      vim.fn.matchadd('Conceal', [[\<std::]], 30, -1, { conceal = '' })
     end
   end,
 })

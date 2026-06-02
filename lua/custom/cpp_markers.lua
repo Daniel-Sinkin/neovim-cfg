@@ -9,7 +9,7 @@
 local M = {}
 
 local MATCH_GROUPS =
-  { DansMarkerMut = true, DansMarkerCpy = true, DansConst = true }
+  { DansMarkerMut = true, DansMarkerCpy = true, DansConst = true, DansNamespace = true }
 
 local function set_hl()
   vim.api.nvim_set_hl(0, 'DansMarkerMut', { fg = '#f7768e', bold = true })
@@ -21,6 +21,10 @@ local function set_hl()
   -- and the leading const when revealed on the cursor line) — const is the
   -- de-emphasized default, `mut` is the bright exception.
   vim.api.nvim_set_hl(0, 'DansConst', { fg = '#6b7280' })
+  -- Namespace/scope qualifiers (std::, dans::, Foo::) grayed as visual noise.
+  -- std:: is additionally concealed (autocmds.lua) so it only shows, gray, on
+  -- the cursor line; every other qualifier stays gray-but-visible.
+  vim.api.nvim_set_hl(0, 'DansNamespace', { fg = '#6b7280' })
 end
 
 local function apply()
@@ -46,6 +50,9 @@ local function apply()
   -- lines; this grays the ones that stay visible (args, trailing, and the
   -- leading one revealed on the cursor line).
   vim.fn.matchadd('DansConst', [[\<const\>]], 20)
+  -- Gray every `ident::` scope qualifier. std:: is concealed off the cursor
+  -- line by a higher-priority match; the rest stay gray-but-visible.
+  vim.fn.matchadd('DansNamespace', [[\<\w\+::]], 20)
 end
 
 function M.setup()
