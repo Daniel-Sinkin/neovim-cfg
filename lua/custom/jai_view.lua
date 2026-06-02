@@ -226,12 +226,21 @@ local function render_line(line, type_hint)
   if body == '' then
     return nil
   end
-  local had_semi = body:match ';%s*$' ~= nil
-  local core_in = (body:gsub(';%s*$', ''))
+  -- Peel a trailing line comment so it doesn't defeat the `;` / `}` end anchors
+  -- in build_chunks; it's re-appended to the overlay so it stays visible.
+  local code, cws, comment = body:match '^(.-)(%s*)(//.*)$'
+  if not code then
+    code, cws, comment = body, '', ''
+  end
+  local had_semi = code:match ';%s*$' ~= nil
+  local core_in = (code:gsub(';%s*$', ''))
   local prefix, core = split_markers(core_in)
   local chunks = build_chunks(prefix, core, had_semi, type_hint)
   if not chunks then
     return nil
+  end
+  if comment ~= '' then
+    chunks[#chunks + 1] = { cws .. comment, 'Comment' }
   end
   return #indent, chunks
 end

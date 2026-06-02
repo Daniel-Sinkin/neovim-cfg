@@ -6,9 +6,7 @@
 --   reinterpret_cast  -> $rc
 --   const_cast        -> $cc
 --   noexcept          -> $ne
--- [[nodiscard]] is hidden entirely (concealed, not aliased) in
--- config/autocmds.lua, same as leading `const` — it's the expected default
--- so it should be invisible; `discardable` is the visible exception.
+--   [[nodiscard]]     -> $nd
 
 local M = {}
 
@@ -20,6 +18,7 @@ local ALIASES = {
   { 'reinterpret_cast', '$rc' },
   { 'const_cast', '$cc' },
   { 'noexcept', '$ne' },
+  { '[[nodiscard]]', '$nd' },
 }
 
 local function is_word_char(c)

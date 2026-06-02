@@ -61,9 +61,7 @@ vim.api.nvim_create_autocmd('FileType', {
 --     exception (pair with the monochrome theme in treesitter.lua)
 --   - the `dans_` prefix on identifiers (c/cpp/cuda)
 --   - the `std::` qualifier (cpp/cuda only; pointless in plain C)
--- `[[nodiscard]]` is NOT concealed (clang-format puts it on its own line, and
--- hiding it leaves a distracting blank line) — it's grayed by cpp_markers
--- instead, so `discardable` stays the visible exception.
+-- `[[nodiscard]]` is aliased to `$nd` by cpp_aliases (handled there, not here).
 -- Note: filetype pattern matches the *filetype* string, not extension.
 -- .h -> c, .hpp -> cpp, .cu/.cuh -> cuda. With vim.g.c_syntax_for_h = 1,
 -- .h stays as c (so std:: hiding skips it).

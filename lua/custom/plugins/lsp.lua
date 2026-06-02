@@ -142,7 +142,9 @@ return {
       local servers = {
         clangd = {
           cmd = {
-            '/opt/homebrew/opt/llvm/bin/clangd',
+            -- macOS: Homebrew clang (newer than Apple's). Elsewhere: clangd
+            -- from PATH (LLVM install).
+            vim.fn.has 'mac' == 1 and '/opt/homebrew/opt/llvm/bin/clangd' or 'clangd',
             '--background-index',
             '--clang-tidy',
           },

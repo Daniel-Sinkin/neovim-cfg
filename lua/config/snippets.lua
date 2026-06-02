@@ -25,6 +25,12 @@ pcall(function()
   })
 
   ls.add_snippets('cpp', {
+    -- Marker shorthands: type the $-alias, get real C++ (cpp_aliases shows it
+    -- back as the alias).
+    s({ trig = '$nd', wordTrig = false, snippetType = 'autosnippet' }, { t '[[nodiscard]]' }),
+    s({ trig = '$sc', wordTrig = false, snippetType = 'autosnippet' }, { t 'static_cast' }),
+    s({ trig = '$ne', wordTrig = false, snippetType = 'autosnippet' }, { t 'noexcept' }),
+
     -- Class skeleton (rule of zero).
     s('dsk_class0', {
       t 'class ',
