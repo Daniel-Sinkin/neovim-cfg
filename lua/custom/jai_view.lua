@@ -28,7 +28,7 @@ local ns = vim.api.nvim_create_namespace 'ds_jai_view'
 local enabled = {}
 local revealed = {} -- bufnr -> { [row0] = true } lines currently shown raw (cursor / visual selection)
 local hint_type = {} -- bufnr -> { [row0] = "int *" } from clangd Type inlay hints
-local show_hints = true -- deduced-type hints on/off (toggle with :InlineHints)
+local show_hints = false -- deduced-type hints off by default (toggle with :InlineHints)
 
 local STMT_KEYWORDS = {
   ['return'] = true,
@@ -205,9 +205,10 @@ local function build_chunks(prefix, core, had_semi, type_hint)
       add(semi)
     end
   else
-    -- Explicit type: shown in Normal (your written source, not injected), so it
-    -- reads apart from the muted-blue deduced hints. std:: stripped.
-    add(nm .. ': ' .. (typ:gsub('std::', '')))
+    -- Explicit type: colored the same blue as the deduced hints (DansInlayType);
+    -- written and deduced types are treated alike. std:: stripped.
+    add(nm .. ': ')
+    add(typ:gsub('std::', ''), 'DansInlayType')
     if init ~= '' then
       add ' = '
       add_value(init)
@@ -444,6 +445,18 @@ function M.toggle_hints()
     refresh(bufnr)
   end
   vim.notify('JAI type hints ' .. (show_hints and 'on' or 'off'), vim.log.levels.INFO)
+end
+
+-- Whether the JAI overlay is currently active for this buffer.
+function M.is_enabled(bufnr)
+  return enabled[bufnr] == true
+end
+
+-- Whether a line is one the overlay rewrites. Lets other view modules
+-- (cpp_aliases) defer so they don't double-render on top of the full-line
+-- overlay (which orphans their inline virt_text to the end of the line).
+function M.covers(line)
+  return (render_line(line, nil)) ~= nil
 end
 
 function M.setup()

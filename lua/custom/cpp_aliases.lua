@@ -48,9 +48,14 @@ local function refresh(bufnr)
   -- it (e.g. `$scstatic_cast`). Re-hidden once the cursor leaves the line.
   local cur = cursor_row0(bufnr)
 
+  -- Defer to jai_view on lines it rewrites: it draws a full-line overlay there,
+  -- which would orphan our inline alias to the end of the line.
+  local jai_ok, jai = pcall(require, 'custom.jai_view')
+  local jai_on = jai_ok and jai.is_enabled(bufnr)
+
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   for row, line in ipairs(lines) do
-    if row - 1 ~= cur then
+    if row - 1 ~= cur and not (jai_on and jai.covers(line)) then
       for _, alias in ipairs(ALIASES) do
         local keyword, replacement = alias[1], alias[2]
         local start_pos = 1
