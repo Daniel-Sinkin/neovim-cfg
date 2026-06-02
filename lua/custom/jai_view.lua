@@ -306,7 +306,7 @@ local function set_row(bufnr, row0, reveal)
       end_col = #line,
       conceal = '',
       virt_text = chunks,
-      virt_text_pos = 'inline',
+      virt_text_pos = 'overlay',
     })
   end
 end
@@ -327,7 +327,7 @@ local function refresh(bufnr)
           end_col = #line,
           conceal = '',
           virt_text = chunks,
-          virt_text_pos = 'inline',
+          virt_text_pos = 'overlay',
         })
       end
     end
