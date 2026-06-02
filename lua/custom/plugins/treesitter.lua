@@ -27,15 +27,11 @@ return {
   },
   {
     'nvim-treesitter/nvim-treesitter',
+    -- Pin the classic `master` branch: the config uses its API
+    -- (nvim-treesitter.configs / ensure_installed), not the `main` rewrite that
+    -- is now nvim-treesitter's default branch.
+    branch = 'master',
     build = ':TSUpdate',
-    config = function(_, opts)
-      -- Windows: zig is a hermetic C compiler (ships its own libc headers), so
-      -- parser builds don't need the MSVC/Windows SDK INCLUDE paths set.
-      if vim.fn.has 'win32' == 1 then
-        require('nvim-treesitter.install').compilers = { 'zig' }
-      end
-      require('nvim-treesitter.configs').setup(opts)
-    end,
     opts = {
       ensure_installed = { 'bash', 'c', 'cpp', 'cuda', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' },
       auto_install = true,
@@ -50,7 +46,31 @@ return {
       indent = { enable = true, disable = { 'ruby' } },
     },
     config = function(_, opts)
+      -- Windows: zig is a hermetic C compiler (ships its own libc headers), so
+      -- parser builds don't need the MSVC/Windows SDK INCLUDE paths set.
+      if vim.fn.has 'win32' == 1 then
+        require('nvim-treesitter.install').compilers = { 'zig' }
+      end
       require('nvim-treesitter.configs').setup(opts)
+
+      -- The pinned (frozen) master nvim-treesitter's `set-lang-from-info-string!`
+      -- directive reads match[id] as a single node, but Neovim 0.12 makes it a
+      -- list, so markdown code-fence injection crashes ("attempt to call method
+      -- 'range' (a nil value)"). Re-register the directive, list-aware.
+      pcall(function()
+        require 'nvim-treesitter.query_predicates'
+        vim.treesitter.query.add_directive('set-lang-from-info-string!', function(match, _, bufnr, pred, metadata)
+          local node = match[pred[2]]
+          if type(node) == 'table' then
+            node = node[#node]
+          end
+          if not node then
+            return
+          end
+          local alias = vim.treesitter.get_node_text(node, bufnr):lower()
+          metadata['injection.language'] = vim.treesitter.language.get_lang(alias) or alias
+        end, { force = true })
+      end)
 
       -- Enclosing-brace highlight for C/C++/CUDA. Uses tree-sitter parsing to
       -- find the nearest braced node around the cursor, then linearly searches
