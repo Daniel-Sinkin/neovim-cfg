@@ -73,15 +73,33 @@ vim.api.nvim_create_autocmd('FileType', {
     -- const/std::/dans_), every other line stays concealed. Reveal is driven by
     -- cursor position only — insert mode has no effect. Matches jai_view.
     vim.opt_local.concealcursor = ''
-    -- Priority 30 so the leading-const conceal beats cpp_markers' DansConst
-    -- gray match (priority 20); otherwise the gray wins per-char and const
-    -- shows grayed instead of hidden (only the trailing spaces vanish).
-    vim.fn.matchadd('Conceal', [[^\s*\zsconst\>\s*]], 30, -1, { conceal = '' })
-    vim.fn.matchadd('Conceal', [[\<dans_]], 10, -1, { conceal = '' })
+
+    -- Conceal specs {pattern, priority}. const/std:: at priority 30 beat
+    -- cpp_markers' gray matches (priority 20) so they hide off the cursor line
+    -- rather than only graying.
+    local conceals = {
+      { [[^\s*\zsconst\>\s*]], 30 },
+      { [[\<dans_]], 10 },
+    }
     if ev.match == 'cpp' or ev.match == 'cuda' then
-      -- Priority 30 (above DansNamespace's gray at 20) so std:: hides off the
-      -- cursor line and only shows, grayed, when revealed on it.
-      vim.fn.matchadd('Conceal', [[\<std::]], 30, -1, { conceal = '' })
+      conceals[#conceals + 1] = { [[\<std::]], 30 }
+    end
+
+    -- Drop our own previous matches first: matchadd is window-local and these
+    -- don't self-clear, so repeated FileType events (`:e`, re-sourcing) would
+    -- otherwise stack duplicates. Identified by pattern (unique to this config).
+    local ours = {}
+    for _, c in ipairs(conceals) do
+      ours[c[1]] = true
+    end
+    for _, m in ipairs(vim.fn.getmatches()) do
+      if m.group == 'Conceal' and ours[m.pattern] then
+        pcall(vim.fn.matchdelete, m.id)
+      end
+    end
+
+    for _, c in ipairs(conceals) do
+      vim.fn.matchadd('Conceal', c[1], c[2], -1, { conceal = '' })
     end
   end,
 })
