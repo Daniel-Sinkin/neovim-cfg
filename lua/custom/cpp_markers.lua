@@ -14,6 +14,9 @@ local MATCH_GROUPS =
 local function set_hl()
   vim.api.nvim_set_hl(0, 'DansMarkerMut', { fg = '#f7768e', bold = true })
   vim.api.nvim_set_hl(0, 'DansMarkerCpy', { fg = '#e0af68', bold = true })
+  -- `lambda` pseudo-keyword in jai_view's lambda rendering (green to read as a
+  -- declaration keyword, distinct from the mut/cpy markers).
+  vim.api.nvim_set_hl(0, 'DansLambda', { fg = '#9ece6a', bold = true })
   -- Deduced-type inlay text inside jai_view overlays (clangd auto types).
   -- Clearly blue so it reads apart from the gray comments.
   vim.api.nvim_set_hl(0, 'DansInlayType', { fg = '#7aa2f7' })

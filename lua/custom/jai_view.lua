@@ -30,6 +30,12 @@ local revealed = {} -- bufnr -> { [row0] = true } lines currently shown raw (cur
 local hint_type = {} -- bufnr -> { [row0] = "int *" } from clangd Type inlay hints
 local show_hints = false -- deduced-type hints off by default (toggle with :InlineHints)
 
+-- Experimental: render a lambda-assigned-to-auto as a function-style decl,
+--   const auto f = [cap](params) -> R   ->   lambda f(cap, params) -> R
+-- (intro line only; the body keeps its own indentation). Toggle :LambdaView.
+local lambda_render = true
+local LAMBDA_KEYWORD = 'lambda'
+
 local STMT_KEYWORDS = {
   ['return'] = true,
   ['if'] = true,
@@ -187,6 +193,22 @@ local function colorize(text)
   return out
 end
 
+-- Parse a lambda RHS `[cap](params) rest` (rest = "-> R", "{...}", "{", "" with
+-- the brace on the next line, "mutable -> R", ...). Returns (cap, params, rest)
+-- or nil. The no-params form `[cap]{...}` returns params=nil. Only matches when
+-- the expression starts with `[`, which in valid C++ means a lambda.
+local function parse_lambda(expr)
+  local cap, params, rest = expr:match '^%[(.-)%]%s*%((.-)%)%s*(.*)$'
+  if cap ~= nil then
+    return cap, params, rest
+  end
+  local cap2, rest2 = expr:match '^%[(.-)%]%s*(.*)$'
+  if cap2 ~= nil and rest2:match '^{' then
+    return cap2, nil, rest2
+  end
+  return nil
+end
+
 -- Build the virt_text chunk list for a parsed declaration, or nil if `core`
 -- isn't a recognized declaration form.
 local function build_chunks(prefix, core, had_semi, type_hint)
@@ -227,7 +249,26 @@ local function build_chunks(prefix, core, had_semi, type_hint)
     add_value(sb_expr)
     add(semi)
   elseif name then
-    if type_hint and name ~= '_' then
+    local cap, params, rest = parse_lambda(expr)
+    if lambda_render and cap ~= nil then
+      local sig = {}
+      if cap ~= '' then
+        sig[#sig + 1] = cap
+      end
+      if params ~= nil and params ~= '' then
+        sig[#sig + 1] = params
+      end
+      add(LAMBDA_KEYWORD .. ' ', 'DansLambda')
+      add(name)
+      add '('
+      add_value(table.concat(sig, ', '))
+      add ')'
+      if rest ~= nil and rest ~= '' then
+        add ' '
+        add_value(rest)
+      end
+      add(semi)
+    elseif type_hint and name ~= '_' then
       add(name .. ': ')
       add(type_hint, 'DansInlayType')
       add ' = '
@@ -485,6 +526,15 @@ function M.toggle_hints()
   vim.notify('JAI type hints ' .. (show_hints and 'on' or 'off'), vim.log.levels.INFO)
 end
 
+-- Toggle the experimental lambda-as-function rendering (global).
+function M.toggle_lambda()
+  lambda_render = not lambda_render
+  for bufnr in pairs(enabled) do
+    refresh(bufnr)
+  end
+  vim.notify('JAI lambda view ' .. (lambda_render and 'on' or 'off'), vim.log.levels.INFO)
+end
+
 -- Whether the JAI overlay is currently active for this buffer.
 function M.is_enabled(bufnr)
   return enabled[bufnr] == true
@@ -500,6 +550,7 @@ end
 function M.setup()
   vim.api.nvim_create_user_command('JaiView', M.toggle, { desc = 'Toggle JAI-style declaration view' })
   vim.api.nvim_create_user_command('InlineHints', M.toggle_hints, { desc = 'Toggle deduced-type inline hints' })
+  vim.api.nvim_create_user_command('LambdaView', M.toggle_lambda, { desc = 'Toggle lambda-as-function rendering' })
 
   local group = vim.api.nvim_create_augroup('ds_jai_view', { clear = true })
   vim.api.nvim_create_autocmd('FileType', {
