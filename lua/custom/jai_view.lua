@@ -206,11 +206,15 @@ local function build_chunks(prefix, core, had_semi, type_hint)
     end
   else
     -- Explicit type: colored the same blue as the deduced hints (DansInlayType);
-    -- written and deduced types are treated alike. std:: stripped.
+    -- written and deduced types are treated alike. std:: stripped. `constexpr`
+    -- becomes JAI's constant binding -- `name: T : value` (a `:` in place of the
+    -- `=`), since `::` / `: T :` is how JAI spells a compile-time constant.
+    local is_constexpr = typ:match '^constexpr%s+' ~= nil
+    local shown_typ = typ:gsub('^constexpr%s+', ''):gsub('std::', '')
     add(nm .. ': ')
-    add(typ:gsub('std::', ''), 'DansInlayType')
+    add(shown_typ, 'DansInlayType')
     if init ~= '' then
-      add ' = '
+      add(is_constexpr and ' : ' or ' = ')
       add_value(init)
     end
     add(semi)
