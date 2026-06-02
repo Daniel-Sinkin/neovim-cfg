@@ -133,7 +133,36 @@ local EXPR_MARKERS = {
   mut_unchecked = 'DansMarkerMut',
 }
 
--- Split `text` into chunks, coloring whole-word marker keywords.
+-- Single-word C++ aliases ($sc, $dc, ...) reused from cpp_aliases so casts in
+-- jai-rendered value expressions read the same as on non-overlaid lines. This
+-- overlay conceals the whole source line, so cpp_aliases defers here (its inline
+-- alias would be orphaned); without this the casts rendered verbatim. Built
+-- lazily and cached from cpp_aliases.ALIASES, keeping only identifier-shaped
+-- keywords (`[[nodiscard]]` is dropped -- it can't occur inside a value).
+local expr_aliases_cache = nil
+local function expr_aliases()
+  if expr_aliases_cache then
+    return expr_aliases_cache
+  end
+  local map = {}
+  local ok, aliases = pcall(function()
+    return require('custom.cpp_aliases').ALIASES
+  end)
+  if ok and aliases then
+    for _, a in ipairs(aliases) do
+      if a[1]:match '^[%a_][%w_]*$' then
+        map[a[1]] = a[2]
+      end
+    end
+  end
+  if next(map) then
+    expr_aliases_cache = map
+  end
+  return map
+end
+
+-- Split `text` into chunks, aliasing cast keywords ($sc/...) and coloring
+-- whole-word marker keywords.
 local function colorize(text)
   local out = {}
   local i, n = 1, #text
@@ -147,7 +176,12 @@ local function colorize(text)
       out[#out + 1] = { text:sub(i, s - 1), 'Normal' }
     end
     local word = text:sub(s, e)
-    out[#out + 1] = { word, EXPR_MARKERS[word] or 'Normal' }
+    local alias = expr_aliases()[word]
+    if alias then
+      out[#out + 1] = { alias, 'Comment' }
+    else
+      out[#out + 1] = { word, EXPR_MARKERS[word] or 'Normal' }
+    end
     i = e + 1
   end
   return out
