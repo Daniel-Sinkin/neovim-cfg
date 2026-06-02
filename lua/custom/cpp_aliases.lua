@@ -77,6 +77,21 @@ local function refresh(bufnr)
           start_pos = e + 1
         end
       end
+
+      -- Inject `mut` before a non-const reference return type (`-> T&`): the
+      -- mutability can't be annotated in the return position. A const ref shows
+      -- as bare `T&` (const is hidden), so the marker's presence is the
+      -- mut/const distinction. Colored like the mut/mut_unchecked markers.
+      local pre, ws = line:match '^(.-%->)(%s*)'
+      if pre then
+        local rtyp = line:sub(#pre + #ws + 1):gsub('%s*[{;].*$', ''):gsub('%s*$', '')
+        if rtyp:match '&%s*$' and not rtyp:match '^const%f[%A]' then
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row - 1, #pre + #ws, {
+            virt_text = { { 'mut ', 'DansMarkerMut' } },
+            virt_text_pos = 'inline',
+          })
+        end
+      end
     end
   end
 end

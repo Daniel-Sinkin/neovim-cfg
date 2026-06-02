@@ -78,7 +78,9 @@ vim.api.nvim_create_autocmd('FileType', {
     -- cpp_markers' gray matches (priority 20) so they hide off the cursor line
     -- rather than only graying.
     local conceals = {
-      { [[^\s*\zsconst\>\s*]], 30 },
+      -- Hide `const` as a leading type qualifier: at line start, or right after
+      -- `(`, `,`, or `->` (locals, params, return types). const is the default.
+      { [[\%(^\s*\|(\s*\|,\s*\|->\s*\)\zsconst\>\s*]], 30 },
       { [[\<dans_]], 10 },
     }
     if ev.match == 'cpp' or ev.match == 'cuda' then
