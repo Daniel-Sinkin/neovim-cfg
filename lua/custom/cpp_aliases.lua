@@ -21,6 +21,10 @@ local ALIASES = {
   { '[[nodiscard]]', '$nd' },
 }
 
+-- Exposed so hpp_arrow_align.lua can mirror these widths when it computes the
+-- rendered arrow column (each alias shrinks its keyword to the replacement).
+M.ALIASES = ALIASES
+
 local function is_word_char(c)
   return c and c:match '[%w_]' ~= nil
 end
