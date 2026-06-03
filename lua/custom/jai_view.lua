@@ -193,8 +193,10 @@ local function colorize(text)
     local alias = expr_aliases()[word]
     if alias then
       out[#out + 1] = { alias, 'Comment' }
+    elseif word:match '^Vk' or word:match '^VK_' then
+      out[#out + 1] = { word, 'DansVulkan' } -- Vk*/VK_*, matches cpp_markers
     elseif word:match '^[A-Z][A-Z0-9_]+$' then
-      out[#out + 1] = { word, 'DansMacro' } -- all-caps macro, matches cpp_markers
+      out[#out + 1] = { word, 'DansMacro' } -- other all-caps macro
     else
       out[#out + 1] = { word, EXPR_MARKERS[word] or 'Normal' }
     end
@@ -235,6 +237,16 @@ local function parse_lambda(expr)
     return cap2, nil, rest2
   end
   return nil
+end
+
+-- Highlight for a type in declaration position: Vulkan types (Vk*/VK_*) keep
+-- their purple even here, so a type doesn't flip blue<->purple as the cursor
+-- enters/leaves its line; everything else is the blue inlay-type color.
+local function type_hl(t)
+  if t:match '^Vk' or t:match '^VK_' then
+    return 'DansVulkan'
+  end
+  return 'DansInlayType'
 end
 
 -- Build the virt_text chunk list for a parsed declaration, or nil if `core`
@@ -306,7 +318,7 @@ local function build_chunks(prefix, core, had_semi, type_hint)
       return nil -- incomplete RHS (multi-line opener), leave raw
     elseif type_hint and name ~= '_' then
       add(name .. ': ')
-      add(type_hint, 'DansInlayType')
+      add(type_hint, type_hl(type_hint))
       add ' = '
       add_value(expr)
       add(semi)
@@ -329,7 +341,7 @@ local function build_chunks(prefix, core, had_semi, type_hint)
       :gsub('std::', '')
       :gsub('dans::', '')
     add(nm .. ': ')
-    add(shown_typ, 'DansInlayType')
+    add(shown_typ, type_hl(shown_typ))
     if init ~= '' then
       add(is_constexpr and ' : ' or ' = ')
       add_value(init)

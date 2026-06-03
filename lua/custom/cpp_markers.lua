@@ -8,8 +8,14 @@
 
 local M = {}
 
-local MATCH_GROUPS =
-  { DansMarkerMut = true, DansMarkerCpy = true, DansConst = true, DansNamespace = true, DansMacro = true }
+local MATCH_GROUPS = {
+  DansMarkerMut = true,
+  DansMarkerCpy = true,
+  DansConst = true,
+  DansNamespace = true,
+  DansMacro = true,
+  DansVulkan = true,
+}
 
 local function set_hl()
   vim.api.nvim_set_hl(0, 'DansMarkerMut', { fg = '#f7768e', bold = true })
@@ -17,9 +23,12 @@ local function set_hl()
   -- `lambda` pseudo-keyword in jai_view's lambda rendering (green to read as a
   -- declaration keyword, distinct from the mut/cpy markers).
   vim.api.nvim_set_hl(0, 'DansLambda', { fg = '#9ece6a', bold = true })
-  -- All-caps macros / preprocessor constants, purple. Not bold: these are dense
-  -- in API-heavy code (VK_*, GL_*), so the hue alone carries the category.
-  vim.api.nvim_set_hl(0, 'DansMacro', { fg = '#bb9af7' })
+  -- Vulkan identifiers (Vk*, VK_*) -- purple. Dense in this codebase, so they
+  -- get their own category, overriding the generic macro color for VK_*.
+  vim.api.nvim_set_hl(0, 'DansVulkan', { fg = '#bb9af7' })
+  -- Other all-caps macros / preprocessor constants -- orange. Not bold: these
+  -- are dense in API-heavy code, so the hue alone carries the category.
+  vim.api.nvim_set_hl(0, 'DansMacro', { fg = '#ff9e64' })
   -- Deduced-type inlay text inside jai_view overlays (clangd auto types).
   -- Clearly blue so it reads apart from the gray comments.
   vim.api.nvim_set_hl(0, 'DansInlayType', { fg = '#7aa2f7' })
@@ -59,10 +68,15 @@ local function apply()
   -- Gray every `ident::` scope qualifier. std:: is concealed off the cursor
   -- line by a higher-priority match; the rest stay gray-but-visible.
   vim.fn.matchadd('DansNamespace', [[\<\w\+::]], 20)
-  -- Purple every all-caps identifier (the macro / preprocessor-constant
-  -- convention). >=2 chars so single-letter template params (T, R) are spared;
-  -- mixed-case names (Vec3, GLuint) and k_snake constants don't match.
+  -- All-caps macros / preprocessor constants -> orange. >=2 chars so single
+  -- T/R template params are spared; mixed-case names (Vec3, GLuint) and k_snake
+  -- constants don't match.
   vim.fn.matchadd('DansMacro', [[\<[A-Z][A-Z0-9_]\+\>]], 20)
+  -- Vulkan identifiers -> purple, at a higher priority so VK_* overrides the
+  -- generic macro color above. Vk* (types) are mixed-case so they never hit the
+  -- macro match anyway.
+  vim.fn.matchadd('DansVulkan', [[\<VK_[A-Z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansVulkan', [[\<Vk[A-Za-z0-9_]*\>]], 25)
 end
 
 function M.setup()
