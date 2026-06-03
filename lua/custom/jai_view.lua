@@ -41,6 +41,10 @@ local LAMBDA_KEYWORD = 'lambda'
 -- `&vertex` (before it). const is hidden; a non-const binding shows `mut`.
 local FOR_REF_SUFFIX = true
 
+-- Render pointer *types* with `^` (Pascal/Odin style). Only in type positions
+-- the overlay parses; `*` for multiply and deref in expressions is untouched.
+local POINTER_CARET = true
+
 local STMT_KEYWORDS = {
   ['return'] = true,
   ['if'] = true,
@@ -305,10 +309,16 @@ local function parse_for(core)
   return { is_const = is_const, sigil = sigil, name = vim.trim(name), iter = iter, tail = tail }
 end
 
+-- Render pointer-type `*` as `^` (type positions only). `&` is left alone.
+local function ptr(s)
+  return POINTER_CARET and (s:gsub('%*', '^')) or s
+end
+
 -- Strip the parts of a type the view hides: leading constexpr/inline and the
--- std::/dans:: qualifiers. Shared by build_chunks and the alignment pass.
+-- std::/dans:: qualifiers, and render pointer `*` as `^`. Shared by build_chunks
+-- and the alignment pass (so column widths match).
 local function strip_type(typ)
-  return (typ:gsub('^constexpr%s+', ''):gsub('^inline%s+', ''):gsub('std::', ''):gsub('dans::', ''))
+  return ptr((typ:gsub('^constexpr%s+', ''):gsub('^inline%s+', ''):gsub('std::', ''):gsub('dans::', '')))
 end
 
 -- For an explicit-type brace declaration (`T name{init}`), return the rendered
@@ -411,9 +421,9 @@ local function build_chunks(prefix, core, had_semi, type_hint, align)
     end
     if FOR_REF_SUFFIX then
       add(forp.name)
-      add(forp.sigil)
+      add(ptr(forp.sigil))
     else
-      add(forp.sigil)
+      add(ptr(forp.sigil))
       add(forp.name)
     end
     add ' : '
@@ -453,7 +463,7 @@ local function build_chunks(prefix, core, had_semi, type_hint, align)
       return nil -- incomplete RHS (multi-line opener), leave raw
     elseif type_hint and name ~= '_' then
       add(name .. ': ')
-      add(type_hint, type_hl(type_hint))
+      add(ptr(type_hint), type_hl(type_hint))
       add ' = '
       add_value(expr)
       add(semi)
