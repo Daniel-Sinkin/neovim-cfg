@@ -39,6 +39,8 @@ local function set_hl()
   -- String literals -- muted green. A calm color (strings are inert content);
   -- applied at high priority so no other coloring/conceal leaks inside them.
   vim.api.nvim_set_hl(0, 'DansString', { fg = '#a3be8c' })
+  -- The `^` pointer marker -- grayed (de-emphasized type noise, like const/::).
+  vim.api.nvim_set_hl(0, 'DansPointer', { fg = '#6b7280' })
   -- Deduced-type inlay text inside jai_view overlays (clangd auto types).
   -- Clearly blue so it reads apart from the gray comments.
   vim.api.nvim_set_hl(0, 'DansInlayType', { fg = '#7aa2f7' })

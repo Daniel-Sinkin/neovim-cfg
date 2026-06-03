@@ -535,6 +535,23 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
       chunks[#chunks + 1] = c
     end
   end
+  -- Append a type, graying each `^` pointer marker (DansPointer) while the rest
+  -- keeps its type color. type_hl keys off the leading token (Vk*/SDL_*/...), so
+  -- compute it once on the whole string and reuse it for the non-`^` segments.
+  local function add_type(typ)
+    local hl = type_hl(typ)
+    local i = 1
+    while true do
+      local c = typ:find('%^', i)
+      if not c then
+        add(typ:sub(i), hl)
+        break
+      end
+      add(typ:sub(i, c - 1), hl)
+      add('^', 'DansPointer')
+      i = c + 1
+    end
+  end
 
   if prefix ~= '' then
     add(prefix, MARKER_HL[prefix:match '^(%S+)'] or 'Normal')
@@ -584,7 +601,7 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
       end
       add(name .. ': ')
       local rt = strip_type(rettype)
-      add(rt, type_hl(rt))
+      add_type(rt)
       add ' ='
     elseif lambda_render and cap ~= nil then
       local has_cap = cap ~= ''
@@ -616,7 +633,7 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
       end
       if type_hint and name ~= '_' then
         add(name .. ': ')
-        add(ptr(type_hint), type_hl(type_hint))
+        add_type(ptr(type_hint))
         add ' = '
         add_value(expr)
         add(semi)
@@ -652,7 +669,7 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     elseif not was_const and not is_constexpr and is_local() then
       add('mut ', 'DansMarkerMut')
     end
-    add(shown_typ, type_hl(shown_typ))
+    add_type(shown_typ)
     if init ~= '' then
       -- Pad the type only when there's an initializer, so the `=` aligns across
       -- the block; a no-init line's `;` stays at its natural end position.

@@ -2,8 +2,8 @@
 --
 --   1. pointer-type `*` -> `^` (Pascal/Odin style). Only the `*` of a pointer
 --      *declarator* is rewritten, so multiplication (`a * b`) and dereference
---      (`*p`) keep their `*`. The `*` is concealed and `^` shown as normal-color
---      inline virt_text (width-neutral).
+--      (`*p`) keep their `*`. The `*` is concealed and `^` shown as grayed
+--      (DansPointer) inline virt_text (width-neutral).
 --   2. a leading `const` is concealed on a *value* declaration (const is the
 --      hidden default) but kept on a *pointer/reference* one, where the
 --      const-vs-mut distinction is meaningful.
@@ -106,7 +106,7 @@ local function refresh(bufnr)
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc, {
           end_col = ec,
           conceal = '',
-          virt_text = { { '^', 'Normal' } },
+          virt_text = { { '^', 'DansPointer' } },
           virt_text_pos = 'inline',
         })
       end
