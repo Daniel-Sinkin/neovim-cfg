@@ -41,6 +41,9 @@ local function set_hl()
   vim.api.nvim_set_hl(0, 'DansString', { fg = '#a3be8c' })
   -- The `^` pointer marker -- grayed (de-emphasized type noise, like const/::).
   vim.api.nvim_set_hl(0, 'DansPointer', { fg = '#6b7280' })
+  -- `ref` binding marker (jai renders `auto& x = e` as `mut ref x := e`) -- gray,
+  -- a calm type qualifier like const; `mut` stays the bright exception beside it.
+  vim.api.nvim_set_hl(0, 'DansRef', { fg = '#6b7280' })
   -- Deduced-type inlay text inside jai_view overlays (clangd auto types).
   -- Clearly blue so it reads apart from the gray comments.
   vim.api.nvim_set_hl(0, 'DansInlayType', { fg = '#7aa2f7' })

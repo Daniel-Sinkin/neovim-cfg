@@ -582,7 +582,10 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     if is_local() and not was_const then
       add('mut ', 'DansMarkerMut')
     end
-    add('[' .. sb_binds .. '] := ' .. ((sb_sigil == '&') and '&' or ''))
+    if sb_sigil == '&' then
+      add('ref ', 'DansRef')
+    end
+    add('[' .. sb_binds .. '] := ')
     add_value(sb_expr)
     add(semi)
   elseif name then
@@ -638,7 +641,13 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
         add_value(expr)
         add(semi)
       else
-        add(name .. ' := ' .. ((sigil == '&') and '&' or ''))
+        -- Reference binding: `ref` marker (Rust `ref`/`ref mut`) instead of
+        -- gluing `&` to the value, where it would read as address-of the first
+        -- operand on a compound RHS. `mut` (added above) precedes it: `mut ref`.
+        if sigil == '&' then
+          add('ref ', 'DansRef')
+        end
+        add(name .. ' := ')
         add_value(expr)
         add(semi)
       end
