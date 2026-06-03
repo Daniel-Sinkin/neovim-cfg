@@ -444,6 +444,41 @@ local function decl_kind(bufnr, row0)
   return nil
 end
 
+-- Whether the declaration on this line initializes from an immediately-invoked
+-- lambda (IIFE): `auto x = [&]{...}()`. Treesitter sees the init as a
+-- call_expression (vs a plain lambda_expression for a binding). The caller has
+-- already confirmed the line's RHS is a lambda, so call_expression => IIFE.
+local function is_iife(bufnr, row0)
+  if not bufnr then
+    return false
+  end
+  local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
+  if not line then
+    return false
+  end
+  local col = #(line:match '^%s*' or '')
+  local ok, node = pcall(vim.treesitter.get_node, { bufnr = bufnr, pos = { row0, col } })
+  if not ok or not node then
+    return false
+  end
+  while node and node:type() ~= 'declaration' do
+    node = node:parent()
+  end
+  if not node then
+    return false
+  end
+  for child in node:iter_children() do
+    if child:type() == 'init_declarator' then
+      local last
+      for c in child:iter_children() do
+        last = c
+      end
+      return last ~= nil and last:type() == 'call_expression'
+    end
+  end
+  return false
+end
+
 -- Build the virt_text chunk list for a parsed declaration, or nil if `core`
 -- isn't a recognized declaration form. `align` (optional) is { nw, tw } column
 -- widths to pad the name/type to. `was_const` + (bufnr,row0) drive the inferred
@@ -532,7 +567,23 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     add(semi)
   elseif name then
     local cap, params, rest = parse_lambda(expr)
-    if lambda_render and cap ~= nil then
+    if lambda_render and cap ~= nil and is_iife(bufnr, row0) then
+      -- IIFE: `auto x = [&]() -> T {...}()`. x is the *result* (type T), not a
+      -- lambda. Render the multi-line intro as `x: T =` (body + }(); stay raw).
+      -- Single-line/deduced-return IIFEs have their body on this line, so leave
+      -- them raw rather than truncate.
+      local rettype = rest and rest:match '^%->%s*(.+)$'
+      if not rettype then
+        return nil
+      end
+      if is_local() and not was_const then
+        add('mut ', 'DansMarkerMut')
+      end
+      add(name .. ': ')
+      local rt = strip_type(rettype)
+      add(rt, type_hl(rt))
+      add ' ='
+    elseif lambda_render and cap ~= nil then
       local has_cap = cap ~= ''
       local has_params = params ~= nil and params ~= ''
       add(LAMBDA_KEYWORD .. ' ', 'DansLambda')
