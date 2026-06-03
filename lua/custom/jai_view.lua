@@ -26,9 +26,7 @@ local M = {}
 
 local ns = vim.api.nvim_create_namespace 'ds_jai_view'
 local enabled = {}
-local revealed = {} -- bufnr -> { [row0] = true } lines currently shown raw (cursor / visual selection)
 local hint_type = {} -- bufnr -> { [row0] = "int *" } from clangd Type inlay hints
-local align_cache = {} -- bufnr -> { [row0] = { nw, tw } } struct-field column widths
 local show_hints = false -- deduced-type hints off by default (toggle with :InlineHints)
 
 -- Experimental: render a lambda-assigned-to-auto as a function-style decl,
@@ -384,7 +382,8 @@ end
 -- Map row0 -> { nw, tw } so a run of consecutive explicit-type brace
 -- declarations aligns its `:` (after the name) and `=`/`;` (after the type).
 -- Singleton runs get no entry (nothing to align).
-local function compute_align(lines)
+local function compute_align(lines, offset)
+  offset = offset or 0
   local map = {}
   local i, n = 1, #lines
   while i <= n do
@@ -394,7 +393,7 @@ local function compute_align(lines)
       if not nm then
         break
       end
-      block[#block + 1] = { row0 = i - 1, nw = vim.fn.strwidth(nm), tw = vim.fn.strwidth(ty) }
+      block[#block + 1] = { row0 = offset + i - 1, nw = vim.fn.strwidth(nm), tw = vim.fn.strwidth(ty) }
       i = i + 1
     end
     if #block >= 2 then
@@ -739,24 +738,18 @@ local function reveal_set(bufnr)
   return { [cur] = true }
 end
 
-local function set_row(bufnr, row0, reveal)
-  vim.api.nvim_buf_clear_namespace(bufnr, ns, row0, row0 + 1)
-  if reveal then
-    return
+-- Only the on-screen lines (+ margin) are overlaid, so a big file isn't
+-- re-rendered whole on every edit / scroll / cursor move (was ~52 ms per
+-- keystroke on a 5700-line file). Off-screen overlays aren't visible; they're
+-- (re)placed as lines scroll in (WinScrolled). Reveal (cursor line raw) falls
+-- out of recomputing reveal_set each refresh.
+local VISIBLE_MARGIN = 40
+local function visible_range(bufnr)
+  if bufnr ~= vim.api.nvim_get_current_buf() then
+    return 0, vim.api.nvim_buf_line_count(bufnr)
   end
-  local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
-  if not line then
-    return
-  end
-  local start_col, chunks = render_line(line, type_for(bufnr, row0), (align_cache[bufnr] or {})[row0], bufnr, row0)
-  if start_col then
-    pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, start_col, {
-      end_col = #line,
-      conceal = '',
-      virt_text = chunks,
-      virt_text_pos = 'overlay',
-    })
-  end
+  local n = vim.api.nvim_buf_line_count(bufnr)
+  return math.max(0, vim.fn.line 'w0' - 1 - VISIBLE_MARGIN), math.min(n, vim.fn.line 'w$' + VISIBLE_MARGIN)
 end
 
 local function refresh(bufnr)
@@ -765,11 +758,11 @@ local function refresh(bufnr)
   end
   clear(bufnr)
   local set = reveal_set(bufnr)
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local align = compute_align(lines)
-  align_cache[bufnr] = align
-  for row, line in ipairs(lines) do
-    local row0 = row - 1
+  local s0, e0 = visible_range(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
+  local align = compute_align(lines, s0)
+  for idx, line in ipairs(lines) do
+    local row0 = s0 + idx - 1
     if not set[row0] then
       local start_col, chunks = render_line(line, type_for(bufnr, row0), align[row0], bufnr, row0)
       if start_col then
@@ -782,28 +775,6 @@ local function refresh(bufnr)
       end
     end
   end
-  revealed[bufnr] = set
-end
-
--- Incremental: restore overlays on rows that left the reveal set, drop overlays
--- on rows that entered it. Handles both single-cursor and visual-selection.
-local function on_cursor(bufnr)
-  if not (enabled[bufnr] and vim.api.nvim_buf_is_valid(bufnr)) then
-    return
-  end
-  local new = reveal_set(bufnr)
-  local old = revealed[bufnr] or {}
-  for row0 in pairs(old) do
-    if not new[row0] then
-      set_row(bufnr, row0, false)
-    end
-  end
-  for row0 in pairs(new) do
-    if not old[row0] then
-      set_row(bufnr, row0, true)
-    end
-  end
-  revealed[bufnr] = new
 end
 
 -- Request Type inlay hints from clangd directly (not the built-in renderer, so
@@ -878,9 +849,7 @@ end
 
 local function disable(bufnr)
   enabled[bufnr] = nil
-  revealed[bufnr] = nil
   hint_type[bufnr] = nil
-  align_cache[bufnr] = nil
   clear(bufnr)
 end
 
@@ -936,20 +905,18 @@ function M.setup()
       enable(ev.buf)
     end,
   })
-  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'BufEnter' }, {
-    group = group,
-    callback = function(ev)
-      refresh(ev.buf)
-    end,
-  })
-  -- CursorMoved updates the reveal as the cursor/selection moves; ModeChanged
-  -- catches entering/leaving visual mode (which may not move the cursor).
-  vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'ModeChanged' }, {
-    group = group,
-    callback = function(ev)
-      on_cursor(ev.buf)
-    end,
-  })
+  -- One visible-range refresh for everything: edits, scrolling (WinScrolled),
+  -- and the cursor/selection reveal (CursorMoved / ModeChanged recompute
+  -- reveal_set). Cheap because it only touches on-screen lines.
+  vim.api.nvim_create_autocmd(
+    { 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI', 'ModeChanged', 'WinScrolled' },
+    {
+      group = group,
+      callback = function(ev)
+        refresh(ev.buf)
+      end,
+    }
+  )
   -- Refresh deduced types: BufEnter/InsertLeave plus CursorHold (a natural
   -- debounce for the async clangd response after edits).
   vim.api.nvim_create_autocmd({ 'BufEnter', 'InsertLeave', 'CursorHold' }, {

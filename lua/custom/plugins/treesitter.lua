@@ -183,13 +183,12 @@ return {
           priority = 200,
         })
 
-        -- Highlight inner delimiters within the scope. Bail on huge scopes.
-        local max_lines = 2000
-        if (close_r - open_r) > max_lines then
-          return
-        end
-
-        for r = open_r, close_r do
+        -- Highlight inner delimiters, but only across the on-screen rows of the
+        -- scope: scanning a whole large scope (up to thousands of lines) on every
+        -- cursor move was the cost. Off-screen delimiters aren't visible.
+        local vtop = math.max(open_r, vim.fn.line 'w0' - 1)
+        local vbot = math.min(close_r, vim.fn.line 'w$' - 1)
+        for r = vtop, vbot do
           local line = vim.api.nvim_buf_get_lines(bufnr, r, r + 1, true)[1] or ''
           local start_c = 0
           local end_c = #line
@@ -216,7 +215,7 @@ return {
         end
       end
 
-      vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'TextChanged', 'TextChangedI', 'BufEnter' }, {
+      vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'TextChanged', 'TextChangedI', 'BufEnter', 'WinScrolled' }, {
         group = vim.api.nvim_create_augroup('ds-enclosing-brace', { clear = true }),
         callback = function(ev)
           update_enclosing_braces(ev.buf)
