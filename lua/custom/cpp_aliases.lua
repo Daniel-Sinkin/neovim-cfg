@@ -7,7 +7,7 @@
 --   const_cast        -> $cc
 --   noexcept          -> $ne
 --   [[nodiscard]]     -> $nd
---   VK_NULL_HANDLE    -> ∅   (in the Vulkan color)
+--   VK_NULL_HANDLE    -> {}  (in the Vulkan color)
 
 local M = {}
 
@@ -21,7 +21,7 @@ local ALIASES = {
   { 'const_cast', '$cc' },
   { 'noexcept', '$ne' },
   { '[[nodiscard]]', '$nd' },
-  { 'VK_NULL_HANDLE', '∅', 'DansVulkan' },
+  { 'VK_NULL_HANDLE', '{}', 'DansVulkan' },
 }
 
 -- Exposed so hpp_arrow_align.lua can mirror these widths when it computes the

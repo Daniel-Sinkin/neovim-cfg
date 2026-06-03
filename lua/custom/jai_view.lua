@@ -414,10 +414,12 @@ local function build_chunks(prefix, core, had_semi, type_hint, align)
     end
     add ': '
     add(shown_typ, type_hl(shown_typ))
-    if align then
-      add(string.rep(' ', math.max(0, align.tw - vim.fn.strwidth(shown_typ))))
-    end
     if init ~= '' then
+      -- Pad the type only when there's an initializer, so the `=` aligns across
+      -- the block; a no-init line's `;` stays at its natural end position.
+      if align then
+        add(string.rep(' ', math.max(0, align.tw - vim.fn.strwidth(shown_typ))))
+      end
       add(is_constexpr and ' : ' or ' = ')
       add_value(init)
     end
