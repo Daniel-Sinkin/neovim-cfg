@@ -639,12 +639,18 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
       add(string.rep(' ', math.max(0, align.nw - vim.fn.strwidth(nm))))
     end
     add ': '
-    -- Surface `mut` (const hidden) for a non-const reference (member or local) or
-    -- a non-const local of any type; not for non-const value *members* (those are
-    -- normally mutable, marking them all would be noise). constexpr counts as
-    -- const via was_const. Placed after the colon like `-> mut T&` so the name
-    -- column stays aligned.
-    if not was_const and not is_constexpr and (shown_typ:find('&', 1, true) or is_local()) then
+    -- Pointers/references carry meaningful constness, so always mark it: `const`
+    -- (grayed) for a const pointee/referent, `mut` otherwise. Plain value types
+    -- keep the const-hidden default and only get `mut` on a non-const local
+    -- (value members/globals aren't marked -- would be noise). constexpr counts
+    -- as const. Placed after the colon like `-> mut T&` so names stay aligned.
+    if shown_typ:find('[%^&]') then
+      if was_const then
+        add('const ', 'DansConst')
+      elseif not is_constexpr then
+        add('mut ', 'DansMarkerMut')
+      end
+    elseif not was_const and not is_constexpr and is_local() then
       add('mut ', 'DansMarkerMut')
     end
     add(shown_typ, type_hl(shown_typ))

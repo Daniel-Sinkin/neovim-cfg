@@ -22,7 +22,8 @@ local MATCH_GROUPS = {
 }
 
 local function set_hl()
-  vim.api.nvim_set_hl(0, 'DansMarkerMut', { fg = '#f7768e', bold = true })
+  -- Not bold: mut is inferred everywhere now, so bold red was too aggressive.
+  vim.api.nvim_set_hl(0, 'DansMarkerMut', { fg = '#f7768e' })
   vim.api.nvim_set_hl(0, 'DansMarkerCpy', { fg = '#e0af68', bold = true })
   -- `lambda` pseudo-keyword in jai_view's lambda rendering (green to read as a
   -- declaration keyword, distinct from the mut/cpy markers).
