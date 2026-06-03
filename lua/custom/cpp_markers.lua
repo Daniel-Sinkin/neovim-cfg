@@ -16,6 +16,8 @@ local MATCH_GROUPS = {
   DansMacro = true,
   DansVulkan = true,
   DansSDL = true,
+  DansCommentMask = true,
+  DansIncludeMask = true,
 }
 
 local function set_hl()
@@ -43,6 +45,11 @@ local function set_hl()
   -- std:: is additionally concealed (autocmds.lua) so it only shows, gray, on
   -- the cursor line; every other qualifier stays gray-but-visible.
   vim.api.nvim_set_hl(0, 'DansNamespace', { fg = '#6b7280' })
+  -- Masks that re-neutralize text the syntax-blind matches above would wrongly
+  -- color: line/block comments back to Comment, #include <...> paths back to
+  -- Normal. Applied at a higher priority so they win inside those regions.
+  vim.api.nvim_set_hl(0, 'DansCommentMask', { link = 'Comment' })
+  vim.api.nvim_set_hl(0, 'DansIncludeMask', { link = 'Normal' })
 end
 
 local function apply()
@@ -84,6 +91,14 @@ local function apply()
   -- SDL identifiers (SDL_*) -> teal. Same priority; SDL_FOO also matches the
   -- macro pattern, so the higher priority makes the teal win.
   vim.fn.matchadd('DansSDL', [[\<SDL_[A-Za-z0-9_]*\>]], 25)
+  -- Masks (priority 28, above the color matches): the matches above are syntax
+  -- blind, so they color all-caps tokens inside comments (// IWYU ...) and
+  -- include paths (<SDL3/SDL.h>). Recolor those regions back to neutral. Below
+  -- the conceal matches (30) so const/std:: concealment is untouched.
+  vim.fn.matchadd('DansCommentMask', [[//.*]], 28)
+  vim.fn.matchadd('DansCommentMask', [[/\*.\{-}\*/]], 28)
+  -- Quoted (not [[...]]): the trailing [>"] char class would close a long string.
+  vim.fn.matchadd('DansIncludeMask', '^\\s*#\\s*include\\s*\\zs[<"].\\{-}[>"]', 28)
 end
 
 function M.setup()
