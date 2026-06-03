@@ -193,6 +193,24 @@ local function colorize(text)
   return out
 end
 
+-- Whether all (), [], {} on the line are closed. An unbalanced line is the
+-- opener of a multi-line statement (e.g. `const auto x = foo(`), not a complete
+-- declaration, so it must render raw.
+local function is_balanced(s)
+  local depth = 0
+  for ch in s:gmatch '[%(%)%[%]{}]' do
+    if ch == '(' or ch == '[' or ch == '{' then
+      depth = depth + 1
+    else
+      depth = depth - 1
+    end
+    if depth < 0 then
+      return false
+    end
+  end
+  return depth == 0
+end
+
 -- Parse a lambda RHS `[cap](params) rest` (rest = "-> R", "{...}", "{", "" with
 -- the brace on the next line, "mutable -> R", ...). Returns (cap, params, rest)
 -- or nil. The no-params form `[cap]{...}` returns params=nil. Only matches when
@@ -222,7 +240,10 @@ local function build_chunks(prefix, core, had_semi, type_hint)
   local typ, nm, init
   if not sb_binds and not name then
     typ, nm, init = core:match '^(.-)%s+([%w_]+)%s*{(.*)}$'
-    if not (nm and looks_like_type(typ)) then
+    -- A brace-init declaration is a terminated statement; require the `;`.
+    -- Without it this is a continuation / constructor temporary in an argument
+    -- list (e.g. `local_ray, Aabb{.min = a}`), where `local_ray,` is not a type.
+    if not (nm and had_semi and looks_like_type(typ)) then
       return nil
     end
   end
@@ -245,6 +266,9 @@ local function build_chunks(prefix, core, had_semi, type_hint)
   end
 
   if sb_binds then
+    if not is_balanced(sb_expr) then
+      return nil
+    end
     add('[' .. sb_binds .. '] := ' .. ((sb_sigil == '&') and '&' or ''))
     add_value(sb_expr)
     add(semi)
@@ -268,6 +292,8 @@ local function build_chunks(prefix, core, had_semi, type_hint)
         add_value(rest)
       end
       add(semi)
+    elseif not is_balanced(expr) then
+      return nil -- incomplete RHS (multi-line opener), leave raw
     elseif type_hint and name ~= '_' then
       add(name .. ': ')
       add(type_hint, 'DansInlayType')
