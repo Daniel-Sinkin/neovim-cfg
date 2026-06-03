@@ -59,6 +59,7 @@ vim.api.nvim_create_autocmd('FileType', {
 -- Hide visual noise in C/C++/CUDA buffers without modifying files:
 --   - leading `const` (applies to c/cpp/cuda) so `mut` stands out as the
 --     exception (pair with the monochrome theme in treesitter.lua)
+--   - `inline` (c/cpp/cuda) — a storage specifier never worth seeing
 --   - the `dans_` prefix on identifiers (c/cpp/cuda)
 --   - the `std::` qualifier (cpp/cuda only; pointless in plain C)
 -- `[[nodiscard]]` is aliased to `$nd` by cpp_aliases (handled there, not here).
@@ -81,6 +82,8 @@ vim.api.nvim_create_autocmd('FileType', {
       -- Hide `const` as a leading type qualifier: at line start, or right after
       -- `(`, `,`, or `->` (locals, params, return types). const is the default.
       { [[\%(^\s*\|(\s*\|,\s*\|->\s*\)\zsconst\>\s*]], 30 },
+      -- Hide `inline` everywhere: never worth seeing off the cursor line.
+      { [[\<inline\>\s*]], 30 },
       { [[\<dans_]], 10 },
     }
     if ev.match == 'cpp' or ev.match == 'cuda' then

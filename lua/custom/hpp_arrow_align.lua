@@ -101,6 +101,29 @@ local function literal_removed(prefix, lit)
   return removed
 end
 
+-- Width concealed by a whole-word conceal that also eats trailing whitespace
+-- (\<word\>\s*), e.g. `inline ` (config/autocmds.lua).
+local function word_ws_removed(prefix, word)
+  local removed, i = 0, 1
+  while true do
+    local s, e = prefix:find(word, i, true)
+    if not s then
+      break
+    end
+    i = e + 1
+    local bounded = (s == 1 or not is_word_char(prefix:sub(s - 1, s - 1)))
+      and not is_word_char(prefix:sub(e + 1, e + 1))
+    if bounded then
+      local k = e + 1
+      while k <= #prefix and prefix:sub(k, k):match '%s' do
+        k = k + 1
+      end
+      removed = removed + (k - s)
+    end
+  end
+  return removed
+end
+
 -- Net width change from cpp_aliases: each whole-word keyword is concealed and
 -- replaced by its (shorter) virt_text. Returns (removed, added).
 local function alias_delta(prefix)
@@ -139,6 +162,7 @@ local function rendered_arrow_col(line)
   end
   local prefix = line:sub(1, ap - 1)
   local removed = const_removed(prefix)
+    + word_ws_removed(prefix, 'inline')
     + literal_removed(prefix, 'std::')
     + literal_removed(prefix, 'dans::')
     + literal_removed(prefix, 'dans_')

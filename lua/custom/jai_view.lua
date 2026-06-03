@@ -70,8 +70,8 @@ local MARKER_HL = {
   cpy = 'DansMarkerCpy',
 }
 
--- Peel leading attributes/markers. `const` is dropped; mut/cpy and
--- `[[maybe_unused]]` are kept as a prefix. Returns (prefix, rest).
+-- Peel leading attributes/markers. `const` and `inline` are dropped; mut/cpy
+-- and `[[maybe_unused]]` are kept as a prefix. Returns (prefix, rest).
 local function split_markers(s)
   local prefix = ''
   local rest = s
@@ -82,6 +82,14 @@ local function split_markers(s)
     if after_const then
       rest = after_const
       matched = true
+    end
+
+    if not matched then
+      local after_inline = rest:match '^inline%s+(.*)$'
+      if after_inline then
+        rest = after_inline
+        matched = true
+      end
     end
 
     if not matched then
@@ -185,6 +193,8 @@ local function colorize(text)
     local alias = expr_aliases()[word]
     if alias then
       out[#out + 1] = { alias, 'Comment' }
+    elseif word:match '^[A-Z][A-Z0-9_]+$' then
+      out[#out + 1] = { word, 'DansMacro' } -- all-caps macro, matches cpp_markers
     else
       out[#out + 1] = { word, EXPR_MARKERS[word] or 'Normal' }
     end
@@ -311,7 +321,13 @@ local function build_chunks(prefix, core, had_semi, type_hint)
     -- becomes JAI's constant binding -- `name: T : value` (a `:` in place of the
     -- `=`), since `::` / `: T :` is how JAI spells a compile-time constant.
     local is_constexpr = typ:match '^constexpr%s+' ~= nil
-    local shown_typ = typ:gsub('^constexpr%s+', ''):gsub('std::', ''):gsub('dans::', '')
+    -- Strip `inline` too (the `constexpr inline` order leaves it after the
+    -- constexpr strip; the `inline constexpr` order is already gone via split).
+    local shown_typ = typ
+      :gsub('^constexpr%s+', '')
+      :gsub('^inline%s+', '')
+      :gsub('std::', '')
+      :gsub('dans::', '')
     add(nm .. ': ')
     add(shown_typ, 'DansInlayType')
     if init ~= '' then
