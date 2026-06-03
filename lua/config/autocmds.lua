@@ -79,9 +79,10 @@ vim.api.nvim_create_autocmd('FileType', {
     -- cpp_markers' gray matches (priority 20) so they hide off the cursor line
     -- rather than only graying.
     local conceals = {
-      -- Hide `const` as a leading type qualifier: at line start, or right after
-      -- `(`, `,`, or `->` (locals, params, return types). const is the default.
-      { [[\%(^\s*\|(\s*\|,\s*\|->\s*\)\zsconst\>\s*]], 30 },
+      -- Hide a *leading* `const` (a const value local; const is the default).
+      -- const in params / return types is left visible (grayed): on a pointer or
+      -- reference the const-vs-mut distinction is meaningful, so it's marked.
+      { [[^\s*\zsconst\>\s*]], 30 },
       -- Hide `inline` everywhere: never worth seeing off the cursor line.
       { [[\<inline\>\s*]], 30 },
       { [[\<dans_]], 10 },

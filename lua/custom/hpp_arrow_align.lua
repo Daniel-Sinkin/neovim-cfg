@@ -54,10 +54,9 @@ local function arrow_pos(code)
   end
 end
 
--- Width concealed by the leading/param `const` rule
---   \%(^\s*\|(\s*\|,\s*\|->\s*\)\zsconst\>\s*   (config/autocmds.lua)
--- a whole-word `const` that, scanning left past spaces, sits at line start or
--- right after `(` / `,`; the concealed run is `const` + its trailing whitespace.
+-- Width concealed by the leading `const` rule  ^\s*\zsconst\>\s*  (autocmds.lua):
+-- a whole-word `const` at line start (a const value local). const in params /
+-- return types is no longer concealed, so it isn't removed here.
 local function const_removed(prefix)
   local removed, i = 0, 1
   while true do
@@ -71,8 +70,7 @@ local function const_removed(prefix)
       while j >= 1 and prefix:sub(j, j):match '%s' do
         j = j - 1
       end
-      local ctx = (j < 1) and 'start' or prefix:sub(j, j)
-      if ctx == 'start' or ctx == '(' or ctx == ',' then
+      if j < 1 then -- only a leading const is concealed now
         local k = e + 1
         while k <= #prefix and prefix:sub(k, k):match '%s' do
           k = k + 1
