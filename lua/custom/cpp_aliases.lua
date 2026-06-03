@@ -119,10 +119,10 @@ function M.arg_mut_cols(line)
   return cols
 end
 
--- 0-based column to inject `mut` for a NON-const member function (where the
--- trailing `const` would sit, after the param parens), or nil. Member functions
--- only -- a free function has no receiver const. Needs treesitter to tell a
--- member function from a free one / a data member. Exposed for hpp_arrow_align.
+-- 0-based column right after the param `)` of a NON-const member function (where
+-- the trailing `const`/`mut` sits), or nil. Member functions only -- a free
+-- function has no receiver const. Needs treesitter to tell a member function
+-- from a free one / a data member. Exposed for hpp_arrow_align.
 function M.member_mut_col(line, bufnr, row0)
   if not bufnr or not row0 then
     return nil
@@ -154,11 +154,10 @@ function M.member_mut_col(line, bufnr, row0)
   if not (is_member and is_func) then
     return nil
   end
-  local p = close + 1
-  while p <= #line and line:sub(p, p):match '%s' do
-    p = p + 1
-  end
-  return p - 1
+  -- 0-based column right after `)` (close is its 1-based position). Placing the
+  -- marker here -- not at the first following token -- keeps it ahead of a
+  -- `noexcept` that cpp_aliases renders as `$ne` at that token's own column.
+  return close
 end
 
 local function cursor_row0(bufnr)
@@ -253,15 +252,14 @@ local function refresh(bufnr)
         })
       end
 
-      -- Inject `mut` where a non-const member function's trailing `const` would
-      -- be, so the receiver mutability reads like everywhere else. When the `)`
-      -- ends the line (signature wraps before `->`), there's no following token
-      -- to supply the leading space, so add it: `) mut` not `)mut`.
+      -- Inject `mut` right after the param `)` of a non-const member function
+      -- (where the trailing `const` would sit). Leading-space ` mut` so it reads
+      -- `) mut ...` and always lands before any following token -- in particular
+      -- before a `noexcept`, which is rendered as `$ne` at its own later column.
       local mcol = M.member_mut_col(line, bufnr, row0)
       if mcol then
-        local mtext = (mcol >= #line) and ' mut' or 'mut '
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, mcol, {
-          virt_text = { { mtext, 'DansMarkerMut' } },
+          virt_text = { { ' mut', 'DansMarkerMut' } },
           virt_text_pos = 'inline',
         })
       end
