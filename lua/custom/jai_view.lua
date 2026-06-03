@@ -28,6 +28,7 @@ local ns = vim.api.nvim_create_namespace 'ds_jai_view'
 local enabled = {}
 local revealed = {} -- bufnr -> { [row0] = true } lines currently shown raw (cursor / visual selection)
 local hint_type = {} -- bufnr -> { [row0] = "int *" } from clangd Type inlay hints
+local align_cache = {} -- bufnr -> { [row0] = { nw, tw } } struct-field column widths
 local show_hints = false -- deduced-type hints off by default (toggle with :InlineHints)
 
 -- Experimental: render a lambda-assigned-to-auto as a function-style decl,
@@ -190,19 +191,28 @@ local function colorize(text)
       out[#out + 1] = { text:sub(i, s - 1), 'Normal' }
     end
     local word = text:sub(s, e)
-    local alias = expr_aliases()[word]
-    if alias then
-      out[#out + 1] = { alias[1], alias[2] }
-    elseif word:match '^Vk' or word:match '^VK_' or word:match '^vk%u' then
-      out[#out + 1] = { word, 'DansVulkan' } -- Vk*/VK_*/vk*, matches cpp_markers
-    elseif word:match '^SDL_' then
-      out[#out + 1] = { word, 'DansSDL' }
-    elseif word:match '^[A-Z][A-Z0-9_]+$' then
-      out[#out + 1] = { word, 'DansMacro' } -- other all-caps macro
+    if text:sub(e + 1, e + 2) == '::' then
+      -- Namespace qualifier: hide std::/dans:: and gray the rest, matching the
+      -- conceal + DansNamespace treatment on raw lines.
+      if word ~= 'std' and word ~= 'dans' then
+        out[#out + 1] = { word .. '::', 'DansNamespace' }
+      end
+      i = e + 3
     else
-      out[#out + 1] = { word, EXPR_MARKERS[word] or 'Normal' }
+      local alias = expr_aliases()[word]
+      if alias then
+        out[#out + 1] = { alias[1], alias[2] }
+      elseif word:match '^Vk' or word:match '^VK_' or word:match '^vk%u' then
+        out[#out + 1] = { word, 'DansVulkan' } -- Vk*/VK_*/vk*, matches cpp_markers
+      elseif word:match '^SDL_' then
+        out[#out + 1] = { word, 'DansSDL' }
+      elseif word:match '^[A-Z][A-Z0-9_]+$' then
+        out[#out + 1] = { word, 'DansMacro' } -- other all-caps macro
+      else
+        out[#out + 1] = { word, EXPR_MARKERS[word] or 'Normal' }
+      end
+      i = e + 1
     end
-    i = e + 1
   end
   return out
 end
@@ -254,9 +264,68 @@ local function type_hl(t)
   return 'DansInlayType'
 end
 
+-- Strip the parts of a type the view hides: leading constexpr/inline and the
+-- std::/dans:: qualifiers. Shared by build_chunks and the alignment pass.
+local function strip_type(typ)
+  return (typ:gsub('^constexpr%s+', ''):gsub('^inline%s+', ''):gsub('std::', ''):gsub('dans::', ''))
+end
+
+-- For an explicit-type brace declaration (`T name{init}`), return the rendered
+-- name and type strings, else nil. Mirrors build_chunks' explicit branch so the
+-- alignment pass measures exactly what gets rendered.
+local function field_dims(line)
+  local indent = line:match '^%s*'
+  local body = line:sub(#indent + 1)
+  if body == '' then
+    return nil
+  end
+  local code = body:match '^(.-)%s*//.*$' or body
+  local had_semi = code:match ';%s*$' ~= nil
+  local _, core = split_markers((code:gsub(';%s*$', '')))
+  local typ, nm = core:match '^(.-)%s+([%w_]+)%s*{.*}$'
+  if not (nm and had_semi and looks_like_type(typ)) then
+    return nil
+  end
+  return nm, strip_type(typ)
+end
+
+-- Map row0 -> { nw, tw } so a run of consecutive explicit-type brace
+-- declarations aligns its `:` (after the name) and `=`/`;` (after the type).
+-- Singleton runs get no entry (nothing to align).
+local function compute_align(lines)
+  local map = {}
+  local i, n = 1, #lines
+  while i <= n do
+    local block = {}
+    while i <= n do
+      local nm, ty = field_dims(lines[i])
+      if not nm then
+        break
+      end
+      block[#block + 1] = { row0 = i - 1, nw = vim.fn.strwidth(nm), tw = vim.fn.strwidth(ty) }
+      i = i + 1
+    end
+    if #block >= 2 then
+      local nw, tw = 0, 0
+      for _, b in ipairs(block) do
+        nw = math.max(nw, b.nw)
+        tw = math.max(tw, b.tw)
+      end
+      for _, b in ipairs(block) do
+        map[b.row0] = { nw = nw, tw = tw }
+      end
+    end
+    if #block == 0 then
+      i = i + 1
+    end
+  end
+  return map
+end
+
 -- Build the virt_text chunk list for a parsed declaration, or nil if `core`
--- isn't a recognized declaration form.
-local function build_chunks(prefix, core, had_semi, type_hint)
+-- isn't a recognized declaration form. `align` (optional) is { nw, tw } column
+-- widths to pad the name/type to, for struct-field alignment.
+local function build_chunks(prefix, core, had_semi, type_hint, align)
   local semi = had_semi and ';' or ''
 
   -- structured binding: auto [a, b] = expr  ->  [a, b] := expr (no per-element
@@ -338,15 +407,16 @@ local function build_chunks(prefix, core, had_semi, type_hint)
     -- becomes JAI's constant binding -- `name: T : value` (a `:` in place of the
     -- `=`), since `::` / `: T :` is how JAI spells a compile-time constant.
     local is_constexpr = typ:match '^constexpr%s+' ~= nil
-    -- Strip `inline` too (the `constexpr inline` order leaves it after the
-    -- constexpr strip; the `inline constexpr` order is already gone via split).
-    local shown_typ = typ
-      :gsub('^constexpr%s+', '')
-      :gsub('^inline%s+', '')
-      :gsub('std::', '')
-      :gsub('dans::', '')
-    add(nm .. ': ')
+    local shown_typ = strip_type(typ)
+    add(nm)
+    if align then
+      add(string.rep(' ', math.max(0, align.nw - vim.fn.strwidth(nm))))
+    end
+    add ': '
     add(shown_typ, type_hl(shown_typ))
+    if align then
+      add(string.rep(' ', math.max(0, align.tw - vim.fn.strwidth(shown_typ))))
+    end
     if init ~= '' then
       add(is_constexpr and ' : ' or ' = ')
       add_value(init)
@@ -359,7 +429,7 @@ end
 
 -- Returns (start_col, chunks) for the overlay, or nil if the line isn't a
 -- transformable declaration. `type_hint` is the deduced type for this line.
-local function render_line(line, type_hint)
+local function render_line(line, type_hint, align)
   local indent = line:match '^%s*'
   local body = line:sub(#indent + 1)
   if body == '' then
@@ -374,7 +444,7 @@ local function render_line(line, type_hint)
   local had_semi = code:match ';%s*$' ~= nil
   local core_in = (code:gsub(';%s*$', ''))
   local prefix, core = split_markers(core_in)
-  local chunks = build_chunks(prefix, core, had_semi, type_hint)
+  local chunks = build_chunks(prefix, core, had_semi, type_hint, align)
   if not chunks then
     return nil
   end
@@ -434,7 +504,7 @@ local function set_row(bufnr, row0, reveal)
   if not line then
     return
   end
-  local start_col, chunks = render_line(line, type_for(bufnr, row0))
+  local start_col, chunks = render_line(line, type_for(bufnr, row0), (align_cache[bufnr] or {})[row0])
   if start_col then
     pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, start_col, {
       end_col = #line,
@@ -452,10 +522,12 @@ local function refresh(bufnr)
   clear(bufnr)
   local set = reveal_set(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local align = compute_align(lines)
+  align_cache[bufnr] = align
   for row, line in ipairs(lines) do
     local row0 = row - 1
     if not set[row0] then
-      local start_col, chunks = render_line(line, type_for(bufnr, row0))
+      local start_col, chunks = render_line(line, type_for(bufnr, row0), align[row0])
       if start_col then
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, start_col, {
           end_col = #line,
@@ -564,6 +636,7 @@ local function disable(bufnr)
   enabled[bufnr] = nil
   revealed[bufnr] = nil
   hint_type[bufnr] = nil
+  align_cache[bufnr] = nil
   clear(bufnr)
 end
 
