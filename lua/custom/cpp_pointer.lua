@@ -32,6 +32,18 @@ local function cursor_row0(bufnr)
   return nil
 end
 
+-- Visible rows (+ margin); the treesitter queries are scoped to this so a big
+-- file isn't re-queried whole on every CursorMoved/scroll. Returns 0-based
+-- [start, end) for iter_captures.
+local VISIBLE_MARGIN = 40
+local function visible_range(bufnr)
+  if bufnr ~= vim.api.nvim_get_current_buf() then
+    return 0, vim.api.nvim_buf_line_count(bufnr)
+  end
+  local n = vim.api.nvim_buf_line_count(bufnr)
+  return math.max(0, vim.fn.line 'w0' - 1 - VISIBLE_MARGIN), math.min(n, vim.fn.line 'w$' + VISIBLE_MARGIN)
+end
+
 -- Whether a declaration declares a pointer or reference (so a leading const
 -- qualifies a pointee/referent and should stay visible).
 local function declares_ptr_ref(decl)
@@ -74,6 +86,7 @@ local function refresh(bufnr)
   local lang = parser:lang()
 
   local cur = cursor_row0(bufnr)
+  local s0, e0 = visible_range(bufnr)
   local jai_ok, jai = pcall(require, 'custom.jai_view')
   local jai_on = jai_ok and jai.is_enabled(bufnr)
   local function covered(row0)
@@ -87,7 +100,7 @@ local function refresh(bufnr)
   -- 1. pointer `*` -> `^` (virt_text, skip the cursor line so the real `*` shows)
   local okp, pq = pcall(vim.treesitter.query.parse, lang, PTR_QUERY)
   if okp and pq then
-    for _, node in pq:iter_captures(root, bufnr, 0, -1) do
+    for _, node in pq:iter_captures(root, bufnr, s0, e0) do
       local sr, sc, _, ec = node:range()
       if sr ~= cur and not covered(sr) then
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc, {
@@ -105,7 +118,7 @@ local function refresh(bufnr)
   -- reference declarations keep their const (DansConst grays it).
   local okc, cq = pcall(vim.treesitter.query.parse, lang, CONST_QUERY)
   if okc and cq then
-    for _, node in cq:iter_captures(root, bufnr, 0, -1) do
+    for _, node in cq:iter_captures(root, bufnr, s0, e0) do
       local sr, sc, _, ec = node:range()
       if not covered(sr) and vim.treesitter.get_node_text(node, bufnr) == 'const' then
         local decl = node:parent()
@@ -133,7 +146,7 @@ function M.setup()
       refresh(ev.buf)
     end,
   })
-  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'BufEnter', 'CursorMoved', 'CursorMovedI' }, {
+  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'BufEnter', 'CursorMoved', 'CursorMovedI', 'WinScrolled' }, {
     group = group,
     callback = function(ev)
       refresh(ev.buf)
