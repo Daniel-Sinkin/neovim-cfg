@@ -30,6 +30,7 @@ pcall(function()
     s({ trig = '$nd', wordTrig = false, snippetType = 'autosnippet' }, { t '[[nodiscard]]' }),
     s({ trig = '$sc', wordTrig = false, snippetType = 'autosnippet' }, { t 'static_cast' }),
     s({ trig = '$ne', wordTrig = false, snippetType = 'autosnippet' }, { t 'noexcept' }),
+    s({ trig = '$as', wordTrig = false, snippetType = 'autosnippet' }, { t 'static_assert' }),
 
     -- Class skeleton (rule of zero).
     s('dsk_class0', {

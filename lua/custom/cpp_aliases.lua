@@ -7,6 +7,7 @@
 --   const_cast        -> $cc
 --   noexcept          -> $ne
 --   [[nodiscard]]     -> $nd
+--   static_assert     -> $as
 --   VK_NULL_HANDLE    -> {}  (in the Vulkan color)
 
 local M = {}
@@ -21,6 +22,7 @@ local ALIASES = {
   { 'const_cast', '$cc' },
   { 'noexcept', '$ne' },
   { '[[nodiscard]]', '$nd' },
+  { 'static_assert', '$as' },
   { 'VK_NULL_HANDLE', '{}', 'DansVulkan' },
 }
 
