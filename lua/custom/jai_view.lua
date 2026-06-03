@@ -36,9 +36,10 @@ local show_hints = false -- deduced-type hints off by default (toggle with :Inli
 -- (intro line only; the body keeps its own indentation). Toggle :LambdaView.
 local lambda_render = true
 local LAMBDA_KEYWORD = 'lambda'
--- Divider between a lambda's capture list and its params: lambda f(& | int x).
--- Not `, ` (reads as another arg) nor `: ` (clashes with the name:type colon).
-local LAMBDA_CAP_SEP = ' | '
+-- Divider between a lambda's capture list and its params, shown whenever there
+-- are params: lambda f(& : int x); no capture -> lambda f(: int x); no params
+-- -> lambda f(&).
+local LAMBDA_CAP_SEP = ':'
 
 -- Range-for binding sigil position: true -> `vertex&` (after the name), false ->
 -- `&vertex` (before it). const is hidden; a non-const binding shows `mut`.
@@ -592,10 +593,9 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
       if has_cap then
         add_value(cap)
       end
-      if has_cap and has_params then
-        add(LAMBDA_CAP_SEP)
-      end
       if has_params then
+        -- ` : ` after a capture, `: ` without one (no leading space).
+        add(has_cap and (' ' .. LAMBDA_CAP_SEP .. ' ') or (LAMBDA_CAP_SEP .. ' '))
         add_value(params)
       end
       add ')'
