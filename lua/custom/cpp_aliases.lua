@@ -240,11 +240,14 @@ local function refresh(bufnr)
       end
 
       -- Inject `mut` where a non-const member function's trailing `const` would
-      -- be, so the receiver mutability reads like everywhere else.
+      -- be, so the receiver mutability reads like everywhere else. When the `)`
+      -- ends the line (signature wraps before `->`), there's no following token
+      -- to supply the leading space, so add it: `) mut` not `)mut`.
       local mcol = M.member_mut_col(line, bufnr, row - 1)
       if mcol then
+        local mtext = (mcol >= #line) and ' mut' or 'mut '
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row - 1, mcol, {
-          virt_text = { { 'mut ', 'DansMarkerMut' } },
+          virt_text = { { mtext, 'DansMarkerMut' } },
           virt_text_pos = 'inline',
         })
       end
