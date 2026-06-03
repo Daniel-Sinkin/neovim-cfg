@@ -553,6 +553,30 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     end
   end
 
+  -- dev::Defer _{[cap] { body }}  ->  Jai-style `defer body`: a scope-exit guard
+  -- where the Defer type, throwaway name, capture, and wrapping braces are all
+  -- ceremony. One statement renders inline (`defer f();`); several keep a block
+  -- (`defer { a(); b(); }`). Matched before the generic explicit-type branch.
+  do
+    local dtyp, dinit = core:match '^([%w_:]+)%s+[%w_]+%s*(%b{})$'
+    if dtyp and had_semi and (dtyp == 'Defer' or dtyp:match '::Defer$') then
+      local inner = dinit:sub(2, -2)
+      local body = inner:match '^%s*%b[]%s*{(.*)}%s*$' or inner:match '^%s*%b[]%s*%b()%s*{(.*)}%s*$'
+      if body then
+        body = vim.trim(body)
+        add('defer ', 'DansLambda')
+        if body:gsub(';%s*$', ''):find ';' then
+          add '{ '
+          add_value(body)
+          add ' }'
+        else
+          add_value(body)
+        end
+        return chunks
+      end
+    end
+  end
+
   if prefix ~= '' then
     add(prefix, MARKER_HL[prefix:match '^(%S+)'] or 'Normal')
   end
