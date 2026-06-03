@@ -37,6 +37,10 @@ local show_hints = false -- deduced-type hints off by default (toggle with :Inli
 local lambda_render = true
 local LAMBDA_KEYWORD = 'lambda'
 
+-- Range-for binding sigil position: true -> `vertex&` (after the name), false ->
+-- `&vertex` (before it). const is hidden; a non-const binding shows `mut`.
+local FOR_REF_SUFFIX = true
+
 local STMT_KEYWORDS = {
   ['return'] = true,
   ['if'] = true,
@@ -264,6 +268,43 @@ local function type_hl(t)
   return 'DansInlayType'
 end
 
+-- The lone `:` of a range-based for (skipping `::` qualifiers).
+local function for_colon(s)
+  local i = 1
+  while true do
+    local c = s:find(':', i, true)
+    if not c then
+      return nil
+    end
+    if s:sub(c - 1, c - 1) ~= ':' and s:sub(c + 1, c + 1) ~= ':' then
+      return c
+    end
+    i = c + 1
+  end
+end
+
+-- Parse `for (BINDING : ITER) TAIL` where BINDING is `[const] auto[&*] name`.
+-- Returns a table or nil. const is hidden; a missing const surfaces as `mut`.
+-- C-style fors (no `:`) and explicit-type bindings (no `auto`) return nil.
+local function parse_for(core)
+  local inside, tail = core:match '^for%s*%((.+)%)%s*(.*)$'
+  if not inside then
+    return nil
+  end
+  local c = for_colon(inside)
+  if not c then
+    return nil
+  end
+  local binding = vim.trim(inside:sub(1, c - 1))
+  local iter = vim.trim(inside:sub(c + 1))
+  local is_const = binding:match '^const%f[%A]' ~= nil
+  local sigil, name = binding:gsub('^const%s+', ''):match '^auto%s*([&*]?)%s*(.+)$'
+  if not name then
+    return nil
+  end
+  return { is_const = is_const, sigil = sigil, name = vim.trim(name), iter = iter, tail = tail }
+end
+
 -- Strip the parts of a type the view hides: leading constexpr/inline and the
 -- std::/dans:: qualifiers. Shared by build_chunks and the alignment pass.
 local function strip_type(typ)
@@ -328,13 +369,15 @@ end
 local function build_chunks(prefix, core, had_semi, type_hint, align)
   local semi = had_semi and ';' or ''
 
+  local forp = parse_for(core)
+
   -- structured binding: auto [a, b] = expr  ->  [a, b] := expr (no per-element
   -- type hints; clangd's binding hints aren't reliable enough).
   local sb_sigil, sb_binds, sb_expr = core:match '^auto([&*]?)%s*%[(.-)%]%s*=%s*(.+)$'
 
   local sigil, name, expr = core:match '^auto([&*]?)%s+([%w_]+)%s*=%s*(.+)$'
   local typ, nm, init
-  if not sb_binds and not name then
+  if not forp and not sb_binds and not name then
     typ, nm, init = core:match '^(.-)%s+([%w_]+)%s*{(.*)}$'
     -- A brace-init declaration is a terminated statement; require the `;`.
     -- Without it this is a continuation / constructor temporary in an argument
@@ -361,7 +404,25 @@ local function build_chunks(prefix, core, had_semi, type_hint, align)
     add(prefix, MARKER_HL[prefix:match '^(%S+)'] or 'Normal')
   end
 
-  if sb_binds then
+  if forp then
+    add 'for ('
+    if not forp.is_const then
+      add('mut ', 'DansMarkerMut')
+    end
+    if FOR_REF_SUFFIX then
+      add(forp.name)
+      add(forp.sigil)
+    else
+      add(forp.sigil)
+      add(forp.name)
+    end
+    add ' : '
+    add_value(forp.iter)
+    add ')'
+    if forp.tail ~= '' then
+      add(' ' .. forp.tail)
+    end
+  elseif sb_binds then
     if not is_balanced(sb_expr) then
       return nil
     end
