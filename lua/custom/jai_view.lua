@@ -184,42 +184,64 @@ local function expr_aliases()
   return map
 end
 
--- Split `text` into chunks, aliasing cast keywords ($sc/...) and coloring
--- whole-word marker keywords.
+-- Split `text` into chunks: string literals colored green (contents untouched),
+-- namespace qualifiers grayed/hidden, cast keywords aliased, marker/Vk/SDL/macro
+-- words colored. Mirrors the raw-line matchadd coloring inside the overlay.
 local function colorize(text)
   local out = {}
   local i, n = 1, #text
   while i <= n do
+    local q = text:find('"', i, true)
     local s, e = text:find('[%a_][%w_]*', i)
-    if not s then
+    if q and (not s or q <= s) then
+      -- String literal: emit the gap before it, then consume "..." (with escapes)
+      -- as one green chunk so nothing inside gets recolored or concealed.
+      if q > i then
+        out[#out + 1] = { text:sub(i, q - 1), 'Normal' }
+      end
+      local j = q + 1
+      while j <= n do
+        local c = text:sub(j, j)
+        if c == '\\' then
+          j = j + 2
+        elseif c == '"' then
+          j = j + 1
+          break
+        else
+          j = j + 1
+        end
+      end
+      out[#out + 1] = { text:sub(q, j - 1), 'DansString' }
+      i = j
+    elseif s then
+      if s > i then
+        out[#out + 1] = { text:sub(i, s - 1), 'Normal' }
+      end
+      local word = text:sub(s, e)
+      if text:sub(e + 1, e + 2) == '::' then
+        -- Namespace qualifier: hide std::/dans:: and gray the rest.
+        if word ~= 'std' and word ~= 'dans' then
+          out[#out + 1] = { word .. '::', 'DansNamespace' }
+        end
+        i = e + 3
+      else
+        local alias = expr_aliases()[word]
+        if alias then
+          out[#out + 1] = { alias[1], alias[2] }
+        elseif word:match '^Vk' or word:match '^VK_' or word:match '^vk%u' then
+          out[#out + 1] = { word, 'DansVulkan' } -- Vk*/VK_*/vk*, matches cpp_markers
+        elseif word:match '^SDL_' then
+          out[#out + 1] = { word, 'DansSDL' }
+        elseif word:match '^[A-Z][A-Z0-9_]+$' then
+          out[#out + 1] = { word, 'DansMacro' } -- other all-caps macro
+        else
+          out[#out + 1] = { word, EXPR_MARKERS[word] or 'Normal' }
+        end
+        i = e + 1
+      end
+    else
       out[#out + 1] = { text:sub(i), 'Normal' }
       break
-    end
-    if s > i then
-      out[#out + 1] = { text:sub(i, s - 1), 'Normal' }
-    end
-    local word = text:sub(s, e)
-    if text:sub(e + 1, e + 2) == '::' then
-      -- Namespace qualifier: hide std::/dans:: and gray the rest, matching the
-      -- conceal + DansNamespace treatment on raw lines.
-      if word ~= 'std' and word ~= 'dans' then
-        out[#out + 1] = { word .. '::', 'DansNamespace' }
-      end
-      i = e + 3
-    else
-      local alias = expr_aliases()[word]
-      if alias then
-        out[#out + 1] = { alias[1], alias[2] }
-      elseif word:match '^Vk' or word:match '^VK_' or word:match '^vk%u' then
-        out[#out + 1] = { word, 'DansVulkan' } -- Vk*/VK_*/vk*, matches cpp_markers
-      elseif word:match '^SDL_' then
-        out[#out + 1] = { word, 'DansSDL' }
-      elseif word:match '^[A-Z][A-Z0-9_]+$' then
-        out[#out + 1] = { word, 'DansMacro' } -- other all-caps macro
-      else
-        out[#out + 1] = { word, EXPR_MARKERS[word] or 'Normal' }
-      end
-      i = e + 1
     end
   end
   return out
