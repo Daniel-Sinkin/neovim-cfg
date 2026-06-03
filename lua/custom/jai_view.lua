@@ -70,7 +70,7 @@ local STMT_KEYWORDS = {
   ['static_assert'] = true,
 }
 
-local MARKERS = { 'mut_unchecked', 'mut', 'cpy' }
+local MARKERS = { 'cpy' }
 
 -- Marker word -> highlight group, shared with cpp_markers.lua.
 local MARKER_HL = {
@@ -79,8 +79,9 @@ local MARKER_HL = {
   cpy = 'DansMarkerCpy',
 }
 
--- Peel leading attributes/markers. `const` and `inline` are dropped; mut/cpy
--- and `[[maybe_unused]]` are kept as a prefix. Returns (prefix, rest).
+-- Peel leading attributes/markers. `const`/`constexpr`/`inline` and the (now
+-- source-removed) `mut`/`mut_unchecked` are dropped; `cpy` and `[[maybe_unused]]`
+-- are kept as a prefix. mut is re-inferred from non-const in build_chunks.
 local function split_markers(s)
   local prefix = ''
   local rest = s
@@ -97,6 +98,16 @@ local function split_markers(s)
       local after_inline = rest:match '^inline%s+(.*)$'
       if after_inline then
         rest = after_inline
+        matched = true
+      end
+    end
+
+    if not matched then
+      -- mut / mut_unchecked are dropped (re-inferred from non-const, not a
+      -- source token anymore). mut_unchecked first: it's a prefix of mut.
+      local after_mut = rest:match '^mut_unchecked%s+(.*)$' or rest:match '^mut%s+(.*)$'
+      if after_mut then
+        rest = after_mut
         matched = true
       end
     end
@@ -399,11 +410,52 @@ local function compute_align(lines)
   return map
 end
 
+-- Classify the declaration on a line via treesitter: 'member' (struct/class
+-- field), 'local' (function-body variable), 'param', or nil. Used to infer mut
+-- only on non-const locals (members/params are handled separately). Cheap (a
+-- node lookup + ancestor walk); guarded since the tree may be mid-parse.
+local function decl_kind(bufnr, row0)
+  if not bufnr then
+    return nil
+  end
+  local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
+  if not line then
+    return nil
+  end
+  local col = #(line:match '^%s*' or '')
+  local ok, node = pcall(vim.treesitter.get_node, { bufnr = bufnr, pos = { row0, col } })
+  if not ok or not node then
+    return nil
+  end
+  while node do
+    local t = node:type()
+    if t == 'field_declaration' then
+      return 'member'
+    elseif t == 'parameter_declaration' or t == 'optional_parameter_declaration' then
+      return 'param'
+    elseif t == 'declaration' then
+      return 'local'
+    end
+    node = node:parent()
+  end
+  return nil
+end
+
 -- Build the virt_text chunk list for a parsed declaration, or nil if `core`
 -- isn't a recognized declaration form. `align` (optional) is { nw, tw } column
--- widths to pad the name/type to, for struct-field alignment.
-local function build_chunks(prefix, core, had_semi, type_hint, align, was_const)
+-- widths to pad the name/type to. `was_const` + (bufnr,row0) drive the inferred
+-- `mut` on non-const locals.
+local function build_chunks(prefix, core, had_semi, type_hint, align, was_const, bufnr, row0)
   local semi = had_semi and ';' or ''
+  -- Lazy (treesitter): only the branches that infer mut pay for it, and only on
+  -- lines that actually render (non-decls return before reaching a branch).
+  local _local
+  local function is_local()
+    if _local == nil then
+      _local = decl_kind(bufnr, row0) == 'local'
+    end
+    return _local
+  end
 
   local forp = parse_for(core)
 
@@ -469,6 +521,9 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const)
     if not is_balanced(sb_expr) then
       return nil
     end
+    if is_local() and not was_const then
+      add('mut ', 'DansMarkerMut')
+    end
     add('[' .. sb_binds .. '] := ' .. ((sb_sigil == '&') and '&' or ''))
     add_value(sb_expr)
     add(semi)
@@ -494,16 +549,23 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const)
       add(semi)
     elseif not is_balanced(expr) then
       return nil -- incomplete RHS (multi-line opener), leave raw
-    elseif type_hint and name ~= '_' then
-      add(name .. ': ')
-      add(ptr(type_hint), type_hl(type_hint))
-      add ' = '
-      add_value(expr)
-      add(semi)
     else
-      add(name .. ' := ' .. ((sigil == '&') and '&' or ''))
-      add_value(expr)
-      add(semi)
+      -- non-const local -> inferred mut (prefix; auto-forms aren't in alignment
+      -- blocks so this doesn't shift any aligned column).
+      if is_local() and not was_const then
+        add('mut ', 'DansMarkerMut')
+      end
+      if type_hint and name ~= '_' then
+        add(name .. ': ')
+        add(ptr(type_hint), type_hl(type_hint))
+        add ' = '
+        add_value(expr)
+        add(semi)
+      else
+        add(name .. ' := ' .. ((sigil == '&') and '&' or ''))
+        add_value(expr)
+        add(semi)
+      end
     end
   else
     -- Explicit type: colored the same blue as the deduced hints (DansInlayType);
@@ -517,10 +579,12 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const)
       add(string.rep(' ', math.max(0, align.nw - vim.fn.strwidth(nm))))
     end
     add ': '
-    -- A non-const reference member surfaces `mut` (const is hidden), placed after
-    -- the colon like the `-> mut T&` return injection so the name column stays
-    -- aligned. References only; pointers don't get it.
-    if not was_const and shown_typ:find('&', 1, true) then
+    -- Surface `mut` (const hidden) for a non-const reference (member or local) or
+    -- a non-const local of any type; not for non-const value *members* (those are
+    -- normally mutable, marking them all would be noise). constexpr counts as
+    -- const via was_const. Placed after the colon like `-> mut T&` so the name
+    -- column stays aligned.
+    if not was_const and (shown_typ:find('&', 1, true) or is_local()) then
       add('mut ', 'DansMarkerMut')
     end
     add(shown_typ, type_hl(shown_typ))
@@ -541,7 +605,7 @@ end
 
 -- Returns (start_col, chunks) for the overlay, or nil if the line isn't a
 -- transformable declaration. `type_hint` is the deduced type for this line.
-local function render_line(line, type_hint, align)
+local function render_line(line, type_hint, align, bufnr, row0)
   local indent = line:match '^%s*'
   local body = line:sub(#indent + 1)
   if body == '' then
@@ -555,9 +619,10 @@ local function render_line(line, type_hint, align)
   end
   local had_semi = code:match ';%s*$' ~= nil
   local core_in = (code:gsub(';%s*$', ''))
-  local was_const = core_in:match '^const%f[%A]' ~= nil
+  -- const or constexpr (both hidden, both suppress the inferred mut).
+  local was_const = (core_in:match '^const%f[%A]' or core_in:match '^constexpr%f[%A]') ~= nil
   local prefix, core = split_markers(core_in)
-  local chunks = build_chunks(prefix, core, had_semi, type_hint, align, was_const)
+  local chunks = build_chunks(prefix, core, had_semi, type_hint, align, was_const, bufnr, row0)
   if not chunks then
     return nil
   end
@@ -617,7 +682,7 @@ local function set_row(bufnr, row0, reveal)
   if not line then
     return
   end
-  local start_col, chunks = render_line(line, type_for(bufnr, row0), (align_cache[bufnr] or {})[row0])
+  local start_col, chunks = render_line(line, type_for(bufnr, row0), (align_cache[bufnr] or {})[row0], bufnr, row0)
   if start_col then
     pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, start_col, {
       end_col = #line,
@@ -640,7 +705,7 @@ local function refresh(bufnr)
   for row, line in ipairs(lines) do
     local row0 = row - 1
     if not set[row0] then
-      local start_col, chunks = render_line(line, type_for(bufnr, row0), align[row0])
+      local start_col, chunks = render_line(line, type_for(bufnr, row0), align[row0], bufnr, row0)
       if start_col then
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, start_col, {
           end_col = #line,

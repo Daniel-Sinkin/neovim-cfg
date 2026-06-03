@@ -70,9 +70,8 @@ local function apply()
   end
 
   -- Window-local matches, priority above the flattened monochrome syntax.
-  -- Only the keyword is colored (not the following type/name).
-  vim.fn.matchadd('DansMarkerMut', [[\<mut\>]], 20)
-  vim.fn.matchadd('DansMarkerMut', [[\<mut_unchecked\>]], 20)
+  -- Only the keyword is colored (not the following type/name). mut/mut_unchecked
+  -- are gone from source now -- the frontend (jai_view) infers and colors them.
   vim.fn.matchadd('DansMarkerCpy', [[\<copy\>]], 20)
   vim.fn.matchadd('DansMarkerCpy', [[\<cpy\>]], 20)
   -- Gray every `const`. The leading-const conceal still hides it on non-cursor
