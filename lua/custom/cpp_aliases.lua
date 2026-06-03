@@ -59,6 +59,66 @@ local function in_string_or_comment(line, col0)
   end
 end
 
+-- First balanced (...) group: returns 1-based open/close byte positions, or nil.
+local function balanced_parens(line)
+  local open = line:find('(', 1, true)
+  if not open then
+    return nil
+  end
+  local depth = 0
+  for i = open, #line do
+    local c = line:sub(i, i)
+    if c == '(' then
+      depth = depth + 1
+    elseif c == ')' then
+      depth = depth - 1
+      if depth == 0 then
+        return open, i
+      end
+    end
+  end
+  return nil
+end
+
+-- Split an arg-list body on top-level commas. Returns { {text, from} } with
+-- `from` the 1-based offset of the arg within `s`.
+local function split_args(s)
+  local args, depth, start = {}, 0, 1
+  for i = 1, #s do
+    local c = s:sub(i, i)
+    if c == '(' or c == '<' or c == '[' or c == '{' then
+      depth = depth + 1
+    elseif c == ')' or c == '>' or c == ']' or c == '}' then
+      depth = depth - 1
+    elseif c == ',' and depth == 0 then
+      args[#args + 1] = { text = s:sub(start, i - 1), from = start }
+      start = i + 1
+    end
+  end
+  args[#args + 1] = { text = s:sub(start), from = start }
+  return args
+end
+
+-- 0-based byte columns where a `mut ` should be injected before a function arg:
+-- a non-const reference/pointer parameter. Only on trailing-return decls (a `->`
+-- follows the arg parens), so calls/statements are skipped. Exposed so
+-- hpp_arrow_align can account for the injected width. nil-safe -> {}.
+function M.arg_mut_cols(line)
+  local open, close = balanced_parens(line)
+  if not open or not line:sub(close + 1):find('->', 1, true) then
+    return {}
+  end
+  local cols = {}
+  for _, arg in ipairs(split_args(line:sub(open + 1, close - 1))) do
+    local lead = #(arg.text:match '^%s*' or '')
+    local body = arg.text:sub(lead + 1)
+    if body ~= '' and not body:match '^const%f[%A]' and (body:find('&', 1, true) or body:find('*', 1, true)) then
+      cols[#cols + 1] = open + arg.from + lead - 1 -- 0-based line column of the arg start
+    end
+  end
+  return cols
+end
+
 local function cursor_row0(bufnr)
   if bufnr == vim.api.nvim_get_current_buf() then
     return vim.api.nvim_win_get_cursor(0)[1] - 1
@@ -125,6 +185,16 @@ local function refresh(bufnr)
             virt_text_pos = 'inline',
           })
         end
+      end
+
+      -- Inject `mut` before each non-const reference/pointer parameter (the
+      -- source token is gone; the frontend shows it). hpp_arrow_align mirrors
+      -- these widths via M.arg_mut_cols so header arrows stay aligned.
+      for _, col0 in ipairs(M.arg_mut_cols(line)) do
+        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row - 1, col0, {
+          virt_text = { { 'mut ', 'DansMarkerMut' } },
+          virt_text_pos = 'inline',
+        })
       end
     end
   end

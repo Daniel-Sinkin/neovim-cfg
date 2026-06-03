@@ -167,11 +167,24 @@ local function rendered_arrow_col(line)
     + literal_removed(prefix, 'dans::')
     + literal_removed(prefix, 'dans_')
   local arem, aadd = alias_delta(prefix)
+  -- cpp_aliases injects `mut ` (4 cells) before non-const ref/ptr args; that adds
+  -- width before the arrow, so account for it here or the arrows drift.
+  local mut_added = 0
+  local ok, cols = pcall(function()
+    return require('custom.cpp_aliases').arg_mut_cols(line)
+  end)
+  if ok and cols then
+    for _, col0 in ipairs(cols) do
+      if col0 < ap - 1 then
+        mut_added = mut_added + 4
+      end
+    end
+  end
   -- strwidth, not strdisplaywidth: the latter inflates tab-free strings with
   -- long trailing-space runs on this build (alignment padding is exactly that),
   -- while strwidth is the true cell count. Headers here are space-indented (no
   -- tabs), so column-aware tab expansion isn't needed.
-  return vim.fn.strwidth(prefix) - removed - arem + aadd, ap
+  return vim.fn.strwidth(prefix) - removed - arem + aadd + mut_added, ap
 end
 
 -- Scan the buffer into a row0 -> {col, n} pad map. Blocks are maximal runs of
