@@ -415,9 +415,10 @@ local function compute_align(lines)
 end
 
 -- Classify the declaration on a line via treesitter: 'member' (struct/class
--- field), 'local' (function-body variable), 'param', or nil. Used to infer mut
--- only on non-const locals (members/params are handled separately). Cheap (a
--- node lookup + ancestor walk); guarded since the tree may be mid-parse.
+-- field), 'local' (function-body variable), 'param', 'global' (file/namespace
+-- scope), or nil. mut is inferred only on non-const locals; keyed on the
+-- enclosing scope (not just `declaration`, which also covers namespace globals).
+-- Cheap (node lookup + ancestor walk); guarded since the tree may be mid-parse.
 local function decl_kind(bufnr, row0)
   if not bufnr then
     return nil
@@ -437,8 +438,10 @@ local function decl_kind(bufnr, row0)
       return 'member'
     elseif t == 'parameter_declaration' or t == 'optional_parameter_declaration' then
       return 'param'
-    elseif t == 'declaration' then
-      return 'local'
+    elseif t == 'function_definition' or t == 'compound_statement' then
+      return 'local' -- inside a function body
+    elseif t == 'namespace_definition' or t == 'translation_unit' then
+      return 'global' -- file / namespace scope, not a function local
     end
     node = node:parent()
   end
@@ -641,7 +644,7 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     -- normally mutable, marking them all would be noise). constexpr counts as
     -- const via was_const. Placed after the colon like `-> mut T&` so the name
     -- column stays aligned.
-    if not was_const and (shown_typ:find('&', 1, true) or is_local()) then
+    if not was_const and not is_constexpr and (shown_typ:find('&', 1, true) or is_local()) then
       add('mut ', 'DansMarkerMut')
     end
     add(shown_typ, type_hl(shown_typ))
