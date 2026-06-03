@@ -357,7 +357,11 @@ local function field_dims(line)
   local _, core = split_markers((code:gsub(';%s*$', '')))
   local typ, nm = core:match '^(.-)%s+([%w_]+)%s*{.*}$'
   if not (nm and had_semi and looks_like_type(typ)) then
-    return nil
+    -- no-brace reference/pointer member: `T& name` / `T* name`
+    typ, nm = core:match '^(.-[%w_>][&*]+)%s*([%w_]+)$'
+    if not (typ and nm and had_semi and looks_like_type(typ)) then
+      return nil
+    end
   end
   return nm, strip_type(typ)
 end
@@ -398,7 +402,7 @@ end
 -- Build the virt_text chunk list for a parsed declaration, or nil if `core`
 -- isn't a recognized declaration form. `align` (optional) is { nw, tw } column
 -- widths to pad the name/type to, for struct-field alignment.
-local function build_chunks(prefix, core, had_semi, type_hint, align)
+local function build_chunks(prefix, core, had_semi, type_hint, align, was_const)
   local semi = had_semi and ';' or ''
 
   local forp = parse_for(core)
@@ -415,7 +419,14 @@ local function build_chunks(prefix, core, had_semi, type_hint, align)
     -- Without it this is a continuation / constructor temporary in an argument
     -- list (e.g. `local_ray, Aabb{.min = a}`), where `local_ray,` is not a type.
     if not (nm and had_semi and looks_like_type(typ)) then
-      return nil
+      -- No-brace reference/pointer member: `T& name` / `T* name` (a struct
+      -- reference can't be brace-defaulted). The sigil must touch the type, so
+      -- bitwise/multiply statements like `a & b;` aren't grabbed.
+      typ, nm = core:match '^(.-[%w_>][&*]+)%s*([%w_]+)$'
+      init = ''
+      if not (typ and nm and had_semi and looks_like_type(typ)) then
+        return nil
+      end
     end
   end
 
@@ -506,6 +517,12 @@ local function build_chunks(prefix, core, had_semi, type_hint, align)
       add(string.rep(' ', math.max(0, align.nw - vim.fn.strwidth(nm))))
     end
     add ': '
+    -- A non-const reference member surfaces `mut` (const is hidden), placed after
+    -- the colon like the `-> mut T&` return injection so the name column stays
+    -- aligned. References only; pointers don't get it.
+    if not was_const and shown_typ:find('&', 1, true) then
+      add('mut ', 'DansMarkerMut')
+    end
     add(shown_typ, type_hl(shown_typ))
     if init ~= '' then
       -- Pad the type only when there's an initializer, so the `=` aligns across
@@ -538,8 +555,9 @@ local function render_line(line, type_hint, align)
   end
   local had_semi = code:match ';%s*$' ~= nil
   local core_in = (code:gsub(';%s*$', ''))
+  local was_const = core_in:match '^const%f[%A]' ~= nil
   local prefix, core = split_markers(core_in)
-  local chunks = build_chunks(prefix, core, had_semi, type_hint, align)
+  local chunks = build_chunks(prefix, core, had_semi, type_hint, align, was_const)
   if not chunks then
     return nil
   end
