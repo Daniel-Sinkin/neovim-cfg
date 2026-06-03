@@ -16,6 +16,7 @@ local MATCH_GROUPS = {
   DansMacro = true,
   DansVulkan = true,
   DansSDL = true,
+  DansString = true,
   DansCommentMask = true,
   DansIncludeMask = true,
 }
@@ -34,6 +35,9 @@ local function set_hl()
   vim.api.nvim_set_hl(0, 'DansMacro', { fg = '#ff9e64' })
   -- SDL identifiers (SDL_*) -- teal/cyan, its own category.
   vim.api.nvim_set_hl(0, 'DansSDL', { fg = '#2ac3de' })
+  -- String literals -- muted green. A calm color (strings are inert content);
+  -- applied at high priority so no other coloring/conceal leaks inside them.
+  vim.api.nvim_set_hl(0, 'DansString', { fg = '#a3be8c' })
   -- Deduced-type inlay text inside jai_view overlays (clangd auto types).
   -- Clearly blue so it reads apart from the gray comments.
   vim.api.nvim_set_hl(0, 'DansInlayType', { fg = '#7aa2f7' })
@@ -91,6 +95,11 @@ local function apply()
   -- SDL identifiers (SDL_*) -> teal. Same priority; SDL_FOO also matches the
   -- macro pattern, so the higher priority makes the teal win.
   vim.fn.matchadd('DansSDL', [[\<SDL_[A-Za-z0-9_]*\>]], 25)
+  -- String literals -> green, priority 35 (above the color matches AND the
+  -- conceals at 30) so nothing else colors or conceals inside a string. Quoted
+  -- pattern (a "..." literal with escapes); not [[...]] -- the [^"\] class
+  -- would trip the long-string parser. Single-line strings only.
+  vim.fn.matchadd('DansString', '"\\%(\\\\.\\|[^"\\\\]\\)*"', 35)
   -- Masks (priority 28, above the color matches): the matches above are syntax
   -- blind, so they color all-caps tokens inside comments (// IWYU ...) and
   -- include paths (<SDL3/SDL.h>). Recolor those regions back to neutral. Below

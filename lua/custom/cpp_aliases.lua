@@ -32,6 +32,31 @@ local function is_word_char(c)
   return c and c:match '[%w_]' ~= nil
 end
 
+-- Whether byte column col0 (0-based) sits inside a "..." string or a // comment,
+-- so aliases stay out of non-code text. Naive (ignores raw strings, escaped
+-- quotes, char literals), but enough for this.
+local function in_string_or_comment(line, col0)
+  local cstart = line:find('//', 1, true)
+  if cstart and col0 >= cstart - 1 then
+    return true
+  end
+  local i = 1
+  while true do
+    local s = line:find('"', i)
+    if not s then
+      return false
+    end
+    local e = line:find('"', s + 1)
+    if not e then
+      return false
+    end
+    if col0 >= s - 1 and col0 < e then
+      return true
+    end
+    i = e + 1
+  end
+end
+
 local function cursor_row0(bufnr)
   if bufnr == vim.api.nvim_get_current_buf() then
     return vim.api.nvim_win_get_cursor(0)[1] - 1
@@ -73,7 +98,7 @@ local function refresh(bufnr)
           end
           local before = s > 1 and line:sub(s - 1, s - 1) or nil
           local after = e < #line and line:sub(e + 1, e + 1) or nil
-          if not is_word_char(before) and not is_word_char(after) then
+          if not is_word_char(before) and not is_word_char(after) and not in_string_or_comment(line, s - 1) then
             pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row - 1, s - 1, {
               end_col = e,
               conceal = '',
