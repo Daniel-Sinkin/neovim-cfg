@@ -119,6 +119,48 @@ function M.arg_mut_cols(line)
   return cols
 end
 
+-- 0-based column to inject `mut` for a NON-const member function (where the
+-- trailing `const` would sit, after the param parens), or nil. Member functions
+-- only -- a free function has no receiver const. Needs treesitter to tell a
+-- member function from a free one / a data member. Exposed for hpp_arrow_align.
+function M.member_mut_col(line, bufnr, row0)
+  if not bufnr or not row0 then
+    return nil
+  end
+  local open, close = balanced_parens(line)
+  if not open then
+    return nil
+  end
+  if line:sub(close):match '^%)%s*const%f[%A]' then
+    return nil -- already a const member function
+  end
+  if line:match '%f[%w]static%f[%A]' then
+    return nil -- static member function: no receiver
+  end
+  local ok, node = pcall(vim.treesitter.get_node, { bufnr = bufnr, pos = { row0, open - 1 } })
+  if not ok or not node then
+    return nil
+  end
+  local is_member, is_func = false, false
+  while node do
+    local t = node:type()
+    if t == 'field_declaration' then
+      is_member = true
+    elseif t == 'function_declarator' then
+      is_func = true
+    end
+    node = node:parent()
+  end
+  if not (is_member and is_func) then
+    return nil
+  end
+  local p = close + 1
+  while p <= #line and line:sub(p, p):match '%s' do
+    p = p + 1
+  end
+  return p - 1
+end
+
 local function cursor_row0(bufnr)
   if bufnr == vim.api.nvim_get_current_buf() then
     return vim.api.nvim_win_get_cursor(0)[1] - 1
@@ -192,6 +234,16 @@ local function refresh(bufnr)
       -- these widths via M.arg_mut_cols so header arrows stay aligned.
       for _, col0 in ipairs(M.arg_mut_cols(line)) do
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row - 1, col0, {
+          virt_text = { { 'mut ', 'DansMarkerMut' } },
+          virt_text_pos = 'inline',
+        })
+      end
+
+      -- Inject `mut` where a non-const member function's trailing `const` would
+      -- be, so the receiver mutability reads like everywhere else.
+      local mcol = M.member_mut_col(line, bufnr, row - 1)
+      if mcol then
+        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row - 1, mcol, {
           virt_text = { { 'mut ', 'DansMarkerMut' } },
           virt_text_pos = 'inline',
         })

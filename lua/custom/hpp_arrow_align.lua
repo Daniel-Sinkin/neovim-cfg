@@ -155,7 +155,7 @@ end
 
 -- Rendered display column of the arrow (cells visible before it), and its
 -- 1-based source index. nil if the line has no trailing-return arrow.
-local function rendered_arrow_col(line)
+local function rendered_arrow_col(line, bufnr, row0)
   local ap = arrow_pos(code_of(line))
   if not ap then
     return nil
@@ -167,8 +167,9 @@ local function rendered_arrow_col(line)
     + literal_removed(prefix, 'dans::')
     + literal_removed(prefix, 'dans_')
   local arem, aadd = alias_delta(prefix)
-  -- cpp_aliases injects `mut ` (4 cells) before non-const ref/ptr args; that adds
-  -- width before the arrow, so account for it here or the arrows drift.
+  -- cpp_aliases injects `mut ` (4 cells) before non-const ref/ptr args, and where
+  -- a non-const member function's trailing const would be; both add width before
+  -- the arrow, so account for them or the arrows drift.
   local mut_added = 0
   local ok, cols = pcall(function()
     return require('custom.cpp_aliases').arg_mut_cols(line)
@@ -178,6 +179,14 @@ local function rendered_arrow_col(line)
       if col0 < ap - 1 then
         mut_added = mut_added + 4
       end
+    end
+  end
+  if bufnr and row0 then
+    local okm, mcol = pcall(function()
+      return require('custom.cpp_aliases').member_mut_col(line, bufnr, row0)
+    end)
+    if okm and mcol and mcol < ap - 1 then
+      mut_added = mut_added + 4
     end
   end
   -- strwidth, not strdisplaywidth: the latter inflates tab-free strings with
@@ -198,7 +207,7 @@ local function compute(bufnr)
     local block = {}
     local j = i
     while j <= n do
-      local r, ap = rendered_arrow_col(lines[j])
+      local r, ap = rendered_arrow_col(lines[j], bufnr, j - 1)
       if not r then
         break
       end
