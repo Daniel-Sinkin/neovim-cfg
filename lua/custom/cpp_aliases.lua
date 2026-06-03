@@ -7,11 +7,13 @@
 --   const_cast        -> $cc
 --   noexcept          -> $ne
 --   [[nodiscard]]     -> $nd
+--   VK_NULL_HANDLE    -> ∅   (in the Vulkan color)
 
 local M = {}
 
 local ns = vim.api.nvim_create_namespace 'ds_cpp_aliases'
 
+-- { keyword, replacement, highlight? }  -- highlight defaults to 'Comment'.
 local ALIASES = {
   { 'static_cast', '$sc' },
   { 'dynamic_cast', '$dc' },
@@ -19,6 +21,7 @@ local ALIASES = {
   { 'const_cast', '$cc' },
   { 'noexcept', '$ne' },
   { '[[nodiscard]]', '$nd' },
+  { 'VK_NULL_HANDLE', '∅', 'DansVulkan' },
 }
 
 -- Exposed so hpp_arrow_align.lua can mirror these widths when it computes the
@@ -61,7 +64,7 @@ local function refresh(bufnr)
   for row, line in ipairs(lines) do
     if row - 1 ~= cur and not (jai_on and jai.covers(line)) then
       for _, alias in ipairs(ALIASES) do
-        local keyword, replacement = alias[1], alias[2]
+        local keyword, replacement, hl = alias[1], alias[2], alias[3] or 'Comment'
         local start_pos = 1
         while true do
           local s, e = line:find(keyword, start_pos, true)
@@ -74,7 +77,7 @@ local function refresh(bufnr)
             pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row - 1, s - 1, {
               end_col = e,
               conceal = '',
-              virt_text = { { replacement, 'Comment' } },
+              virt_text = { { replacement, hl } },
               virt_text_pos = 'inline',
             })
           end

@@ -15,6 +15,7 @@ local MATCH_GROUPS = {
   DansNamespace = true,
   DansMacro = true,
   DansVulkan = true,
+  DansSDL = true,
 }
 
 local function set_hl()
@@ -29,6 +30,8 @@ local function set_hl()
   -- Other all-caps macros / preprocessor constants -- orange. Not bold: these
   -- are dense in API-heavy code, so the hue alone carries the category.
   vim.api.nvim_set_hl(0, 'DansMacro', { fg = '#ff9e64' })
+  -- SDL identifiers (SDL_*) -- teal/cyan, its own category.
+  vim.api.nvim_set_hl(0, 'DansSDL', { fg = '#2ac3de' })
   -- Deduced-type inlay text inside jai_view overlays (clangd auto types).
   -- Clearly blue so it reads apart from the gray comments.
   vim.api.nvim_set_hl(0, 'DansInlayType', { fg = '#7aa2f7' })
@@ -73,10 +76,14 @@ local function apply()
   -- constants don't match.
   vim.fn.matchadd('DansMacro', [[\<[A-Z][A-Z0-9_]\+\>]], 20)
   -- Vulkan identifiers -> purple, at a higher priority so VK_* overrides the
-  -- generic macro color above. Vk* (types) are mixed-case so they never hit the
-  -- macro match anyway.
+  -- generic macro color above. Vk* (types) and vk* (functions) are mixed-case so
+  -- they never hit the macro match anyway.
   vim.fn.matchadd('DansVulkan', [[\<VK_[A-Z0-9_]*\>]], 25)
   vim.fn.matchadd('DansVulkan', [[\<Vk[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansVulkan', [[\<vk[A-Z][A-Za-z0-9_]*\>]], 25)
+  -- SDL identifiers (SDL_*) -> teal. Same priority; SDL_FOO also matches the
+  -- macro pattern, so the higher priority makes the teal win.
+  vim.fn.matchadd('DansSDL', [[\<SDL_[A-Za-z0-9_]*\>]], 25)
 end
 
 function M.setup()

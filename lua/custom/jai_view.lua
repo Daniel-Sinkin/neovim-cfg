@@ -165,7 +165,7 @@ local function expr_aliases()
   if ok and aliases then
     for _, a in ipairs(aliases) do
       if a[1]:match '^[%a_][%w_]*$' then
-        map[a[1]] = a[2]
+        map[a[1]] = { a[2], a[3] or 'Comment' } -- { replacement, highlight }
       end
     end
   end
@@ -192,9 +192,11 @@ local function colorize(text)
     local word = text:sub(s, e)
     local alias = expr_aliases()[word]
     if alias then
-      out[#out + 1] = { alias, 'Comment' }
-    elseif word:match '^Vk' or word:match '^VK_' then
-      out[#out + 1] = { word, 'DansVulkan' } -- Vk*/VK_*, matches cpp_markers
+      out[#out + 1] = { alias[1], alias[2] }
+    elseif word:match '^Vk' or word:match '^VK_' or word:match '^vk%u' then
+      out[#out + 1] = { word, 'DansVulkan' } -- Vk*/VK_*/vk*, matches cpp_markers
+    elseif word:match '^SDL_' then
+      out[#out + 1] = { word, 'DansSDL' }
     elseif word:match '^[A-Z][A-Z0-9_]+$' then
       out[#out + 1] = { word, 'DansMacro' } -- other all-caps macro
     else
@@ -245,6 +247,9 @@ end
 local function type_hl(t)
   if t:match '^Vk' or t:match '^VK_' then
     return 'DansVulkan'
+  end
+  if t:match '^SDL_' then
+    return 'DansSDL'
   end
   return 'DansInlayType'
 end
