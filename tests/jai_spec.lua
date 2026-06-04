@@ -160,6 +160,33 @@ run('for destructure', 'fn', { 'for (const auto& [k, v] : items)' }, { 'for (k, 
 run('if let', 'fn', { 'if (const auto res = find(x); res)' }, { 'if let res := find(x)' })
 run('if let with brace', 'fn', { 'if (const auto p = lookup(k); p) {' }, { 'if let p := lookup(k) {' })
 run('if plain (raw)', 'fn', { 'if (ready) {' }, { false })
+run('std move value', 'fn', { 'auto y = std::move(x);' }, { 'mut y := move(x);' })
+run('std forward value', 'fn', { 'auto y = std::forward<T>(x);' }, { 'mut y := forward<T>(x);' })
+
+-- std::move / forward must render red (DansMarkerMut); the text suite can't see hl
+do
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, { 'auto fn() -> void', '{', '    auto y = std::move(x);', '}' })
+  vim.bo[b].filetype = 'cpp'
+  vim.api.nvim_set_current_buf(b)
+  pcall(function() vim.treesitter.get_parser(b, 'cpp'):parse() end)
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+  vim.cmd 'doautocmd FileType'
+  vim.cmd 'doautocmd BufEnter'
+  local m = vim.api.nvim_buf_get_extmarks(b, jns, { 2, 0 }, { 2, -1 }, { details = true })
+  local hl
+  for _, c in ipairs(m[1] and m[1][4].virt_text or {}) do
+    if c[1] == 'move' then
+      hl = c[2]
+    end
+  end
+  if hl == 'DansMarkerMut' then
+    pass = pass + 1
+  else
+    fail = fail + 1
+    fails[#fails + 1] = 'FAIL  std::move color: move hl = ' .. tostring(hl)
+  end
+end
 
 -- ===================== report =====================
 local report = { string.format('jai_spec: %d passed, %d failed', pass, fail) }

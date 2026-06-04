@@ -102,11 +102,21 @@ local function colorize(text)
       end
       local word = text:sub(s, e)
       if text:sub(e + 1, e + 2) == '::' then
-        -- Namespace qualifier: hide std::/dans:: and gray the rest.
-        if word ~= 'std' and word ~= 'dans' then
+        if word == 'std' or word == 'dans' then
+          -- std::/dans:: hidden; std::move / std::forward keep a red flag (the
+          -- ownership-transfer points -- the source is left moved-from).
+          local mv = word == 'std' and (text:match('^move%f[%W]', e + 3) or text:match('^forward%f[%W]', e + 3))
+          if mv then
+            out[#out + 1] = { mv, 'DansMarkerMut' }
+            i = e + 3 + #mv
+          else
+            i = e + 3
+          end
+        else
+          -- Other namespace qualifier: gray it.
           out[#out + 1] = { word .. '::', 'DansNamespace' }
+          i = e + 3
         end
-        i = e + 3
       else
         local alias = expr_aliases()[word]
         if alias then

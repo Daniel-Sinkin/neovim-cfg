@@ -104,6 +104,10 @@ local function apply()
   -- SDL identifiers (SDL_*) -> teal. Same priority; SDL_FOO also matches the
   -- macro pattern, so the higher priority makes the teal win.
   vim.fn.matchadd('DansSDL', [[\<SDL_[A-Za-z0-9_]*\>]], 25)
+  -- std::move / std::forward -> red: ownership-transfer points worth seeing (the
+  -- source is left moved-from). `\zs` colors only the move/forward word; a member
+  -- `.move()` (e.g. a widget) isn't std::-qualified so it's untouched.
+  vim.fn.matchadd('DansMarkerMut', [[\<std::\zs\%(move\|forward\)\>]], 25)
   -- assert / static_assert -> gray the whole `...assert(...);` statement (priority
   -- 26 beats the macro/Vk/SDL coloring inside the condition). static_assert also
   -- still renders as `$as` (cpp_aliases); this just grays the rest of its line.
