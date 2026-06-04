@@ -39,33 +39,51 @@ local MARKERS = { 'cpy' }
 -- Peel leading attributes/markers. `const`/`constexpr`/`inline` and the (now
 -- source-removed) `mut`/`mut_unchecked` are dropped; `cpy` and `[[maybe_unused]]`
 -- are kept as a prefix. mut is re-inferred from non-const in build_chunks.
+-- Returns prefix, rest, is_const, is_constexpr. Leading cv/storage specifiers in
+-- ANY order are peeled and hidden: const/constexpr drive the rendering
+-- (const-ness hides const + suppresses the inferred mut; constexpr additionally
+-- renders as a `:` constant binding); static/inline/thread_local/extern/constinit
+-- are pure storage noise. `mut`/`mut_unchecked` are dropped (re-inferred from
+-- non-const, no longer a source token); `cpy` and `[[maybe_unused]]` are kept as
+-- a visible prefix.
 function M.split_markers(s)
   local prefix = ''
   local rest = s
+  local is_const, is_constexpr = false, false
   while true do
     local matched = false
 
-    local after_const = rest:match '^const%s+(.*)$'
-    if after_const then
-      rest = after_const
-      matched = true
+    -- const must be tried before the storage group; constexpr before const so a
+    -- bare `const ` (with trailing space) and `constexpr ` don't shadow it (they
+    -- can't anyway -- `^const%s+` won't match `constexpr` -- but keep it clear).
+    local after = rest:match '^constexpr%s+(.*)$'
+    if after then
+      rest, is_const, is_constexpr, matched = after, true, true, true
     end
 
     if not matched then
-      local after_inline = rest:match '^inline%s+(.*)$'
-      if after_inline then
-        rest = after_inline
-        matched = true
+      after = rest:match '^const%s+(.*)$'
+      if after then
+        rest, is_const, matched = after, true, true
       end
     end
 
     if not matched then
-      -- mut / mut_unchecked are dropped (re-inferred from non-const, not a
-      -- source token anymore). mut_unchecked first: it's a prefix of mut.
+      -- Pure storage/linkage specifiers: hidden, no effect on const/mut.
+      after = rest:match '^static%s+(.*)$'
+        or rest:match '^inline%s+(.*)$'
+        or rest:match '^thread_local%s+(.*)$'
+        or rest:match '^extern%s+(.*)$'
+        or rest:match '^constinit%s+(.*)$'
+      if after then
+        rest, matched = after, true
+      end
+    end
+
+    if not matched then
       local after_mut = rest:match '^mut_unchecked%s+(.*)$' or rest:match '^mut%s+(.*)$'
       if after_mut then
-        rest = after_mut
-        matched = true
+        rest, matched = after_mut, true
       end
     end
 
@@ -73,18 +91,16 @@ function M.split_markers(s)
       local after_mu = rest:match '^%[%[maybe_unused%]%]%s+(.*)$'
       if after_mu then
         prefix = prefix .. '[[maybe_unused]] '
-        rest = after_mu
-        matched = true
+        rest, matched = after_mu, true
       end
     end
 
     if not matched then
       for _, mk in ipairs(MARKERS) do
-        local after = rest:match('^' .. mk .. '%s+(.*)$')
-        if after then
+        local a = rest:match('^' .. mk .. '%s+(.*)$')
+        if a then
           prefix = prefix .. mk .. ' '
-          rest = after
-          matched = true
+          rest, matched = a, true
           break
         end
       end
@@ -94,7 +110,7 @@ function M.split_markers(s)
       break
     end
   end
-  return prefix, rest
+  return prefix, rest, is_const, is_constexpr
 end
 
 function M.looks_like_type(t)

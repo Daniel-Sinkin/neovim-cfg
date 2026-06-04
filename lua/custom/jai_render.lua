@@ -130,6 +130,25 @@ local function colorize(text)
   return out
 end
 
+-- Whether the type has a pointer/reference declarator at top level (`Foo^`,
+-- `Foo&`), as opposed to a `^`/`&` buried in template args (`pair<int&, V>`,
+-- `function<void(int&)>`) which does NOT make the variable a pointer/reference.
+-- Drives the const/mut marking on the type, so it must not be fooled by nesting.
+local function top_level_ptr_ref(t)
+  local depth = 0
+  for i = 1, #t do
+    local c = t:sub(i, i)
+    if c == '<' or c == '(' or c == '[' then
+      depth = depth + 1
+    elseif c == '>' or c == ')' or c == ']' then
+      depth = depth - 1
+    elseif (c == '^' or c == '&') and depth == 0 then
+      return true
+    end
+  end
+  return false
+end
+
 -- Highlight for a type in declaration position: Vulkan types (Vk*/VK_*) keep
 -- their purple even here, so a type doesn't flip blue<->purple as the cursor
 -- enters/leaves its line; everything else is the blue inlay-type color.
@@ -147,7 +166,7 @@ end
 -- isn't a recognized declaration form. `align` (optional) is { nw, tw } column
 -- widths to pad the name/type to. `was_const` + (bufnr,row0) drive the inferred
 -- `mut` on non-const locals.
-local function build_chunks(prefix, core, had_semi, type_hint, align, was_const, bufnr, row0)
+local function build_chunks(prefix, core, had_semi, type_hint, align, was_const, is_constexpr, bufnr, row0)
   local semi = had_semi and ';' or ''
   -- Lazy (treesitter): only the branches that infer mut pay for it, and only on
   -- lines that actually render (non-decls return before reaching a branch).
@@ -341,7 +360,6 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     -- written and deduced types are treated alike. std:: stripped. `constexpr`
     -- becomes JAI's constant binding -- `name: T : value` (a `:` in place of the
     -- `=`), since `::` / `: T :` is how JAI spells a compile-time constant.
-    local is_constexpr = typ:match '^constexpr%s+' ~= nil
     local shown_typ = P.strip_type(typ)
     add(nm)
     if align then
@@ -353,7 +371,7 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     -- keep the const-hidden default and only get `mut` on a non-const local
     -- (value members/globals aren't marked -- would be noise). constexpr counts
     -- as const. Placed after the colon like `-> mut T&` so names stay aligned.
-    if shown_typ:find('[%^&]') then
+    if top_level_ptr_ref(shown_typ) then
       if was_const then
         add('const ', 'DansConst')
       elseif not is_constexpr then
@@ -394,10 +412,10 @@ function M.render_line(line, type_hint, align, bufnr, row0)
   end
   local had_semi = code:match ';%s*$' ~= nil
   local core_in = (code:gsub(';%s*$', ''))
-  -- const or constexpr (both hidden, both suppress the inferred mut).
-  local was_const = (core_in:match '^const%f[%A]' or core_in:match '^constexpr%f[%A]') ~= nil
-  local prefix, core = P.split_markers(core_in)
-  local chunks = build_chunks(prefix, core, had_semi, type_hint, align, was_const, bufnr, row0)
+  -- split_markers peels and reports const/constexpr (both hidden; const-ness
+  -- suppresses the inferred mut, constexpr also renders as a `:` constant binding).
+  local prefix, core, was_const, is_constexpr = P.split_markers(core_in)
+  local chunks = build_chunks(prefix, core, had_semi, type_hint, align, was_const, is_constexpr, bufnr, row0)
   if not chunks then
     return nil
   end
