@@ -13,6 +13,7 @@
 local M = {}
 
 local ns = vim.api.nvim_create_namespace 'ds_cpp_aliases'
+local vu = require 'custom.cpp_view_util'
 
 -- { keyword, replacement, highlight? }  -- highlight defaults to 'Comment'.
 local ALIASES = {
@@ -186,31 +187,12 @@ function M.member_mut_col(line, bufnr, row0)
   return close
 end
 
-local function cursor_row0(bufnr)
-  if bufnr == vim.api.nvim_get_current_buf() then
-    return vim.api.nvim_win_get_cursor(0)[1] - 1
-  end
-  return nil
-end
-
--- Only the on-screen lines (+ margin) need decorating; scanning every line per
--- CursorMoved/scroll is the dominant cost on big files. Off-screen extmarks
--- aren't visible and are (re)placed as lines scroll in (WinScrolled/CursorMoved).
-local VISIBLE_MARGIN = 40
-local function visible_range(bufnr)
-  if bufnr ~= vim.api.nvim_get_current_buf() then
-    return 0, vim.api.nvim_buf_line_count(bufnr)
-  end
-  local n = vim.api.nvim_buf_line_count(bufnr)
-  return math.max(0, vim.fn.line 'w0' - 1 - VISIBLE_MARGIN), math.min(n, vim.fn.line 'w$' + VISIBLE_MARGIN)
-end
-
 local function refresh(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
   local ft = vim.bo[bufnr].filetype
-  if ft ~= 'c' and ft ~= 'cpp' and ft ~= 'cuda' then
+  if not vu.is_cpp(ft) then
     return
   end
 
@@ -219,14 +201,14 @@ local function refresh(bufnr)
   -- Skip the cursor line: concealcursor is empty for these buffers, so the real
   -- text shows there; the inline alias virt_text would otherwise double up with
   -- it (e.g. `$scstatic_cast`). Re-hidden once the cursor leaves the line.
-  local cur = cursor_row0(bufnr)
+  local cur = vu.cursor_row0(bufnr)
 
   -- Defer to jai_view on lines it rewrites: it draws a full-line overlay there,
   -- which would orphan our inline alias to the end of the line.
   local jai_ok, jai = pcall(require, 'custom.jai_view')
   local jai_on = jai_ok and jai.is_enabled(bufnr)
 
-  local s0, e0 = visible_range(bufnr)
+  local s0, e0 = vu.visible_range(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
   for idx, line in ipairs(lines) do
     local row0 = s0 + idx - 1

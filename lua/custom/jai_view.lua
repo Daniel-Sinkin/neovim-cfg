@@ -25,6 +25,7 @@
 local M = {}
 
 local ns = vim.api.nvim_create_namespace 'ds_jai_view'
+local vu = require 'custom.cpp_view_util'
 local enabled = {}
 local hint_type = {} -- bufnr -> { [row0] = "int *" } from clangd Type inlay hints
 local show_hints = false -- deduced-type hints off by default (toggle with :InlineHints)
@@ -753,13 +754,6 @@ local function clear(bufnr)
   end
 end
 
-local function cursor_row0(bufnr)
-  if bufnr == vim.api.nvim_get_current_buf() then
-    return vim.api.nvim_win_get_cursor(0)[1] - 1
-  end
-  return nil
-end
-
 local function type_for(bufnr, row0)
   if not show_hints then
     return nil
@@ -771,7 +765,7 @@ end
 -- Set of rows to show raw (no overlay): the cursor line, or the whole visual
 -- selection while in a visual mode. Reveal is cursor/selection driven.
 local function reveal_set(bufnr)
-  local cur = cursor_row0(bufnr)
+  local cur = vu.cursor_row0(bufnr)
   if cur == nil then
     return {}
   end
@@ -788,27 +782,13 @@ local function reveal_set(bufnr)
   return { [cur] = true }
 end
 
--- Only the on-screen lines (+ margin) are overlaid, so a big file isn't
--- re-rendered whole on every edit / scroll / cursor move (was ~52 ms per
--- keystroke on a 5700-line file). Off-screen overlays aren't visible; they're
--- (re)placed as lines scroll in (WinScrolled). Reveal (cursor line raw) falls
--- out of recomputing reveal_set each refresh.
-local VISIBLE_MARGIN = 40
-local function visible_range(bufnr)
-  if bufnr ~= vim.api.nvim_get_current_buf() then
-    return 0, vim.api.nvim_buf_line_count(bufnr)
-  end
-  local n = vim.api.nvim_buf_line_count(bufnr)
-  return math.max(0, vim.fn.line 'w0' - 1 - VISIBLE_MARGIN), math.min(n, vim.fn.line 'w$' + VISIBLE_MARGIN)
-end
-
 local function refresh(bufnr)
   if not (enabled[bufnr] and vim.api.nvim_buf_is_valid(bufnr)) then
     return
   end
   clear(bufnr)
   local set = reveal_set(bufnr)
-  local s0, e0 = visible_range(bufnr)
+  local s0, e0 = vu.visible_range(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
   local align = compute_align(lines, s0)
   for idx, line in ipairs(lines) do
