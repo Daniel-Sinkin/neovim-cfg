@@ -104,10 +104,10 @@ local function apply()
   -- SDL identifiers (SDL_*) -> teal. Same priority; SDL_FOO also matches the
   -- macro pattern, so the higher priority makes the teal win.
   vim.fn.matchadd('DansSDL', [[\<SDL_[A-Za-z0-9_]*\>]], 25)
-  -- Runtime asserts -> gray. Grays the whole `assert(...);` statement (priority 26
-  -- beats the macro/Vk/SDL coloring inside the condition). `static_assert` is
-  -- untouched -- the leading `_` defeats the `\<` word boundary.
-  vim.fn.matchadd('DansAssert', [[\<assert\>.\{-};]], 26)
+  -- assert / static_assert -> gray the whole `...assert(...);` statement (priority
+  -- 26 beats the macro/Vk/SDL coloring inside the condition). static_assert also
+  -- still renders as `$as` (cpp_aliases); this just grays the rest of its line.
+  vim.fn.matchadd('DansAssert', [[\<\%(static_\)\?assert\>.\{-};]], 26)
   -- String literals -> green, priority 35 (above the color matches AND the
   -- conceals at 30) so nothing else colors or conceals inside a string. Quoted
   -- pattern (a "..." literal with escapes); not [[...]] -- the [^"\] class
