@@ -48,6 +48,10 @@ local function set_hl()
   -- runtime `assert(...)` statements -- grayed out as auxiliary checks, not core
   -- logic (compile-time `static_assert` is spared; it reads as `$as`).
   vim.api.nvim_set_hl(0, 'DansAssert', { fg = '#6b7280' })
+  -- Designated-init field-name hints (`.width = 800` -> `width=800`): a muted
+  -- tier, less pronounced than normal text but not as dim as comments. Library-
+  -- aware tinting (SDL / Vulkan / dearImgui) is a later refinement.
+  vim.api.nvim_set_hl(0, 'DansHint', { fg = '#8b8fa3' })
   -- Deduced-type inlay text inside jai_view overlays (clangd auto types).
   -- Clearly blue so it reads apart from the gray comments.
   vim.api.nvim_set_hl(0, 'DansInlayType', { fg = '#7aa2f7' })

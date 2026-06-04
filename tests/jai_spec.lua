@@ -188,6 +188,61 @@ do
   end
 end
 
+-- ===================== designated init (conceal-based) =====================
+do
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, {
+    'auto fn() -> void', '{',
+    '    const auto cfg = Config{',
+    '        .width = 800,',
+    '        .height = height,',
+    '    };',
+    '}',
+  })
+  vim.bo[b].filetype = 'cpp'
+  vim.api.nvim_set_current_buf(b)
+  pcall(function() vim.treesitter.get_parser(b, 'cpp'):parse() end)
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+  vim.cmd 'doautocmd FileType'
+  vim.cmd 'doautocmd BufEnter'
+  local dns = vim.api.nvim_create_namespace 'ds_cpp_designated'
+  local function visible(row0)
+    local line = vim.api.nvim_buf_get_lines(b, row0, row0 + 1, false)[1] or ''
+    local hidden, hl = {}, false
+    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(b, dns, { row0, 0 }, { row0, -1 }, { details = true })) do
+      local d = m[4]
+      if d.conceal ~= nil and d.end_col then
+        for c = m[3], d.end_col - 1 do
+          hidden[c] = true
+        end
+      end
+      if d.hl_group == 'DansHint' then
+        hl = true
+      end
+    end
+    local s = {}
+    for c = 0, #line - 1 do
+      if not hidden[c] then
+        s[#s + 1] = line:sub(c + 1, c + 1)
+      end
+    end
+    return vim.trim(table.concat(s)), hl
+  end
+  local function chk(desc, got, exp)
+    if got == exp then
+      pass = pass + 1
+    else
+      fail = fail + 1
+      fails[#fails + 1] = string.format('FAIL  %s\n        exp: %s\n        got: %s', desc, tostring(exp), tostring(got))
+    end
+  end
+  local v4, hint4 = visible(3)
+  local v5 = visible(4)
+  chk('designated tighten', v4, 'width=800,')
+  chk('designated pun', v5, 'height,')
+  chk('designated field hint color', hint4, true)
+end
+
 -- ===================== report =====================
 local report = { string.format('jai_spec: %d passed, %d failed', pass, fail) }
 for _, f in ipairs(fails) do
