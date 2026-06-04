@@ -17,6 +17,7 @@ local MATCH_GROUPS = {
   DansVulkan = true,
   DansSDL = true,
   DansString = true,
+  DansAssert = true,
   DansCommentMask = true,
   DansIncludeMask = true,
 }
@@ -44,6 +45,9 @@ local function set_hl()
   -- `ref` binding marker (jai renders `auto& x = e` as `mut ref x := e`) -- gray,
   -- a calm type qualifier like const; `mut` stays the bright exception beside it.
   vim.api.nvim_set_hl(0, 'DansRef', { fg = '#6b7280' })
+  -- runtime `assert(...)` statements -- grayed out as auxiliary checks, not core
+  -- logic (compile-time `static_assert` is spared; it reads as `$as`).
+  vim.api.nvim_set_hl(0, 'DansAssert', { fg = '#6b7280' })
   -- Deduced-type inlay text inside jai_view overlays (clangd auto types).
   -- Clearly blue so it reads apart from the gray comments.
   vim.api.nvim_set_hl(0, 'DansInlayType', { fg = '#7aa2f7' })
@@ -100,6 +104,10 @@ local function apply()
   -- SDL identifiers (SDL_*) -> teal. Same priority; SDL_FOO also matches the
   -- macro pattern, so the higher priority makes the teal win.
   vim.fn.matchadd('DansSDL', [[\<SDL_[A-Za-z0-9_]*\>]], 25)
+  -- Runtime asserts -> gray. Grays the whole `assert(...);` statement (priority 26
+  -- beats the macro/Vk/SDL coloring inside the condition). `static_assert` is
+  -- untouched -- the leading `_` defeats the `\<` word boundary.
+  vim.fn.matchadd('DansAssert', [[\<assert\>.\{-};]], 26)
   -- String literals -> green, priority 35 (above the color matches AND the
   -- conceals at 30) so nothing else colors or conceals inside a string. Quoted
   -- pattern (a "..." literal with escapes); not [[...]] -- the [^"\] class
