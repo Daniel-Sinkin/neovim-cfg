@@ -179,14 +179,15 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
   end
 
   local forp = P.parse_for(core)
+  local iflet = P.parse_if_let(core)
 
-  -- structured binding: auto [a, b] = expr  ->  [a, b] := expr (no per-element
+  -- structured binding: auto [a, b] = expr  ->  a, b := expr (no per-element
   -- type hints; clangd's binding hints aren't reliable enough).
   local sb_sigil, sb_binds, sb_expr = core:match '^auto([&*]?)%s*%[(.-)%]%s*=%s*(.+)$'
 
   local sigil, name, expr = core:match '^auto([&*]?)%s+([%w_]+)%s*=%s*(.+)$'
   local typ, nm, init
-  if not forp and not sb_binds and not name then
+  if not forp and not iflet and not sb_binds and not name then
     typ, nm, init = core:match '^(.-)%s+([%w_]+)%s*{(.*)}$'
     -- A brace-init declaration is a terminated statement; require the `;`.
     -- Without it this is a continuation / constructor temporary in an argument
@@ -261,7 +262,16 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     add(prefix, MARKER_HL[prefix:match '^(%S+)'] or 'Normal')
   end
 
-  if forp then
+  if iflet then
+    -- if (const auto x = e; x)  ->  if let x := e   (truthiness-on-the-bound-name)
+    add 'if let '
+    add(iflet.name)
+    add ' := '
+    add_value(iflet.rhs)
+    if iflet.tail ~= '' then
+      add(' ' .. iflet.tail)
+    end
+  elseif forp then
     add 'for ('
     if not forp.is_const then
       add('mut ', 'DansMarkerMut')
@@ -289,7 +299,7 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     if sb_sigil == '&' then
       add('ref ', 'DansRef')
     end
-    add('[' .. sb_binds .. '] := ')
+    add(sb_binds .. ' := ')
     add_value(sb_expr)
     add(semi)
   elseif name then
@@ -361,6 +371,8 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     -- becomes JAI's constant binding -- `name: T : value` (a `:` in place of the
     -- `=`), since `::` / `: T :` is how JAI spells a compile-time constant.
     local shown_typ = P.strip_type(typ)
+    local sp_inner, sp_kind = P.smart_ptr(shown_typ)
+    local disp_typ = sp_inner and (sp_inner .. P.SMART_PTR_GLYPH[sp_kind]) or shown_typ
     add(nm)
     if align then
       add(string.rep(' ', math.max(0, align.nw - vim.fn.strwidth(nm))))
@@ -371,21 +383,27 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     -- keep the const-hidden default and only get `mut` on a non-const local
     -- (value members/globals aren't marked -- would be noise). constexpr counts
     -- as const. Placed after the colon like `-> mut T&` so names stay aligned.
-    if top_level_ptr_ref(shown_typ) then
-      if was_const then
-        add('const ', 'DansConst')
-      elseif not is_constexpr then
+    if sp_inner then
+      -- smart pointer: `T` + ownership glyph (🔒 unique, 🔗 shared) in place of `^`.
+      add_type(sp_inner)
+      add(P.SMART_PTR_GLYPH[sp_kind])
+    else
+      if top_level_ptr_ref(shown_typ) then
+        if was_const then
+          add('const ', 'DansConst')
+        elseif not is_constexpr then
+          add('mut ', 'DansMarkerMut')
+        end
+      elseif not was_const and not is_constexpr and is_local() then
         add('mut ', 'DansMarkerMut')
       end
-    elseif not was_const and not is_constexpr and is_local() then
-      add('mut ', 'DansMarkerMut')
+      add_type(shown_typ)
     end
-    add_type(shown_typ)
     if init ~= '' then
       -- Pad the type only when there's an initializer, so the `=` aligns across
       -- the block; a no-init line's `;` stays at its natural end position.
       if align then
-        add(string.rep(' ', math.max(0, align.tw - vim.fn.strwidth(shown_typ))))
+        add(string.rep(' ', math.max(0, align.tw - vim.fn.strwidth(disp_typ))))
       end
       add(is_constexpr and ' : ' or ' = ')
       add_value(init)

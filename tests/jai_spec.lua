@@ -89,8 +89,8 @@ run('lambda no cap/params', 'fn', { 'auto g = []() { run(); };' }, { 'lambda g()
 run('lambda copy cap', 'fn', { 'const auto h = [=](int n) { return n; };' }, { 'lambda h(= : int n) { return n; };' })
 
 -- ===================== structured bindings =====================
-run('structured binding', 'fn', { 'auto [a, b] = pair;' }, { 'mut [a, b] := pair;' })
-run('structured ref binding', 'fn', { 'const auto& [k, v] = *it;' }, { 'ref [k, v] := *it;' })
+run('structured binding', 'fn', { 'auto [a, b] = pair;' }, { 'mut a, b := pair;' })
+run('structured ref binding', 'fn', { 'const auto& [k, v] = *it;' }, { 'ref k, v := *it;' })
 
 -- ===================== range-for =====================
 run('for const ref', 'fn', { 'for (const auto& v : items)' }, { 'for (v& : items)' })
@@ -118,7 +118,9 @@ run('member const pointer', 'struct', { 'const Foo* cptr{};' }, { 'cptr: const F
 run('member array', 'struct', { 'std::array<f32, 3> arr{};' }, { 'arr: array<f32, 3>;' })
 run('member nested template', 'struct', { 'std::vector<std::pair<int, int>> v{};' }, { 'v: vector<pair<int, int>>;' })
 run('member ref-in-template', 'struct', { 'std::pair<int&, int> pr{};' }, { 'pr: pair<int&, int>;' })
-run('member unique_ptr', 'struct', { 'std::unique_ptr<Foo> up{};' }, { 'up: unique_ptr<Foo>;' })
+run('member unique_ptr', 'struct', { 'std::unique_ptr<Foo> up{};' }, { 'up: Foo🔒;' })
+run('member shared_ptr', 'struct', { 'std::shared_ptr<Foo> sp{};' }, { 'sp: Foo🔗;' })
+run('member optional', 'struct', { 'std::optional<int> o{};' }, { 'o: int?;' })
 run('member vulkan null', 'struct', { 'VkBuffer buf{VK_NULL_HANDLE};' }, { 'buf: VkBuffer = {};' })
 run('member static constexpr', 'struct', { 'static constexpr usize cap{16};' }, { 'cap: usize : 16;' })
 
@@ -150,6 +152,14 @@ run('glm-namespaced type', 'fn', { 'glm::vec3 v{};' }, { 'v: mut glm::vec3;' })
 run('ref member', 'struct', { 'Foo& m;' }, { 'm: mut Foo&;' })
 run('const ref member', 'struct', { 'const Foo& m;' }, { 'm: const Foo&;' })
 run('trailing comment', 'fn', { 'int x{7}; // count' }, { 'x: mut int = 7; // count' })
+
+-- ===================== new features =====================
+run('optional local', 'fn', { 'std::optional<Foo> o{};' }, { 'o: mut Foo?;' })
+run('optional pointer', 'struct', { 'std::optional<int> o{};' }, { 'o: int?;' })
+run('for destructure', 'fn', { 'for (const auto& [k, v] : items)' }, { 'for (k, v& : items)' })
+run('if let', 'fn', { 'if (const auto res = find(x); res)' }, { 'if let res := find(x)' })
+run('if let with brace', 'fn', { 'if (const auto p = lookup(k); p) {' }, { 'if let p := lookup(k) {' })
+run('if plain (raw)', 'fn', { 'if (ready) {' }, { false })
 
 -- ===================== report =====================
 local report = { string.format('jai_spec: %d passed, %d failed', pass, fail) }

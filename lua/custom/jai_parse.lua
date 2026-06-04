@@ -198,7 +198,33 @@ function M.parse_for(core)
   if not name then
     return nil
   end
-  return { is_const = is_const, sigil = sigil, name = vim.trim(name), iter = iter, tail = tail }
+  name = vim.trim(name):gsub('^%[%s*(.-)%s*%]$', '%1') -- destructured binding -> bare list
+  return { is_const = is_const, sigil = sigil, name = name, iter = iter, tail = tail }
+end
+
+-- `if (const auto NAME = RHS; NAME) TAIL` -> { name, rhs, tail } for an `if let`
+-- render, else nil. Only the truthiness-on-the-bound-name form (the condition is
+-- exactly the declared name); anything else (e.g. `it != end()`) is left raw so
+-- the real test is never hidden.
+function M.parse_if_let(core)
+  local inside, tail = core:match '^if%s*%((.+)%)%s*(.*)$'
+  if not inside then
+    return nil
+  end
+  local semi = inside:find(';', 1, true)
+  if not semi then
+    return nil
+  end
+  local init = vim.trim(inside:sub(1, semi - 1))
+  local cond = vim.trim(inside:sub(semi + 1))
+  local name, rhs = init:match '^const%s+auto%s+([%w_]+)%s*=%s*(.+)$'
+  if not name then
+    name, rhs = init:match '^auto%s+([%w_]+)%s*=%s*(.+)$'
+  end
+  if not name or cond ~= name then
+    return nil
+  end
+  return { name = name, rhs = rhs, tail = tail }
 end
 
 -- Render pointer-type `*` as `^` (type positions only). `&` is left alone.
@@ -210,8 +236,30 @@ end
 -- std::/dans:: qualifiers, and render pointer `*` as `^`. Shared by build_chunks
 -- and the alignment pass (so column widths match).
 function M.strip_type(typ)
-  return M.ptr((typ:gsub('^constexpr%s+', ''):gsub('^inline%s+', ''):gsub('std::', ''):gsub('dans::', '')))
+  local t = typ:gsub('^constexpr%s+', ''):gsub('^inline%s+', ''):gsub('std::', ''):gsub('dans::', '')
+  t = t:gsub('^optional<(.+)>$', '%1?') -- std::optional<T> -> T?
+  return M.ptr(t)
 end
+
+-- A std smart-pointer type (after strip_type already removed std::): returns the
+-- inner type and 'unique'/'shared', else nil. Lets the view render
+-- `unique_ptr<T>` / `shared_ptr<T>` as `T^` with an ownership-colored caret.
+function M.smart_ptr(t)
+  local inner = t:match '^unique_ptr<(.+)>$'
+  if inner then
+    return inner, 'unique'
+  end
+  inner = t:match '^shared_ptr<(.+)>$'
+  if inner then
+    return inner, 'shared'
+  end
+  return nil
+end
+
+-- Glyph rendered after the inner type for each smart-pointer kind, in place of
+-- the raw-pointer `^`: lock = exclusive/owning (unique), link = shared/refcounted.
+-- Both are single-codepoint, width-2 emoji (no VS16) so column alignment holds.
+M.SMART_PTR_GLYPH = { unique = '🔒', shared = '🔗' }
 
 -- For an explicit-type brace declaration (`T name{init}`), return the rendered
 -- name and type strings, else nil. Mirrors build_chunks' explicit branch so the
@@ -233,7 +281,12 @@ function M.field_dims(line)
       return nil
     end
   end
-  return nm, M.strip_type(typ)
+  local disp = M.strip_type(typ)
+  local inner, kind = M.smart_ptr(disp)
+  if inner then
+    disp = inner .. M.SMART_PTR_GLYPH[kind]
+  end
+  return nm, disp
 end
 
 -- Map row0 -> { nw, tw } so a run of consecutive explicit-type brace
