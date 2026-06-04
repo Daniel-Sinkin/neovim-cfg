@@ -1,0 +1,417 @@
+-- Chunk building for the JAI declaration view: turn a parsed declaration line
+-- into the list of { text, highlight } pieces the overlay draws. Depends on
+-- jai_parse for the structural analysis; holds the render-side config (the
+-- lambda-as-function rendering toggle and the cosmetic separators).
+
+local P = require 'custom.jai_parse'
+
+local M = {}
+
+-- Experimental: render a lambda-assigned-to-auto as a function-style decl,
+--   const auto f = [cap](params) -> R   ->   lambda f(cap, params) -> R
+-- (intro line only; the body keeps its own indentation). Toggle :LambdaView.
+local lambda_render = true
+local LAMBDA_KEYWORD = 'lambda'
+-- Divider between a lambda's capture list and its params, shown whenever there
+-- are params: lambda f(& : int x); no capture -> lambda f(: int x); no params
+-- -> lambda f(&).
+local LAMBDA_CAP_SEP = ':'
+-- Range-for binding sigil position: true -> `vertex&` (after the name), false ->
+-- `&vertex` (before it). const is hidden; a non-const binding shows `mut`.
+local FOR_REF_SUFFIX = true
+
+-- Marker word -> highlight group, shared with cpp_markers.lua. Only `cpy` can
+-- still appear as a real prefix (mut/mut_unchecked are source-removed), but the
+-- mut entries stay so an inferred-mut prefix colors correctly.
+local MARKER_HL = {
+  mut = 'DansMarkerMut',
+  mut_unchecked = 'DansMarkerMut',
+  cpy = 'DansMarkerCpy',
+}
+
+-- Marker keywords that should pop wherever they appear in an expression
+-- (e.g. `copy(x)` in a value), so the overlay matches the matchadd coloring on
+-- real text.
+local EXPR_MARKERS = {
+  copy = 'DansMarkerCpy',
+  cpy = 'DansMarkerCpy',
+  mut = 'DansMarkerMut',
+  mut_unchecked = 'DansMarkerMut',
+}
+
+-- Single-word C++ aliases ($sc, $dc, ...) reused from cpp_aliases so casts in
+-- jai-rendered value expressions read the same as on non-overlaid lines. This
+-- overlay conceals the whole source line, so cpp_aliases defers here (its inline
+-- alias would be orphaned); without this the casts rendered verbatim. Built
+-- lazily and cached from cpp_aliases.ALIASES, keeping only identifier-shaped
+-- keywords (`[[nodiscard]]` is dropped -- it can't occur inside a value).
+local expr_aliases_cache = nil
+local function expr_aliases()
+  if expr_aliases_cache then
+    return expr_aliases_cache
+  end
+  local map = {}
+  local ok, aliases = pcall(function()
+    return require('custom.cpp_aliases').ALIASES
+  end)
+  if ok and aliases then
+    for _, a in ipairs(aliases) do
+      if a[1]:match '^[%a_][%w_]*$' then
+        map[a[1]] = { a[2], a[3] or 'Comment' } -- { replacement, highlight }
+      end
+    end
+  end
+  if next(map) then
+    expr_aliases_cache = map
+  end
+  return map
+end
+
+-- Split `text` into chunks: string literals colored green (contents untouched),
+-- namespace qualifiers grayed/hidden, cast keywords aliased, marker/Vk/SDL/macro
+-- words colored. Mirrors the raw-line matchadd coloring inside the overlay.
+local function colorize(text)
+  local out = {}
+  local i, n = 1, #text
+  while i <= n do
+    local q = text:find('"', i, true)
+    local s, e = text:find('[%a_][%w_]*', i)
+    if q and (not s or q <= s) then
+      -- String literal: emit the gap before it, then consume "..." (with escapes)
+      -- as one green chunk so nothing inside gets recolored or concealed.
+      if q > i then
+        out[#out + 1] = { text:sub(i, q - 1), 'Normal' }
+      end
+      local j = q + 1
+      while j <= n do
+        local c = text:sub(j, j)
+        if c == '\\' then
+          j = j + 2
+        elseif c == '"' then
+          j = j + 1
+          break
+        else
+          j = j + 1
+        end
+      end
+      out[#out + 1] = { text:sub(q, j - 1), 'DansString' }
+      i = j
+    elseif s then
+      if s > i then
+        out[#out + 1] = { text:sub(i, s - 1), 'Normal' }
+      end
+      local word = text:sub(s, e)
+      if text:sub(e + 1, e + 2) == '::' then
+        -- Namespace qualifier: hide std::/dans:: and gray the rest.
+        if word ~= 'std' and word ~= 'dans' then
+          out[#out + 1] = { word .. '::', 'DansNamespace' }
+        end
+        i = e + 3
+      else
+        local alias = expr_aliases()[word]
+        if alias then
+          out[#out + 1] = { alias[1], alias[2] }
+        elseif word:match '^Vk' or word:match '^VK_' or word:match '^vk%u' then
+          out[#out + 1] = { word, 'DansVulkan' } -- Vk*/VK_*/vk*, matches cpp_markers
+        elseif word:match '^SDL_' then
+          out[#out + 1] = { word, 'DansSDL' }
+        elseif word:match '^[A-Z][A-Z0-9_]+$' then
+          out[#out + 1] = { word, 'DansMacro' } -- other all-caps macro
+        else
+          out[#out + 1] = { word, EXPR_MARKERS[word] or 'Normal' }
+        end
+        i = e + 1
+      end
+    else
+      out[#out + 1] = { text:sub(i), 'Normal' }
+      break
+    end
+  end
+  return out
+end
+
+-- Highlight for a type in declaration position: Vulkan types (Vk*/VK_*) keep
+-- their purple even here, so a type doesn't flip blue<->purple as the cursor
+-- enters/leaves its line; everything else is the blue inlay-type color.
+local function type_hl(t)
+  if t:match '^Vk' or t:match '^VK_' then
+    return 'DansVulkan'
+  end
+  if t:match '^SDL_' then
+    return 'DansSDL'
+  end
+  return 'DansInlayType'
+end
+
+-- Build the virt_text chunk list for a parsed declaration, or nil if `core`
+-- isn't a recognized declaration form. `align` (optional) is { nw, tw } column
+-- widths to pad the name/type to. `was_const` + (bufnr,row0) drive the inferred
+-- `mut` on non-const locals.
+local function build_chunks(prefix, core, had_semi, type_hint, align, was_const, bufnr, row0)
+  local semi = had_semi and ';' or ''
+  -- Lazy (treesitter): only the branches that infer mut pay for it, and only on
+  -- lines that actually render (non-decls return before reaching a branch).
+  local _local
+  local function is_local()
+    if _local == nil then
+      _local = P.decl_kind(bufnr, row0) == 'local'
+    end
+    return _local
+  end
+
+  local forp = P.parse_for(core)
+
+  -- structured binding: auto [a, b] = expr  ->  [a, b] := expr (no per-element
+  -- type hints; clangd's binding hints aren't reliable enough).
+  local sb_sigil, sb_binds, sb_expr = core:match '^auto([&*]?)%s*%[(.-)%]%s*=%s*(.+)$'
+
+  local sigil, name, expr = core:match '^auto([&*]?)%s+([%w_]+)%s*=%s*(.+)$'
+  local typ, nm, init
+  if not forp and not sb_binds and not name then
+    typ, nm, init = core:match '^(.-)%s+([%w_]+)%s*{(.*)}$'
+    -- A brace-init declaration is a terminated statement; require the `;`.
+    -- Without it this is a continuation / constructor temporary in an argument
+    -- list (e.g. `local_ray, Aabb{.min = a}`), where `local_ray,` is not a type.
+    if not (nm and had_semi and P.looks_like_type(typ)) then
+      -- No-brace reference/pointer member: `T& name` / `T* name` (a struct
+      -- reference can't be brace-defaulted). The sigil must touch the type, so
+      -- bitwise/multiply statements like `a & b;` aren't grabbed.
+      typ, nm = core:match '^(.-[%w_>][&*]+)%s*([%w_]+)$'
+      init = ''
+      if not (typ and nm and had_semi and P.looks_like_type(typ)) then
+        return nil
+      end
+    end
+  end
+
+  local chunks = {}
+  local function add(text, hl)
+    if text ~= '' then
+      chunks[#chunks + 1] = { text, hl or 'Normal' }
+    end
+  end
+  -- Append value text, coloring marker keywords inside it.
+  local function add_value(text)
+    for _, c in ipairs(colorize(text)) do
+      chunks[#chunks + 1] = c
+    end
+  end
+  -- Append a type, graying each `^` pointer marker (DansPointer) while the rest
+  -- keeps its type color. type_hl keys off the leading token (Vk*/SDL_*/...), so
+  -- compute it once on the whole string and reuse it for the non-`^` segments.
+  local function add_type(t)
+    local hl = type_hl(t)
+    local i = 1
+    while true do
+      local c = t:find('%^', i)
+      if not c then
+        add(t:sub(i), hl)
+        break
+      end
+      add(t:sub(i, c - 1), hl)
+      add('^', 'DansPointer')
+      i = c + 1
+    end
+  end
+
+  -- dev::Defer _{[cap] { body }}  ->  Jai-style `defer body`: a scope-exit guard
+  -- where the Defer type, throwaway name, capture, and wrapping braces are all
+  -- ceremony. One statement renders inline (`defer f();`); several keep a block
+  -- (`defer { a(); b(); }`). Matched before the generic explicit-type branch.
+  do
+    local dtyp, dinit = core:match '^([%w_:]+)%s+[%w_]+%s*(%b{})$'
+    if dtyp and had_semi and (dtyp == 'Defer' or dtyp:match '::Defer$') then
+      local inner = dinit:sub(2, -2)
+      local body = inner:match '^%s*%b[]%s*{(.*)}%s*$' or inner:match '^%s*%b[]%s*%b()%s*{(.*)}%s*$'
+      if body then
+        body = vim.trim(body)
+        add('defer ', 'DansLambda')
+        if body:gsub(';%s*$', ''):find ';' then
+          add '{ '
+          add_value(body)
+          add ' }'
+        else
+          add_value(body)
+        end
+        return chunks
+      end
+    end
+  end
+
+  if prefix ~= '' then
+    add(prefix, MARKER_HL[prefix:match '^(%S+)'] or 'Normal')
+  end
+
+  if forp then
+    add 'for ('
+    if not forp.is_const then
+      add('mut ', 'DansMarkerMut')
+    end
+    if FOR_REF_SUFFIX then
+      add(forp.name)
+      add(P.ptr(forp.sigil))
+    else
+      add(P.ptr(forp.sigil))
+      add(forp.name)
+    end
+    add ' : '
+    add_value(forp.iter)
+    add ')'
+    if forp.tail ~= '' then
+      add(' ' .. forp.tail)
+    end
+  elseif sb_binds then
+    if not P.is_balanced(sb_expr) then
+      return nil
+    end
+    if is_local() and not was_const then
+      add('mut ', 'DansMarkerMut')
+    end
+    if sb_sigil == '&' then
+      add('ref ', 'DansRef')
+    end
+    add('[' .. sb_binds .. '] := ')
+    add_value(sb_expr)
+    add(semi)
+  elseif name then
+    local cap, params, rest = P.parse_lambda(expr)
+    if lambda_render and cap ~= nil and P.is_iife(bufnr, row0) then
+      -- IIFE: `auto x = [&]() -> T {...}()`. x is the *result* (type T), not a
+      -- lambda. Render the multi-line intro as `x: T =` (body + }(); stay raw).
+      -- Single-line/deduced-return IIFEs have their body on this line, so leave
+      -- them raw rather than truncate.
+      local rettype = rest and rest:match '^%->%s*(.+)$'
+      if not rettype then
+        return nil
+      end
+      if is_local() and not was_const then
+        add('mut ', 'DansMarkerMut')
+      end
+      add(name .. ': ')
+      add_type(P.strip_type(rettype))
+      add ' ='
+    elseif lambda_render and cap ~= nil then
+      local has_cap = cap ~= ''
+      local has_params = params ~= nil and params ~= ''
+      add(LAMBDA_KEYWORD .. ' ', 'DansLambda')
+      add(name)
+      add '('
+      if has_cap then
+        add_value(cap)
+      end
+      if has_params then
+        -- ` : ` after a capture, `: ` without one (no leading space).
+        add(has_cap and (' ' .. LAMBDA_CAP_SEP .. ' ') or (LAMBDA_CAP_SEP .. ' '))
+        add_value(params)
+      end
+      add ')'
+      if rest ~= nil and rest ~= '' then
+        add ' '
+        add_value(rest)
+      end
+      add(semi)
+    elseif not P.is_balanced(expr) then
+      return nil -- incomplete RHS (multi-line opener), leave raw
+    else
+      -- non-const local -> inferred mut (prefix; auto-forms aren't in alignment
+      -- blocks so this doesn't shift any aligned column).
+      if is_local() and not was_const then
+        add('mut ', 'DansMarkerMut')
+      end
+      if type_hint and name ~= '_' then
+        add(name .. ': ')
+        add_type(P.ptr(type_hint))
+        add ' = '
+        add_value(expr)
+        add(semi)
+      else
+        -- Reference binding: `ref` marker (Rust `ref`/`ref mut`) instead of
+        -- gluing `&` to the value, where it would read as address-of the first
+        -- operand on a compound RHS. `mut` (added above) precedes it: `mut ref`.
+        if sigil == '&' then
+          add('ref ', 'DansRef')
+        end
+        add(name .. ' := ')
+        add_value(expr)
+        add(semi)
+      end
+    end
+  else
+    -- Explicit type: colored the same blue as the deduced hints (DansInlayType);
+    -- written and deduced types are treated alike. std:: stripped. `constexpr`
+    -- becomes JAI's constant binding -- `name: T : value` (a `:` in place of the
+    -- `=`), since `::` / `: T :` is how JAI spells a compile-time constant.
+    local is_constexpr = typ:match '^constexpr%s+' ~= nil
+    local shown_typ = P.strip_type(typ)
+    add(nm)
+    if align then
+      add(string.rep(' ', math.max(0, align.nw - vim.fn.strwidth(nm))))
+    end
+    add ': '
+    -- Pointers/references carry meaningful constness, so always mark it: `const`
+    -- (grayed) for a const pointee/referent, `mut` otherwise. Plain value types
+    -- keep the const-hidden default and only get `mut` on a non-const local
+    -- (value members/globals aren't marked -- would be noise). constexpr counts
+    -- as const. Placed after the colon like `-> mut T&` so names stay aligned.
+    if shown_typ:find('[%^&]') then
+      if was_const then
+        add('const ', 'DansConst')
+      elseif not is_constexpr then
+        add('mut ', 'DansMarkerMut')
+      end
+    elseif not was_const and not is_constexpr and is_local() then
+      add('mut ', 'DansMarkerMut')
+    end
+    add_type(shown_typ)
+    if init ~= '' then
+      -- Pad the type only when there's an initializer, so the `=` aligns across
+      -- the block; a no-init line's `;` stays at its natural end position.
+      if align then
+        add(string.rep(' ', math.max(0, align.tw - vim.fn.strwidth(shown_typ))))
+      end
+      add(is_constexpr and ' : ' or ' = ')
+      add_value(init)
+    end
+    add(semi)
+  end
+
+  return chunks
+end
+
+-- Returns (start_col, chunks) for the overlay, or nil if the line isn't a
+-- transformable declaration. `type_hint` is the deduced type for this line.
+function M.render_line(line, type_hint, align, bufnr, row0)
+  local indent = line:match '^%s*'
+  local body = line:sub(#indent + 1)
+  if body == '' then
+    return nil
+  end
+  -- Peel a trailing line comment so it doesn't defeat the `;` / `}` end anchors
+  -- in build_chunks; it's re-appended to the overlay so it stays visible.
+  local code, cws, comment = body:match '^(.-)(%s*)(//.*)$'
+  if not code then
+    code, cws, comment = body, '', ''
+  end
+  local had_semi = code:match ';%s*$' ~= nil
+  local core_in = (code:gsub(';%s*$', ''))
+  -- const or constexpr (both hidden, both suppress the inferred mut).
+  local was_const = (core_in:match '^const%f[%A]' or core_in:match '^constexpr%f[%A]') ~= nil
+  local prefix, core = P.split_markers(core_in)
+  local chunks = build_chunks(prefix, core, had_semi, type_hint, align, was_const, bufnr, row0)
+  if not chunks then
+    return nil
+  end
+  if comment ~= '' then
+    chunks[#chunks + 1] = { cws .. comment, 'Comment' }
+  end
+  return #indent, chunks
+end
+
+-- Flip the lambda-as-function rendering; returns the new state. jai_view owns
+-- the user command and re-renders open buffers.
+function M.toggle_lambda()
+  lambda_render = not lambda_render
+  return lambda_render
+end
+
+return M
