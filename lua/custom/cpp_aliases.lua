@@ -100,20 +100,40 @@ local function split_args(s)
 end
 
 -- 0-based byte columns where a `mut ` should be injected before a function arg:
--- a non-const reference/pointer parameter. Only on trailing-return decls (a `->`
--- follows the arg parens), so calls/statements are skipped. Exposed so
--- hpp_arrow_align can account for the injected width. nil-safe -> {}.
+-- a non-const *reference* parameter. mut marks a mutable reference; whether a
+-- by-value arg is a copy is the user's call via cpy, independent of mut -- so a
+-- by-value param never qualifies, even when its default value contains a `*`
+-- (`T eps = a * b`) or its type nests `&`/`*` in template args
+-- (`std::function<void(int&)>`). Pointers don't get mut either. Only on
+-- trailing-return decls (a `->` follows the parens). Exposed for hpp_arrow_align.
 function M.arg_mut_cols(line)
   local open, close = balanced_parens(line)
   if not open or not line:sub(close + 1):find('->', 1, true) then
     return {}
   end
+  -- A top-level `&` in the type (default stripped, template/paren/brace groups
+  -- skipped) marks a reference parameter.
+  local function is_ref_param(typ)
+    local depth = 0
+    for i = 1, #typ do
+      local c = typ:sub(i, i)
+      if c == '<' or c == '(' or c == '[' or c == '{' then
+        depth = depth + 1
+      elseif c == '>' or c == ')' or c == ']' or c == '}' then
+        depth = depth - 1
+      elseif c == '&' and depth == 0 then
+        return true
+      end
+    end
+    return false
+  end
   local cols = {}
   for _, arg in ipairs(split_args(line:sub(open + 1, close - 1))) do
     local lead = #(arg.text:match '^%s*' or '')
     local body = arg.text:sub(lead + 1)
-    if body ~= '' and not body:match '^const%f[%A]' and (body:find('&', 1, true) or body:find('*', 1, true)) then
-      cols[#cols + 1] = open + arg.from + lead - 1 -- 0-based line column of the arg start
+    local typ = body:gsub('%s*=.*$', '') -- drop the default value
+    if typ ~= '' and not typ:match '^const%f[%A]' and is_ref_param(typ) then
+      cols[#cols + 1] = open + arg.from + lead - 1 -- 0-based column of the arg start
     end
   end
   return cols
