@@ -115,15 +115,21 @@ function M.arg_mut_cols(line)
   -- skipped) marks a reference parameter.
   local function is_ref_param(typ)
     local depth = 0
-    for i = 1, #typ do
+    local i = 1
+    while i <= #typ do
       local c = typ:sub(i, i)
       if c == '<' or c == '(' or c == '[' or c == '{' then
         depth = depth + 1
       elseif c == '>' or c == ')' or c == ']' or c == '}' then
         depth = depth - 1
       elseif c == '&' and depth == 0 then
-        return true
+        if typ:sub(i + 1, i + 1) == '&' then
+          i = i + 1 -- `&&` is an rvalue ref; mut on an rvalue ref is meaningless, skip
+        else
+          return true -- single `&`: an lvalue reference parameter
+        end
       end
+      i = i + 1
     end
     return false
   end
@@ -254,7 +260,7 @@ local function refresh(bufnr)
       local pre, ws = line:match '^(.-%->)(%s*)'
       if pre then
         local rtyp = line:sub(#pre + #ws + 1):gsub('%s*[{;].*$', ''):gsub('%s*$', '')
-        if rtyp:match '&%s*$' and not rtyp:match '^const%f[%A]' then
+        if rtyp:match '&%s*$' and not rtyp:match '&&%s*$' and not rtyp:match '^const%f[%A]' then
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, #pre + #ws, {
             virt_text = { { 'mut ', 'DansMarkerMut' } },
             virt_text_pos = 'inline',
