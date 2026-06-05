@@ -47,6 +47,12 @@ local function apply(ev)
     { [[\<dans_]], 10 },
   }
   if ev and (ev.match == 'cpp' or ev.match == 'cuda') then
+    -- ranges/views are unusable at `ranges::transform` / `views::filter` length;
+    -- hide the whole qualifier (these cover more than `\<std::`, so the union
+    -- hides `std::ranges::views::` down to the bare algorithm/view name).
+    conceals[#conceals + 1] = { [[\<std::ranges::views::]], 31 }
+    conceals[#conceals + 1] = { [[\<std::ranges::]], 31 }
+    conceals[#conceals + 1] = { [[\<std::views::]], 31 }
     conceals[#conceals + 1] = { [[\<std::]], 30 }
     conceals[#conceals + 1] = { [[\<dans::]], 30 }
   end
