@@ -373,6 +373,52 @@ do
   end
 end
 
+-- ===================== module toggles (:DansFrontend <module>) =====================
+do
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, {
+    'int* gp();', -- top-level decl: pointer `*`->`^` fires (raw, not overlaid)
+    'void fn()',
+    '{',
+    '    int x{7};', -- overlaid by the view
+    '}',
+  })
+  vim.bo[b].filetype = 'cpp'
+  vim.api.nvim_set_current_buf(b)
+  pcall(function()
+    vim.treesitter.get_parser(b, 'cpp'):parse()
+  end)
+  vim.api.nvim_win_set_cursor(0, { 2, 0 }) -- cursor off both decorated lines
+  vim.cmd 'doautocmd FileType'
+  vim.cmd 'doautocmd BufEnter'
+  vim.cmd 'doautocmd CursorMoved'
+
+  local function count(nsname)
+    local id = vim.api.nvim_get_namespaces()[nsname]
+    return id and #vim.api.nvim_buf_get_extmarks(b, id, 0, -1, {}) or 0
+  end
+  local function chk(desc, cond)
+    if cond then
+      pass = pass + 1
+    else
+      fail = fail + 1
+      fails[#fails + 1] = 'FAIL  toggle: ' .. desc
+    end
+  end
+
+  chk('view on by default', count 'ds_frontend_view' > 0)
+  chk('pointer on by default', count 'ds_cpp_pointer' > 0)
+  vim.cmd 'DansFrontend pointer'
+  chk('pointer off clears its marks', count 'ds_cpp_pointer' == 0)
+  chk('toggling pointer leaves view alone', count 'ds_frontend_view' > 0)
+  vim.cmd 'DansFrontend pointer'
+  chk('pointer back on', count 'ds_cpp_pointer' > 0)
+  vim.cmd 'DansFrontend view'
+  chk('view off clears its overlay', count 'ds_frontend_view' == 0)
+  vim.cmd 'DansFrontend view'
+  chk('view back on', count 'ds_frontend_view' > 0)
+end
+
 -- ===================== report =====================
 local report = { string.format('frontend_spec: %d passed, %d failed', pass, fail) }
 for _, f in ipairs(fails) do

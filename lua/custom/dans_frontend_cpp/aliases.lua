@@ -197,6 +197,9 @@ local function refresh(bufnr)
   end
 
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+  if not vu.module_enabled(bufnr, 'aliases') then
+    return
+  end
 
   -- skip.skip hides our inline aliases on the cursor line (concealcursor shows
   -- the real text there, so the virt_text would otherwise double up like
@@ -269,6 +272,8 @@ local function refresh(bufnr)
     end
   end
 end
+
+M.refresh = refresh
 
 function M.setup()
   local group = vim.api.nvim_create_augroup('ds_cpp_aliases', { clear = true })

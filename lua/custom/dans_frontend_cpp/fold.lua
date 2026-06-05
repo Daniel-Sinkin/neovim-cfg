@@ -6,6 +6,8 @@
 
 local M = {}
 
+local vu = require 'custom.dans_frontend_cpp.util'
+
 -- Per-line fold descriptors for `lines`: '>1' opens a fold on an Expects/Ensures
 -- `{`, '1' for the body, '<1' on the matching `}`, '0' elsewhere. Brace matching
 -- is naive (counts `{`/`}` literally), which is fine for these assert-only blocks.
@@ -49,6 +51,9 @@ end
 local cache = {}
 function _G.dans_cpp_foldexpr()
   local buf = vim.api.nvim_get_current_buf()
+  if not vu.module_enabled(buf, 'fold') then
+    return '0'
+  end
   local tick = vim.api.nvim_buf_get_changedtick(buf)
   local c = cache[buf]
   if not c or c.tick ~= tick then
@@ -83,6 +88,7 @@ local cpp_ft = { c = true, cpp = true, cuda = true }
 local focus_last = {}
 local function focus_folds()
   if not cpp_ft[vim.bo.filetype] then return end
+  if not vu.module_enabled(vim.api.nvim_get_current_buf(), 'fold') then return end
   if vim.wo.foldmethod ~= 'expr' then return end
   if vim.fn.mode() ~= 'n' then return end
   local win = vim.api.nvim_get_current_win()
@@ -90,6 +96,14 @@ local function focus_folds()
   if focus_last[win] == lnum then return end
   focus_last[win] = lnum
   pcall(vim.cmd, 'normal! zx')
+end
+
+-- Recompute folds for a buffer after a :DansFrontend toggle: `zx` re-evaluates
+-- the (now guarded) foldexpr, re-folding when on and opening everything when off.
+function M.refresh(bufnr)
+  if bufnr == vim.api.nvim_get_current_buf() then
+    pcall(vim.cmd, 'normal! zx')
+  end
 end
 
 function M.setup()

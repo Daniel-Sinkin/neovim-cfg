@@ -8,6 +8,8 @@
 
 local M = {}
 
+local vu = require 'custom.dans_frontend_cpp.util'
+
 local MATCH_GROUPS = {
   DansMarkerMut = true,
   DansMarkerCpy = true,
@@ -61,6 +63,10 @@ local function apply(ev)
     end
   end
 
+  if not vu.module_enabled((ev and ev.buf) or vim.api.nvim_get_current_buf(), 'markers') then
+    return -- disabled: matches cleared above, conceallevel left for the overlay
+  end
+
   for _, c in ipairs(conceals) do
     vim.fn.matchadd('Conceal', c[1], c[2], -1, { conceal = '' })
   end
@@ -112,6 +118,12 @@ local function apply(ev)
   vim.fn.matchadd('DansCommentMask', [[/\*.\{-}\*/]], 28)
   -- Quoted (not [[...]]): the trailing [>"] char class would close a long string.
   vim.fn.matchadd('DansIncludeMask', '^\\s*#\\s*include\\s*\\zs[<"].\\{-}[>"]', 28)
+end
+
+-- Re-apply for a buffer after a :DansFrontend toggle (synthesize the FileType
+-- event apply() reads its filetype from).
+function M.refresh(bufnr)
+  apply { match = vim.bo[bufnr].filetype, buf = bufnr }
 end
 
 function M.setup()

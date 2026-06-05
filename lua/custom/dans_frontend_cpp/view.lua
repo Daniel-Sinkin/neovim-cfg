@@ -174,6 +174,16 @@ function M.toggle()
   end
 end
 
+-- Enable/disable the overlay for a buffer explicitly (the umbrella's
+-- :DansFrontend per-module + master toggles drive this).
+function M.set_enabled(bufnr, on)
+  if on then
+    enable(bufnr)
+  else
+    disable(bufnr)
+  end
+end
+
 -- Toggle the deduced-type inlay hints (global) while keeping the overlay.
 function M.toggle_hints()
   show_hints = not show_hints

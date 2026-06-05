@@ -18,6 +18,8 @@
 
 local M = {}
 
+local vu = require 'custom.dans_frontend_cpp.util'
+
 local ns = vim.api.nvim_create_namespace 'ds_hpp_arrow'
 local cache = {} -- bufnr -> { [row0] = { col = byte0, n = pad } }
 local last_cursor = {} -- bufnr -> row0
@@ -252,6 +254,10 @@ local function refresh(bufnr)
     return
   end
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+  if not vu.module_enabled(bufnr, 'arrow_align') then
+    cache[bufnr] = nil
+    return
+  end
   local c = compute(bufnr)
   cache[bufnr] = c
   local cur = cursor_row0(bufnr)
@@ -321,6 +327,8 @@ function M.setup()
     end,
   })
 end
+
+M.refresh = refresh
 
 -- Exposed for the headless live-test harness.
 M._rendered_arrow_col = rendered_arrow_col

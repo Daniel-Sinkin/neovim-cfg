@@ -73,4 +73,18 @@ function M.make_skipper(bufnr)
   }
 end
 
+-- Per-buffer module enable/disable (default enabled). The umbrella's
+-- :DansFrontend command flips these; each module's refresh consults
+-- M.module_enabled and clears its own decorations when off.
+local module_off = {}
+function M.module_enabled(bufnr, name)
+  local off = module_off[bufnr]
+  return not (off and off[name])
+end
+function M.set_module(bufnr, name, on)
+  local off = module_off[bufnr] or {}
+  off[name] = (not on) or nil
+  module_off[bufnr] = off
+end
+
 return M

@@ -64,6 +64,9 @@ local function refresh(bufnr)
     return
   end
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+  if not vu.module_enabled(bufnr, 'pointer') then
+    return
+  end
 
   local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
   if not ok or not parser then
@@ -136,6 +139,8 @@ local function refresh(bufnr)
     end
   end
 end
+
+M.refresh = refresh
 
 function M.setup()
   local group = vim.api.nvim_create_augroup('ds_cpp_pointer', { clear = true })
