@@ -303,6 +303,31 @@ do
   chk('const ptr normal', chunk_hl(5, 'const '), 'Normal')
 end
 
+-- ===================== fold levels (Expects / Ensures blocks) =====================
+do
+  local fl = require('custom.cpp_fold').compute_fold_levels
+  local levels = fl({
+    'def f() -> void', '{',
+    '    {  // Expects', '        assert(a > 0);', '    }',
+    '    do_work();',
+    '    {  // Ensures', '        assert(b);', '    }',
+    '}',
+  })
+  local exp = { '0', '0', '>1', '1', '<1', '0', '>1', '1', '<1', '0' }
+  local ok = true
+  for i = 1, #exp do
+    if levels[i] ~= exp[i] then
+      ok = false
+    end
+  end
+  if ok then
+    pass = pass + 1
+  else
+    fail = fail + 1
+    fails[#fails + 1] = 'FAIL  fold levels: ' .. table.concat(levels, ',')
+  end
+end
+
 -- ===================== report =====================
 local report = { string.format('jai_spec: %d passed, %d failed', pass, fail) }
 for _, f in ipairs(fails) do
