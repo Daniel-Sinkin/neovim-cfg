@@ -69,10 +69,10 @@ function _G.dans_cpp_foldtext()
   return indent .. '+-- ' .. n .. ' lines:'
 end
 
--- Gray foldtext on the normal background, dropping tokyonight's banded Folded
--- bg. Re-asserted on ColorScheme since the day/night swap runs `:hi clear`.
+-- Folded's gray-on-normal definition lives in highlights.lua now; re-assert it
+-- (and the rest of the frontend groups) on setup + ColorScheme via this wrapper.
 local function set_fold_hl()
-  vim.api.nvim_set_hl(0, 'Folded', { fg = '#6b7280' })
+  require('custom.dans_frontend_cpp.highlights').apply()
 end
 
 -- Focus folding: keep only the fold under the cursor open. `zx` reapplies

@@ -22,60 +22,47 @@ local MATCH_GROUPS = {
   DansIncludeMask = true,
 }
 
+-- Group definitions live in highlights.lua now (one place to retheme). Still
+-- re-asserted on FileType + ColorScheme via this thin wrapper.
 local function set_hl()
-  -- Not bold: mut is inferred everywhere now, so bold red was too aggressive.
-  vim.api.nvim_set_hl(0, 'DansMarkerMut', { fg = '#f7768e' })
-  vim.api.nvim_set_hl(0, 'DansMarkerCpy', { fg = '#e0af68', bold = true })
-  -- `lambda` pseudo-keyword in view's lambda rendering (green to read as a
-  -- declaration keyword, distinct from the mut/cpy markers).
-  vim.api.nvim_set_hl(0, 'DansLambda', { fg = '#9ece6a', bold = true })
-  -- Vulkan identifiers (Vk*, VK_*) -- purple. Dense in this codebase, so they
-  -- get their own category, overriding the generic macro color for VK_*.
-  vim.api.nvim_set_hl(0, 'DansVulkan', { fg = '#bb9af7' })
-  -- Other all-caps macros / preprocessor constants -- orange. Not bold: these
-  -- are dense in API-heavy code, so the hue alone carries the category.
-  vim.api.nvim_set_hl(0, 'DansMacro', { fg = '#bb9af7' })
-  -- SDL identifiers (SDL_*) -- teal/cyan, its own category.
-  vim.api.nvim_set_hl(0, 'DansSDL', { fg = '#2ac3de' })
-  -- String literals -- muted green. A calm color (strings are inert content);
-  -- applied at high priority so no other coloring/conceal leaks inside them.
-  vim.api.nvim_set_hl(0, 'DansString', { fg = '#a3be8c' })
-  -- runtime `assert(...)` statements -- grayed out as auxiliary checks, not core
-  -- logic (compile-time `static_assert` is spared; it reads as `$sa`).
-  vim.api.nvim_set_hl(0, 'DansAssert', { fg = '#6b7280' })
-  -- Designated-init field-name hints (`.width = 800` -> `width=800`): a muted
-  -- tier, less pronounced than normal text but not as dim as comments. Library-
-  -- aware tinting (SDL / Vulkan / dearImgui) is a later refinement.
-  vim.api.nvim_set_hl(0, 'DansHint', { fg = '#8b8fa3' })
-  -- Deduced-type inlay text inside view overlays (clangd auto types).
-  -- Clearly blue so it reads apart from the gray comments.
-  vim.api.nvim_set_hl(0, 'DansInlayType', { fg = '#7aa2f7' })
-  -- `const` grayed wherever it stays visible (function args, trailing const,
-  -- and the leading const when revealed on the cursor line) — const is the
-  -- de-emphasized default, `mut` is the bright exception.
-  vim.api.nvim_set_hl(0, 'DansConst', { fg = '#6b7280' })
-  -- Namespace/scope qualifiers (std::, dans::, Foo::) grayed as visual noise.
-  -- std:: is additionally concealed (autocmds.lua) so it only shows, gray, on
-  -- the cursor line; every other qualifier stays gray-but-visible.
-  vim.api.nvim_set_hl(0, 'DansNamespace', { fg = '#6b7280' })
-  -- Masks that re-neutralize text the syntax-blind matches above would wrongly
-  -- color: line/block comments back to Comment, #include <...> paths back to
-  -- Normal. Applied at a higher priority so they win inside those regions.
-  vim.api.nvim_set_hl(0, 'DansCommentMask', { link = 'Comment' })
-  vim.api.nvim_set_hl(0, 'DansIncludeMask', { link = 'Normal' })
+  require('custom.dans_frontend_cpp.highlights').apply()
 end
 
-local function apply()
+local function apply(ev)
   -- Re-assert the groups here too: `:colorscheme` (e.g. the day/night swap)
   -- runs `:hi clear`, which would otherwise blank these until a ColorScheme
   -- event; defining them on FileType guarantees they exist for this buffer.
   set_hl()
 
-  -- Drop our own previous matches so repeated FileType events don't stack.
+  -- Conceal the visual noise that hides off the cursor line (moved here from
+  -- config/autocmds.lua so the frontend owns it): a leading `inline`, the
+  -- `dans_` identifier prefix, and -- C++ only -- the std::/dans:: scope
+  -- qualifiers. concealcursor is empty so the cursor line shows the real text.
+  vim.opt_local.conceallevel = 2
+  vim.opt_local.concealcursor = ''
+  local conceals = {
+    { [[\<inline\>\s*]], 30 },
+    { [[\<dans_]], 10 },
+  }
+  if ev and (ev.match == 'cpp' or ev.match == 'cuda') then
+    conceals[#conceals + 1] = { [[\<std::]], 30 }
+    conceals[#conceals + 1] = { [[\<dans::]], 30 }
+  end
+
+  -- Drop our own previous matches (color + conceal) so repeated FileType events
+  -- don't stack.
+  local ours_conceal = {}
+  for _, c in ipairs(conceals) do
+    ours_conceal[c[1]] = true
+  end
   for _, m in ipairs(vim.fn.getmatches()) do
-    if MATCH_GROUPS[m.group] then
+    if MATCH_GROUPS[m.group] or (m.group == 'Conceal' and ours_conceal[m.pattern]) then
       pcall(vim.fn.matchdelete, m.id)
     end
+  end
+
+  for _, c in ipairs(conceals) do
+    vim.fn.matchadd('Conceal', c[1], c[2], -1, { conceal = '' })
   end
 
   -- Window-local matches, priority above the flattened monochrome syntax.
@@ -133,7 +120,9 @@ function M.setup()
   vim.api.nvim_create_autocmd('FileType', {
     group = group,
     pattern = { 'c', 'cpp', 'cuda' },
-    callback = apply,
+    callback = function(ev)
+      apply(ev)
+    end,
   })
   -- Re-assert colors after a colorscheme change (tokyonight day/night swap).
   vim.api.nvim_create_autocmd('ColorScheme', { group = group, callback = set_hl })
