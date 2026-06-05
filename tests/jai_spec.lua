@@ -162,6 +162,8 @@ run('if let with brace', 'fn', { 'if (const auto p = lookup(k); p) {' }, { 'if l
 run('if plain (raw)', 'fn', { 'if (ready) {' }, { false })
 run('std move value', 'fn', { 'auto y = std::move(x);' }, { 'mut y := move(x);' })
 run('std forward value', 'fn', { 'auto y = std::forward<T>(x);' }, { 'mut y := forward<T>(x);' })
+run('cast pointer arg', 'fn', { 'auto y = reinterpret_cast<u8*>(p);' }, { 'mut y := $rc<u8^>(p);' })
+run('cast nested pointer', 'fn', { 'auto z = static_cast<std::vector<int*>>(v);' }, { 'mut z := $sc<vector<int^>>(v);' })
 
 -- std::move / forward must render red (DansMarkerMut); the text suite can't see hl
 do

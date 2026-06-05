@@ -67,6 +67,24 @@ local function expr_aliases()
   return map
 end
 
+-- Index of the `>` matching the `<` at 1-based `open` (nested `<>` balanced), or
+-- nil. Used to bound a cast's template args.
+local function match_angle(s, open)
+  local depth = 0
+  for j = open, #s do
+    local c = s:sub(j, j)
+    if c == '<' then
+      depth = depth + 1
+    elseif c == '>' then
+      depth = depth - 1
+      if depth == 0 then
+        return j
+      end
+    end
+  end
+  return nil
+end
+
 -- Split `text` into chunks: string literals colored green (contents untouched),
 -- namespace qualifiers grayed/hidden, cast keywords aliased, marker/Vk/SDL/macro
 -- words colored. Mirrors the raw-line matchadd coloring inside the overlay.
@@ -131,6 +149,30 @@ local function colorize(text)
           out[#out + 1] = { word, EXPR_MARKERS[word] or 'Normal' }
         end
         i = e + 1
+        -- A cast's template args are a type, so every `*` inside is a pointer:
+        -- emit it as a grayed `^`. The value path is otherwise blind to
+        -- pointer-vs-multiply, but inside `_cast<...>` it's unambiguous.
+        if alias and word:match '_cast$' and text:sub(i, i) == '<' then
+          local close = match_angle(text, i)
+          if close then
+            out[#out + 1] = { '<', 'Normal' }
+            local inner, pos = text:sub(i + 1, close - 1), 1
+            while true do
+              local star = inner:find('*', pos, true)
+              if not star then
+                vim.list_extend(out, colorize(inner:sub(pos)))
+                break
+              end
+              if star > pos then
+                vim.list_extend(out, colorize(inner:sub(pos, star - 1)))
+              end
+              out[#out + 1] = { '^', 'DansPointer' }
+              pos = star + 1
+            end
+            out[#out + 1] = { '>', 'Normal' }
+            i = close + 1
+          end
+        end
       end
     else
       out[#out + 1] = { text:sub(i), 'Normal' }
