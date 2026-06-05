@@ -71,7 +71,9 @@ function _G.dans_cpp_foldtext()
   local first = vim.api.nvim_buf_get_lines(0, start - 1, start, false)[1] or ''
   local indent = first:match '^%s*' or ''
   local n = vim.v.foldend - start + 1
-  return indent .. '+-- ' .. n .. ' lines:'
+  -- show the contract kind (Expects / Ensures) read off the `{ // Expects` opener.
+  local label = first:match '//%s*(%a+)'
+  return indent .. '+-- ' .. n .. ' lines:' .. (label and (' ' .. label) or '')
 end
 
 -- Folded's gray-on-normal definition lives in highlights.lua now; re-assert it
