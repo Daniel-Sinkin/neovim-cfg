@@ -39,6 +39,9 @@ local EXPR_MARKERS = {
   mut_unchecked = 'DansMarkerMut',
 }
 
+-- All-caps stdlib tokens that aren't user macros worth coloring -- left normal.
+local MACRO_DENY = { FILE = true, SEEK_SET = true, SEEK_CUR = true, SEEK_END = true, EOF = true, NULL = true }
+
 -- Single-word C++ aliases ($sc, $dc, ...) reused from cpp_aliases so casts in
 -- jai-rendered value expressions read the same as on non-overlaid lines. This
 -- overlay conceals the whole source line, so cpp_aliases defers here (its inline
@@ -143,7 +146,7 @@ local function colorize(text)
           out[#out + 1] = { word, 'DansVulkan' } -- Vk*/VK_*/vk*, matches cpp_markers
         elseif word:match '^SDL_' then
           out[#out + 1] = { word, 'DansSDL' }
-        elseif word:match '^[A-Z][A-Z0-9_]+$' then
+        elseif word:match '^[A-Z][A-Z0-9_]+$' and not MACRO_DENY[word] then
           out[#out + 1] = { word, 'DansMacro' } -- other all-caps macro
         else
           out[#out + 1] = { word, EXPR_MARKERS[word] or 'Normal' }
@@ -166,7 +169,7 @@ local function colorize(text)
               if star > pos then
                 vim.list_extend(out, colorize(inner:sub(pos, star - 1)))
               end
-              out[#out + 1] = { '^', 'DansPointer' }
+              out[#out + 1] = { '^', 'Normal' }
               pos = star + 1
             end
             out[#out + 1] = { '>', 'Normal' }
@@ -281,7 +284,7 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
         break
       end
       add(t:sub(i, c - 1), hl)
-      add('^', 'DansPointer')
+      add('^', 'Normal')
       i = c + 1
     end
   end
@@ -348,10 +351,11 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     if is_local() and not was_const then
       add('mut ', 'DansMarkerMut')
     end
+    add(sb_binds)
     if sb_sigil == '&' then
-      add('ref ', 'DansRef')
+      add('&')
     end
-    add(sb_binds .. ' := ')
+    add(' := ')
     add_value(sb_expr)
     add(semi)
   elseif name then
@@ -406,13 +410,13 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
         add_value(expr)
         add(semi)
       else
-        -- Reference binding: `ref` marker (Rust `ref`/`ref mut`) instead of
-        -- gluing `&` to the value, where it would read as address-of the first
-        -- operand on a compound RHS. `mut` (added above) precedes it: `mut ref`.
+        -- Reference binding: a `&` suffix on the name (matches the range-for
+        -- `v&` style) rather than a `ref` keyword or gluing `&` to the value.
+        add(name)
         if sigil == '&' then
-          add('ref ', 'DansRef')
+          add('&')
         end
-        add(name .. ' := ')
+        add(' := ')
         add_value(expr)
         add(semi)
       end
@@ -424,7 +428,7 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     -- `=`), since `::` / `: T :` is how JAI spells a compile-time constant.
     local shown_typ = P.strip_type(typ)
     local sp_inner, sp_kind = P.smart_ptr(shown_typ)
-    local disp_typ = sp_inner and (sp_inner .. P.SMART_PTR_GLYPH[sp_kind]) or shown_typ
+    local disp_typ = sp_inner and (sp_inner .. '^') or shown_typ
     add(nm)
     if align then
       add(string.rep(' ', math.max(0, align.nw - vim.fn.strwidth(nm))))
@@ -436,13 +440,14 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     -- (value members/globals aren't marked -- would be noise). constexpr counts
     -- as const. Placed after the colon like `-> mut T&` so names stay aligned.
     if sp_inner then
-      -- smart pointer: `T` + ownership glyph (🔒 unique, 🔗 shared) in place of `^`.
+      -- smart pointer: `T^` with the caret colored by ownership (unique = mut red,
+      -- shared = cpy yellow); a raw pointer's caret stays normal text.
       add_type(sp_inner)
-      add(P.SMART_PTR_GLYPH[sp_kind])
+      add('^', sp_kind == 'unique' and 'DansMarkerMut' or 'DansMarkerCpy')
     else
       if top_level_ptr_ref(shown_typ) then
         if was_const then
-          add('const ', 'DansConst')
+          add('const ', 'Normal')
         elseif not is_constexpr then
           add('mut ', 'DansMarkerMut')
         end

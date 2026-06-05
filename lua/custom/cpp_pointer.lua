@@ -88,7 +88,7 @@ local function refresh(bufnr)
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc, {
           end_col = ec,
           conceal = '',
-          virt_text = { { '^', 'DansPointer' } },
+          virt_text = { { '^', 'Normal' } },
           virt_text_pos = 'inline',
         })
       end

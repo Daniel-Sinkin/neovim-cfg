@@ -256,11 +256,6 @@ function M.smart_ptr(t)
   return nil
 end
 
--- Glyph rendered after the inner type for each smart-pointer kind, in place of
--- the raw-pointer `^`: lock = exclusive/owning (unique), link = shared/refcounted.
--- Both are single-codepoint, width-2 emoji (no VS16) so column alignment holds.
-M.SMART_PTR_GLYPH = { unique = '🔒', shared = '🔗' }
-
 -- For an explicit-type brace declaration (`T name{init}`), return the rendered
 -- name and type strings, else nil. Mirrors build_chunks' explicit branch so the
 -- alignment pass measures exactly what gets rendered.
@@ -284,7 +279,7 @@ function M.field_dims(line)
   local disp = M.strip_type(typ)
   local inner, kind = M.smart_ptr(disp)
   if inner then
-    disp = inner .. M.SMART_PTR_GLYPH[kind]
+    disp = inner .. '^'
   end
   return nm, disp
 end

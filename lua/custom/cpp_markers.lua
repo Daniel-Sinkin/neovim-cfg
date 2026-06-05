@@ -34,19 +34,14 @@ local function set_hl()
   vim.api.nvim_set_hl(0, 'DansVulkan', { fg = '#bb9af7' })
   -- Other all-caps macros / preprocessor constants -- orange. Not bold: these
   -- are dense in API-heavy code, so the hue alone carries the category.
-  vim.api.nvim_set_hl(0, 'DansMacro', { fg = '#ff9e64' })
+  vim.api.nvim_set_hl(0, 'DansMacro', { fg = '#bb9af7' })
   -- SDL identifiers (SDL_*) -- teal/cyan, its own category.
   vim.api.nvim_set_hl(0, 'DansSDL', { fg = '#2ac3de' })
   -- String literals -- muted green. A calm color (strings are inert content);
   -- applied at high priority so no other coloring/conceal leaks inside them.
   vim.api.nvim_set_hl(0, 'DansString', { fg = '#a3be8c' })
-  -- The `^` pointer marker -- grayed (de-emphasized type noise, like const/::).
-  vim.api.nvim_set_hl(0, 'DansPointer', { fg = '#6b7280' })
-  -- `ref` binding marker (jai renders `auto& x = e` as `mut ref x := e`) -- gray,
-  -- a calm type qualifier like const; `mut` stays the bright exception beside it.
-  vim.api.nvim_set_hl(0, 'DansRef', { fg = '#6b7280' })
   -- runtime `assert(...)` statements -- grayed out as auxiliary checks, not core
-  -- logic (compile-time `static_assert` is spared; it reads as `$as`).
+  -- logic (compile-time `static_assert` is spared; it reads as `$sa`).
   vim.api.nvim_set_hl(0, 'DansAssert', { fg = '#6b7280' })
   -- Designated-init field-name hints (`.width = 800` -> `width=800`): a muted
   -- tier, less pronounced than normal text but not as dim as comments. Library-
@@ -95,10 +90,11 @@ local function apply()
   -- Gray every `ident::` scope qualifier. std:: is concealed off the cursor
   -- line by a higher-priority match; the rest stay gray-but-visible.
   vim.fn.matchadd('DansNamespace', [[\<\w\+::]], 20)
-  -- All-caps macros / preprocessor constants -> orange. >=2 chars so single
+  -- All-caps macros / preprocessor constants -> purple. >=2 chars so single
   -- T/R template params are spared; mixed-case names (Vec3, GLuint) and k_snake
-  -- constants don't match.
-  vim.fn.matchadd('DansMacro', [[\<[A-Z][A-Z0-9_]\+\>]], 20)
+  -- constants don't match. A negative-lookahead skips stdlib all-caps that aren't
+  -- user macros worth coloring (FILE, SEEK_*, EOF, NULL).
+  vim.fn.matchadd('DansMacro', [[\<\%(\%(FILE\|SEEK_SET\|SEEK_CUR\|SEEK_END\|EOF\|NULL\)\>\)\@![A-Z][A-Z0-9_]\+\>]], 20)
   -- Vulkan identifiers -> purple, at a higher priority so VK_* overrides the
   -- generic macro color above. Vk* (types) and vk* (functions) are mixed-case so
   -- they never hit the macro match anyway.

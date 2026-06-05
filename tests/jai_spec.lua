@@ -71,8 +71,8 @@ run('local inline constexpr', 'fn', { 'inline constexpr f32 k{2.0f};' }, { 'k: f
 -- ===================== auto bindings =====================
 run('auto local', 'fn', { 'auto a = foo();' }, { 'mut a := foo();' })
 run('const auto local', 'fn', { 'const auto a = foo();' }, { 'a := foo();' })
-run('auto& ref', 'fn', { 'auto& r = x;' }, { 'mut ref r := x;' })
-run('const auto& ref', 'fn', { 'const auto& r = x;' }, { 'ref r := x;' })
+run('auto& ref', 'fn', { 'auto& r = x;' }, { 'mut r& := x;' })
+run('const auto& ref', 'fn', { 'const auto& r = x;' }, { 'r& := x;' })
 run('auto* ptr', 'fn', { 'auto* p = &x;' }, { 'mut p := &x;' })
 run('auto&& fwd (raw)', 'fn', { 'auto&& z = f();' }, { false })
 
@@ -90,7 +90,7 @@ run('lambda copy cap', 'fn', { 'const auto h = [=](int n) { return n; };' }, { '
 
 -- ===================== structured bindings =====================
 run('structured binding', 'fn', { 'auto [a, b] = pair;' }, { 'mut a, b := pair;' })
-run('structured ref binding', 'fn', { 'const auto& [k, v] = *it;' }, { 'ref k, v := *it;' })
+run('structured ref binding', 'fn', { 'const auto& [k, v] = *it;' }, { 'k, v& := *it;' })
 
 -- ===================== range-for =====================
 run('for const ref', 'fn', { 'for (const auto& v : items)' }, { 'for (v& : items)' })
@@ -118,8 +118,8 @@ run('member const pointer', 'struct', { 'const Foo* cptr{};' }, { 'cptr: const F
 run('member array', 'struct', { 'std::array<f32, 3> arr{};' }, { 'arr: array<f32, 3>;' })
 run('member nested template', 'struct', { 'std::vector<std::pair<int, int>> v{};' }, { 'v: vector<pair<int, int>>;' })
 run('member ref-in-template', 'struct', { 'std::pair<int&, int> pr{};' }, { 'pr: pair<int&, int>;' })
-run('member unique_ptr', 'struct', { 'std::unique_ptr<Foo> up{};' }, { 'up: Foo🔒;' })
-run('member shared_ptr', 'struct', { 'std::shared_ptr<Foo> sp{};' }, { 'sp: Foo🔗;' })
+run('member unique_ptr', 'struct', { 'std::unique_ptr<Foo> up{};' }, { 'up: Foo^;' })
+run('member shared_ptr', 'struct', { 'std::shared_ptr<Foo> sp{};' }, { 'sp: Foo^;' })
 run('member optional', 'struct', { 'std::optional<int> o{};' }, { 'o: int?;' })
 run('member vulkan null', 'struct', { 'VkBuffer buf{VK_NULL_HANDLE};' }, { 'buf: VkBuffer = {};' })
 run('member static constexpr', 'struct', { 'static constexpr usize cap{16};' }, { 'cap: usize : 16;' })
@@ -243,6 +243,45 @@ do
   chk('designated tighten', v4, 'width=800,')
   chk('designated pun', v5, 'height,')
   chk('designated field hint color', hint4, true)
+end
+
+-- ===================== caret / const colors =====================
+do
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, {
+    'struct S', '{',
+    '    Foo* raw{};',
+    '    std::unique_ptr<Foo> uni{};',
+    '    std::shared_ptr<Foo> sha{};',
+    '    const Foo* cst{};',
+    '};',
+  })
+  vim.bo[b].filetype = 'cpp'
+  vim.api.nvim_set_current_buf(b)
+  pcall(function() vim.treesitter.get_parser(b, 'cpp'):parse() end)
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+  vim.cmd 'doautocmd FileType'
+  vim.cmd 'doautocmd BufEnter'
+  local function chunk_hl(row0, txt)
+    local m = vim.api.nvim_buf_get_extmarks(b, jns, { row0, 0 }, { row0, -1 }, { details = true })
+    for _, c in ipairs(m[1] and m[1][4].virt_text or {}) do
+      if c[1] == txt then
+        return c[2]
+      end
+    end
+  end
+  local function chk(d, g, e)
+    if g == e then
+      pass = pass + 1
+    else
+      fail = fail + 1
+      fails[#fails + 1] = 'FAIL  ' .. d .. '  got ' .. tostring(g)
+    end
+  end
+  chk('raw caret normal', chunk_hl(2, '^'), 'Normal')
+  chk('unique caret mut', chunk_hl(3, '^'), 'DansMarkerMut')
+  chk('shared caret cpy', chunk_hl(4, '^'), 'DansMarkerCpy')
+  chk('const ptr normal', chunk_hl(5, 'const '), 'Normal')
 end
 
 -- ===================== report =====================
