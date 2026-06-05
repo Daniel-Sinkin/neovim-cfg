@@ -1,7 +1,8 @@
 -- Folding for contract-style scope blocks: `{ // Expects ... }` and
--- `{ // Ensures ... }` are made foldable and auto-closed, so the pre/post-
--- condition asserts don't clutter the body. foldmethod=expr for c/cpp/cuda; only
--- those blocks fold (every other line stays level 0, i.e. never folded).
+-- `{ // Ensures ... }` collapse to a single gray `+-- N lines:` line so the
+-- pre/post-condition asserts don't clutter the body. foldmethod=expr for
+-- c/cpp/cuda; only those blocks fold (every other line stays level 0). Focus
+-- folding (see M.setup) keeps just the fold under the cursor open.
 
 local M = {}
 
@@ -57,17 +58,57 @@ function _G.dans_cpp_foldexpr()
   return c.levels[vim.v.lnum] or '0'
 end
 
+-- Folded display: a single gray `<indent>+-- N lines:` line on a normal
+-- background (no banded Folded highlight, no echoed first-line content), so a
+-- closed contract block reads as quiet auxiliary text rather than a loud band.
+function _G.dans_cpp_foldtext()
+  local start = vim.v.foldstart
+  local first = vim.api.nvim_buf_get_lines(0, start - 1, start, false)[1] or ''
+  local indent = first:match '^%s*' or ''
+  local n = vim.v.foldend - start + 1
+  return indent .. '+-- ' .. n .. ' lines:'
+end
+
+-- Gray foldtext on the normal background, dropping tokyonight's banded Folded
+-- bg. Re-asserted on ColorScheme since the day/night swap runs `:hi clear`.
+local function set_fold_hl()
+  vim.api.nvim_set_hl(0, 'Folded', { fg = '#6b7280' })
+end
+
+-- Focus folding: keep only the fold under the cursor open. `zx` reapplies
+-- 'foldlevel' (re-closing every Expects/Ensures fold) then `zv` (reopening the
+-- one the cursor sits in). Gated on a line change so horizontal moves and
+-- same-line edits don't thrash, and on normal mode so it never fires mid-visual.
+local cpp_ft = { c = true, cpp = true, cuda = true }
+local focus_last = {}
+local function focus_folds()
+  if not cpp_ft[vim.bo.filetype] then return end
+  if vim.wo.foldmethod ~= 'expr' then return end
+  if vim.fn.mode() ~= 'n' then return end
+  local win = vim.api.nvim_get_current_win()
+  local lnum = vim.api.nvim_win_get_cursor(win)[1]
+  if focus_last[win] == lnum then return end
+  focus_last[win] = lnum
+  pcall(vim.cmd, 'normal! zx')
+end
+
 function M.setup()
+  set_fold_hl()
+  local group = vim.api.nvim_create_augroup('ds_cpp_fold', { clear = true })
   vim.api.nvim_create_autocmd('FileType', {
-    group = vim.api.nvim_create_augroup('ds_cpp_fold', { clear = true }),
+    group = group,
     pattern = { 'c', 'cpp', 'cuda' },
     callback = function()
       vim.opt_local.foldmethod = 'expr'
       vim.opt_local.foldexpr = 'v:lua.dans_cpp_foldexpr()'
+      vim.opt_local.foldtext = 'v:lua.dans_cpp_foldtext()'
+      vim.opt_local.fillchars:append 'fold: '
       vim.opt_local.foldenable = true
       vim.opt_local.foldlevel = 0 -- the Expects/Ensures folds start closed
     end,
   })
+  vim.api.nvim_create_autocmd('CursorMoved', { group = group, callback = focus_folds })
+  vim.api.nvim_create_autocmd('ColorScheme', { group = group, callback = set_fold_hl })
 end
 
 return M
