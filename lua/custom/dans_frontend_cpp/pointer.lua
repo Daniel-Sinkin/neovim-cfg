@@ -12,13 +12,13 @@
 --      `optional<T>&` reads as `T?&`. Treesitter-scoped to the optional
 --      template, so a `>` elsewhere (a comparison, another template) is safe.
 --
--- All three skip variable-declaration lines that jai_view overlays (it renders
+-- All three skip variable-declaration lines that view overlays (it renders
 -- these itself), so this mainly covers function signatures and other raw decls.
 
 local M = {}
 
 local ns = vim.api.nvim_create_namespace 'ds_cpp_pointer'
-local vu = require 'custom.cpp_view_util'
+local vu = require 'custom.dans_frontend_cpp.util'
 
 local PTR_QUERY = [[
   (pointer_declarator "*" @star)
@@ -79,14 +79,14 @@ local function refresh(bufnr)
   local cur = vu.cursor_row0(bufnr)
   local diag = vu.diagnostic_lines(bufnr)
   local s0, e0 = vu.visible_range(bufnr)
-  local jai_ok, jai = pcall(require, 'custom.jai_view')
-  local jai_on = jai_ok and jai.is_enabled(bufnr)
+  local view_ok, view = pcall(require, 'custom.dans_frontend_cpp.view')
+  local view_on = view_ok and view.is_enabled(bufnr)
   local function covered(row0)
-    if not jai_on then
+    if not view_on then
       return false
     end
     local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
-    return line ~= nil and jai.covers(line)
+    return line ~= nil and view.covers(line)
   end
 
   -- 1. pointer `*` -> `^` (virt_text, skip the cursor line so the real `*` shows)

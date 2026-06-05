@@ -126,7 +126,7 @@ function M.render_file(path)
     vim.treesitter.get_parser(buf, 'cpp'):parse()
   end)
 
-  local vu = require 'custom.cpp_view_util'
+  local vu = require 'custom.dans_frontend_cpp.util'
   local saved = vu.visible_range
   vu.visible_range = function()
     return 0, vim.api.nvim_buf_line_count(buf)

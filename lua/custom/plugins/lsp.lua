@@ -86,7 +86,7 @@ return {
 
           if client and client_supports_method(client, vim.lsp.protocol.Methods.textDocument_inlayHint, event.buf) then
             -- Toggles the *built-in* renderer (end-of-line hints). For C/C++ the
-            -- deduced auto types are instead pulled and placed by custom.jai_view
+            -- deduced auto types are instead pulled and placed by custom.dans_frontend_cpp.view
             -- (rendered between the `:` and `=`), so leave the built-in off here.
             map('<leader>th', function()
               vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled { bufnr = event.buf })

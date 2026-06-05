@@ -10,10 +10,4 @@ require 'config.snippets'
 
 require('custom.julia_scope').setup()
 require('custom.julia_progress').setup()
-require('custom.cpp_aliases').setup()
-require('custom.cpp_markers').setup()
-require('custom.jai_view').setup()
-require('custom.hpp_arrow_align').setup()
-require('custom.cpp_pointer').setup()
-require('custom.cpp_designated').setup()
-require('custom.cpp_fold').setup()
+require('custom.dans_frontend_cpp').setup()

@@ -126,7 +126,7 @@ end
 -- replaced by its (shorter) virt_text. Returns (removed, added).
 local function alias_delta(prefix)
   local ok, aliases = pcall(function()
-    return require('custom.cpp_aliases').ALIASES
+    return require('custom.dans_frontend_cpp.aliases').ALIASES
   end)
   if not ok or not aliases then
     return 0, 0
@@ -170,7 +170,7 @@ local function rendered_arrow_col(line, bufnr, row0)
   -- the arrow, so account for them or the arrows drift.
   local mut_added = 0
   local ok, cols = pcall(function()
-    return require('custom.cpp_aliases').arg_mut_cols(line)
+    return require('custom.dans_frontend_cpp.aliases').arg_mut_cols(line)
   end)
   if ok and cols then
     for _, col0 in ipairs(cols) do
@@ -181,7 +181,7 @@ local function rendered_arrow_col(line, bufnr, row0)
   end
   if bufnr and row0 then
     local okm, mcol = pcall(function()
-      return require('custom.cpp_aliases').member_mut_col(line, bufnr, row0)
+      return require('custom.dans_frontend_cpp.aliases').member_mut_col(line, bufnr, row0)
     end)
     if okm and mcol and mcol < ap - 1 then
       mut_added = mut_added + 4

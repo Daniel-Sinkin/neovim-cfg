@@ -1,7 +1,7 @@
--- Parsing and treesitter classification for the JAI declaration view. Pure
+-- Parsing and treesitter classification for the dans-cpp-frontend declaration view. Pure
 -- analysis: from declaration text (and optionally a buffer position) it returns
 -- structured data or measurements -- no rendering, no module state. Used by
--- jai_render (chunk building) and jai_view (alignment / reveal).
+-- render (chunk building) and view (alignment / reveal).
 
 local M = {}
 

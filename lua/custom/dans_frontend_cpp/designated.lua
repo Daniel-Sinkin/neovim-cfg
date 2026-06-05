@@ -3,17 +3,17 @@
 --   .width = 800      ->  width=800     (drop the dot, tighten the `=`)
 --   .width = width    ->  width         (pun: value == field, hide ` = value`)
 -- The field name gets the muted hint color (DansHint). Skips the cursor line and
--- any line jai_view overlays (it renders those itself). Conceal-based, so the
+-- any line view overlays (it renders those itself). Conceal-based, so the
 -- value keeps its normal coloring.
 --
--- Covers the non-jai lines: multi-line aggregate openers' body lines, call-site
--- temporaries, returns. Designated inits *inside* a jai-overlaid declaration's
--- value are not handled here (jai draws that line); that's a separate follow-up.
+-- Covers the non-overlay lines: multi-line aggregate openers' body lines, call-site
+-- temporaries, returns. Designated inits *inside* a overlay-covered declaration's
+-- value are not handled here (the overlay draws that line); that's a separate follow-up.
 
 local M = {}
 
 local ns = vim.api.nvim_create_namespace 'ds_cpp_designated'
-local vu = require 'custom.cpp_view_util'
+local vu = require 'custom.dans_frontend_cpp.util'
 
 local DESIG_QUERY = [[(field_designator) @fd]]
 
@@ -40,14 +40,14 @@ local function refresh(bufnr)
   local cur = vu.cursor_row0(bufnr)
   local diag = vu.diagnostic_lines(bufnr)
   local s0, e0 = vu.visible_range(bufnr)
-  local jai_ok, jai = pcall(require, 'custom.jai_view')
-  local jai_on = jai_ok and jai.is_enabled(bufnr)
+  local view_ok, view = pcall(require, 'custom.dans_frontend_cpp.view')
+  local view_on = view_ok and view.is_enabled(bufnr)
   local function covered(row0)
-    if not jai_on then
+    if not view_on then
       return false
     end
     local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
-    return line ~= nil and jai.covers(line)
+    return line ~= nil and view.covers(line)
   end
 
   local okq, q = pcall(vim.treesitter.query.parse, lang, DESIG_QUERY)

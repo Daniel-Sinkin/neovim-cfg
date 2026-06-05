@@ -1,11 +1,11 @@
--- Headless spec for the C/C++ JAI view layer (jai_view / jai_parse / jai_render).
--- Run:  nvim --headless --cmd "set noswapfile" -c "luafile tests/jai_spec.lua" -c "qa!"
+-- Headless spec for the C/C++ frontend view layer (view / parse / render).
+-- Run:  nvim --headless --cmd "set noswapfile" -c "luafile tests/frontend_spec.lua" -c "qa!"
 -- Each case wraps body lines in a function ('fn'), a struct ('struct'), or none
 -- ('top'); the cursor sits on line 1 (the wrapper) so body lines aren't revealed.
--- expect[i] is the rendered jai overlay for body line i, or false for "no overlay"
+-- expect[i] is the rendered frontend overlay for body line i, or false for "no overlay"
 -- (raw). Prints a PASS/FAIL summary; failures show expected vs actual.
 
-local jns = vim.api.nvim_create_namespace 'ds_jai_view'
+local jns = vim.api.nvim_create_namespace 'ds_frontend_view'
 local pass, fail, fails = 0, 0, {}
 
 local function overlay(b, row0)
@@ -308,7 +308,7 @@ end
 
 -- ===================== fold levels (Expects / Ensures blocks) =====================
 do
-  local fl = require('custom.cpp_fold').compute_fold_levels
+  local fl = require('custom.dans_frontend_cpp.fold').compute_fold_levels
   local levels = fl({
     'def f() -> void', '{',
     '    {  // Expects', '        assert(a > 0);', '    }',
@@ -374,7 +374,7 @@ do
 end
 
 -- ===================== report =====================
-local report = { string.format('jai_spec: %d passed, %d failed', pass, fail) }
+local report = { string.format('frontend_spec: %d passed, %d failed', pass, fail) }
 for _, f in ipairs(fails) do
   report[#report + 1] = f
 end

@@ -1,9 +1,9 @@
--- Chunk building for the JAI declaration view: turn a parsed declaration line
+-- Chunk building for the dans-cpp-frontend declaration view: turn a parsed declaration line
 -- into the list of { text, highlight } pieces the overlay draws. Depends on
--- jai_parse for the structural analysis; holds the render-side config (the
+-- parse for the structural analysis; holds the render-side config (the
 -- lambda-as-function rendering toggle and the cosmetic separators).
 
-local P = require 'custom.jai_parse'
+local P = require 'custom.dans_frontend_cpp.parse'
 
 local M = {}
 
@@ -43,7 +43,7 @@ local EXPR_MARKERS = {
 local MACRO_DENY = { FILE = true, SEEK_SET = true, SEEK_CUR = true, SEEK_END = true, EOF = true, NULL = true }
 
 -- Single-word C++ aliases ($sc, $dc, ...) reused from cpp_aliases so casts in
--- jai-rendered value expressions read the same as on non-overlaid lines. This
+-- frontend-rendered value expressions read the same as on non-overlaid lines. This
 -- overlay conceals the whole source line, so cpp_aliases defers here (its inline
 -- alias would be orphaned); without this the casts rendered verbatim. Built
 -- lazily and cached from cpp_aliases.ALIASES, keeping only identifier-shaped
@@ -55,7 +55,7 @@ local function expr_aliases()
   end
   local map = {}
   local ok, aliases = pcall(function()
-    return require('custom.cpp_aliases').ALIASES
+    return require('custom.dans_frontend_cpp.aliases').ALIASES
   end)
   if ok and aliases then
     for _, a in ipairs(aliases) do
@@ -297,7 +297,7 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     end
   end
 
-  -- dev::Defer _{[cap] { body }}  ->  Jai-style `defer body`: a scope-exit guard
+  -- dev::Defer _{[cap] { body }}  ->  Odin-style `defer body`: a scope-exit guard
   -- where the Defer type, throwaway name, capture, and wrapping braces are all
   -- ceremony. One statement renders inline (`defer f();`); several keep a block
   -- (`defer { a(); b(); }`). Matched before the generic explicit-type branch.
@@ -437,8 +437,8 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
   else
     -- Explicit type: colored the same blue as the deduced hints (DansInlayType);
     -- written and deduced types are treated alike. std:: stripped. `constexpr`
-    -- becomes JAI's constant binding -- `name: T : value` (a `:` in place of the
-    -- `=`), since `::` / `: T :` is how JAI spells a compile-time constant.
+    -- becomes Odin's constant binding -- `name: T : value` (a `:` in place of the
+    -- `=`), since `::` / `: T :` is how frontend spells a compile-time constant.
     local shown_typ = P.strip_type(typ)
     local sp_inner, sp_kind = P.smart_ptr(shown_typ)
     local disp_typ = sp_inner and (sp_inner .. '^') or shown_typ
@@ -518,7 +518,7 @@ function M.render_line(line, type_hint, align, bufnr, row0)
   return #indent, chunks
 end
 
--- Flip the lambda-as-function rendering; returns the new state. jai_view owns
+-- Flip the lambda-as-function rendering; returns the new state. view owns
 -- the user command and re-renders open buffers.
 function M.toggle_lambda()
   lambda_render = not lambda_render

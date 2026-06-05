@@ -3,7 +3,7 @@
 --   mut, mut_unchecked          -> reddish-pink
 --   cpy (and its type + name)   -> yellow
 --   copy(...)                   -> yellow
--- Highlight group names are shared with jai_view.lua, which colors the marker
+-- Highlight group names are shared with view.lua, which colors the marker
 -- prefix inside its overlays using the same groups.
 
 local M = {}
@@ -26,7 +26,7 @@ local function set_hl()
   -- Not bold: mut is inferred everywhere now, so bold red was too aggressive.
   vim.api.nvim_set_hl(0, 'DansMarkerMut', { fg = '#f7768e' })
   vim.api.nvim_set_hl(0, 'DansMarkerCpy', { fg = '#e0af68', bold = true })
-  -- `lambda` pseudo-keyword in jai_view's lambda rendering (green to read as a
+  -- `lambda` pseudo-keyword in view's lambda rendering (green to read as a
   -- declaration keyword, distinct from the mut/cpy markers).
   vim.api.nvim_set_hl(0, 'DansLambda', { fg = '#9ece6a', bold = true })
   -- Vulkan identifiers (Vk*, VK_*) -- purple. Dense in this codebase, so they
@@ -47,7 +47,7 @@ local function set_hl()
   -- tier, less pronounced than normal text but not as dim as comments. Library-
   -- aware tinting (SDL / Vulkan / dearImgui) is a later refinement.
   vim.api.nvim_set_hl(0, 'DansHint', { fg = '#8b8fa3' })
-  -- Deduced-type inlay text inside jai_view overlays (clangd auto types).
+  -- Deduced-type inlay text inside view overlays (clangd auto types).
   -- Clearly blue so it reads apart from the gray comments.
   vim.api.nvim_set_hl(0, 'DansInlayType', { fg = '#7aa2f7' })
   -- `const` grayed wherever it stays visible (function args, trailing const,
@@ -80,7 +80,7 @@ local function apply()
 
   -- Window-local matches, priority above the flattened monochrome syntax.
   -- Only the keyword is colored (not the following type/name). mut/mut_unchecked
-  -- are gone from source now -- the frontend (jai_view) infers and colors them.
+  -- are gone from source now -- the frontend (view) infers and colors them.
   vim.fn.matchadd('DansMarkerCpy', [[\<copy\>]], 20)
   vim.fn.matchadd('DansMarkerCpy', [[\<cpy\>]], 20)
   -- Gray every `const`. The leading-const conceal still hides it on non-cursor

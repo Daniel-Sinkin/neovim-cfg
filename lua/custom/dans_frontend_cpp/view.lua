@@ -1,6 +1,6 @@
--- Read-mode that re-renders C/C++/CUDA variable declarations in a JAI-like
+-- Read-mode that re-renders C/C++/CUDA variable declarations in a Odin-like
 -- syntax. View-only (extmark conceal + inline virt_text). ON by default for
--- c/cpp/cuda buffers; toggle per-buffer with :JaiView.
+-- c/cpp/cuda buffers; toggle per-buffer with :DansFrontend.
 --
 --   int x{7}        ->  x: int = 7
 --   int x{}         ->  x: int
@@ -11,20 +11,20 @@
 --
 -- This is the orchestration layer: per-buffer state, the visible-range refresh,
 -- clangd inlay-hint fetching, and the user commands / autocmds. The parsing
--- lives in jai_parse, the chunk building in jai_render.
+-- lives in parse, the chunk building in render.
 --
 -- Reveal is cursor-line driven: the line the cursor sits on shows the real C++
--- (no overlay, no type hint); every other line shows the JAI overlay. Moving
--- the cursor flips the line you leave back to JAI and reveals the one you land
+-- (no overlay, no type hint); every other line shows the overlay. Moving
+-- the cursor flips the line you leave back to the overlay and reveals the one you land
 -- on. Mode-agnostic (insert mode has no special effect).
 
-local vu = require 'custom.cpp_view_util'
-local P = require 'custom.jai_parse'
-local R = require 'custom.jai_render'
+local vu = require 'custom.dans_frontend_cpp.util'
+local P = require 'custom.dans_frontend_cpp.parse'
+local R = require 'custom.dans_frontend_cpp.render'
 
 local M = {}
 
-local ns = vim.api.nvim_create_namespace 'ds_jai_view'
+local ns = vim.api.nvim_create_namespace 'ds_frontend_view'
 local enabled = {}
 local hint_type = {} -- bufnr -> { [row0] = "int *" } from clangd Type inlay hints
 local show_hints = false -- deduced-type hints off by default (toggle with :InlineHints)
@@ -174,26 +174,26 @@ function M.toggle()
   end
 end
 
--- Toggle the deduced-type inlay hints (global) while keeping the jai overlay.
+-- Toggle the deduced-type inlay hints (global) while keeping the overlay.
 function M.toggle_hints()
   show_hints = not show_hints
   for bufnr in pairs(enabled) do
     refresh(bufnr)
   end
-  vim.notify('JAI type hints ' .. (show_hints and 'on' or 'off'), vim.log.levels.INFO)
+  vim.notify('frontend type hints ' .. (show_hints and 'on' or 'off'), vim.log.levels.INFO)
 end
 
 -- Toggle the experimental lambda-as-function rendering (global). The flag lives
--- in jai_render; flip it there, then re-render every open overlay.
+-- in render; flip it there, then re-render every open overlay.
 function M.toggle_lambda()
   local on = R.toggle_lambda()
   for bufnr in pairs(enabled) do
     refresh(bufnr)
   end
-  vim.notify('JAI lambda view ' .. (on and 'on' or 'off'), vim.log.levels.INFO)
+  vim.notify('frontend lambda view ' .. (on and 'on' or 'off'), vim.log.levels.INFO)
 end
 
--- Whether the JAI overlay is currently active for this buffer.
+-- Whether the overlay is currently active for this buffer.
 function M.is_enabled(bufnr)
   return enabled[bufnr] == true
 end
@@ -206,11 +206,7 @@ function M.covers(line)
 end
 
 function M.setup()
-  vim.api.nvim_create_user_command('JaiView', M.toggle, { desc = 'Toggle JAI-style declaration view' })
-  vim.api.nvim_create_user_command('InlineHints', M.toggle_hints, { desc = 'Toggle deduced-type inline hints' })
-  vim.api.nvim_create_user_command('LambdaView', M.toggle_lambda, { desc = 'Toggle lambda-as-function rendering' })
-
-  local group = vim.api.nvim_create_augroup('ds_jai_view', { clear = true })
+  local group = vim.api.nvim_create_augroup('ds_frontend_view', { clear = true })
   vim.api.nvim_create_autocmd('FileType', {
     group = group,
     pattern = { 'c', 'cpp', 'cuda' },

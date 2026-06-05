@@ -13,7 +13,7 @@
 local M = {}
 
 local ns = vim.api.nvim_create_namespace 'ds_cpp_aliases'
-local vu = require 'custom.cpp_view_util'
+local vu = require 'custom.dans_frontend_cpp.util'
 
 -- { keyword, replacement, highlight? }  -- highlight defaults to 'Comment'.
 local ALIASES = {
@@ -204,16 +204,16 @@ local function refresh(bufnr)
   local cur = vu.cursor_row0(bufnr)
   local diag = vu.diagnostic_lines(bufnr)
 
-  -- Defer to jai_view on lines it rewrites: it draws a full-line overlay there,
+  -- Defer to view on lines it rewrites: it draws a full-line overlay there,
   -- which would orphan our inline alias to the end of the line.
-  local jai_ok, jai = pcall(require, 'custom.jai_view')
-  local jai_on = jai_ok and jai.is_enabled(bufnr)
+  local view_ok, view = pcall(require, 'custom.dans_frontend_cpp.view')
+  local view_on = view_ok and view.is_enabled(bufnr)
 
   local s0, e0 = vu.visible_range(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
   for idx, line in ipairs(lines) do
     local row0 = s0 + idx - 1
-    if row0 ~= cur and not diag[row0] and not (jai_on and jai.covers(line)) then
+    if row0 ~= cur and not diag[row0] and not (view_on and view.covers(line)) then
       for _, alias in ipairs(ALIASES) do
         local keyword, replacement, hl = alias[1], alias[2], alias[3] or 'Comment'
         local start_pos = 1

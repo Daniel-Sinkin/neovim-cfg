@@ -72,7 +72,7 @@ vim.api.nvim_create_autocmd('FileType', {
     vim.opt_local.conceallevel = 2
     -- Empty concealcursor: the cursor line never conceals (raw WYSIWYG view of
     -- const/std::/dans_), every other line stays concealed. Reveal is driven by
-    -- cursor position only — insert mode has no effect. Matches jai_view.
+    -- cursor position only — insert mode has no effect. Matches view.
     vim.opt_local.concealcursor = ''
 
     -- Conceal specs {pattern, priority}. const/std:: at priority 30 beat

@@ -1,5 +1,5 @@
 -- Shared helpers for the C/C++/CUDA view-layer modules (cpp_aliases,
--- cpp_pointer, jai_view). These were copy-pasted in each; centralized here so
+-- cpp_pointer, view). These were copy-pasted in each; centralized here so
 -- the visible-range window, cursor row, and filetype guard stay in one place.
 
 local M = {}
