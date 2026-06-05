@@ -249,7 +249,9 @@ end
 -- and the alignment pass (so column widths match).
 function M.strip_type(typ)
   local t = typ:gsub('^constexpr%s+', ''):gsub('^inline%s+', ''):gsub('std::', ''):gsub('dans::', '')
-  t = t:gsub('^optional<(.+)>$', '%1?') -- std::optional<T> -> T?
+  -- std::optional<T> -> T?, keeping any trailing ref/ptr after the `?`:
+  -- optional<T>& -> T?&, optional<T>* -> T?^ (once M.ptr rewrites the star).
+  t = t:gsub('^optional<(.+)>%s*([&*]*)$', '%1?%2')
   return M.ptr(t)
 end
 

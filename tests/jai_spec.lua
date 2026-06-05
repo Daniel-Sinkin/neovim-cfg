@@ -156,6 +156,9 @@ run('trailing comment', 'fn', { 'int x{7}; // count' }, { 'x: mut int = 7; // co
 -- ===================== new features =====================
 run('optional local', 'fn', { 'std::optional<Foo> o{};' }, { 'o: mut Foo?;' })
 run('optional pointer', 'struct', { 'std::optional<int> o{};' }, { 'o: int?;' })
+run('optional ref member', 'struct', { 'std::optional<int>& o;' }, { 'o: mut int?&;' })
+run('optional const ref member', 'struct', { 'const std::optional<int>& o;' }, { 'o: const int?&;' })
+run('optional ptr member', 'struct', { 'std::optional<int>* o{};' }, { 'o: mut int?^;' })
 run('for destructure', 'fn', { 'for (const auto& [k, v] : items)' }, { 'for (k, v& : items)' })
 run('if let', 'fn', { 'if (const auto res = find(x); res)' }, { 'if let res := find(x)' })
 run('if let with brace', 'fn', { 'if (const auto p = lookup(k); p) {' }, { 'if let p := lookup(k) {' })

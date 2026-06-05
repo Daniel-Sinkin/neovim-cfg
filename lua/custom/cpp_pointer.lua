@@ -7,9 +7,13 @@
 --   2. a leading `const` is concealed on a *value* declaration (const is the
 --      hidden default) but kept on a *pointer/reference* one, where the
 --      const-vs-mut distinction is meaningful.
+--   3. `std::optional<T>` -> `T?`: `optional<` is concealed and the closing `>`
+--      rewritten to `?`. Any ref/ptr suffix stays in the source, so
+--      `optional<T>&` reads as `T?&`. Treesitter-scoped to the optional
+--      template, so a `>` elsewhere (a comparison, another template) is safe.
 --
--- Both skip variable-declaration lines that jai_view overlays (it renders these
--- itself), so this mainly covers function signatures and other raw decls.
+-- All three skip variable-declaration lines that jai_view overlays (it renders
+-- these itself), so this mainly covers function signatures and other raw decls.
 
 local M = {}
 
@@ -24,6 +28,11 @@ local PTR_QUERY = [[
 local CONST_QUERY = [[
   (declaration (type_qualifier) @const)
   (field_declaration (type_qualifier) @const)
+]]
+
+-- Every `Foo<...>`; the optional pass filters to the ones named `optional`.
+local OPT_QUERY = [[
+  (template_type) @tt
 ]]
 
 -- Whether a declaration declares a pointer or reference (so a leading const
@@ -114,6 +123,24 @@ local function refresh(bufnr)
             end
             pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc, { end_col = k, conceal = '' })
           end
+        end
+      end
+    end
+  end
+
+  -- 3. std::optional<T> -> T?: conceal `optional<` and rewrite the closing `>`
+  -- to `?`. A ref/ptr suffix stays in the source, so optional<T>& reads `T?&`.
+  local oko, oq = pcall(vim.treesitter.query.parse, lang, OPT_QUERY)
+  if oko and oq then
+    for _, node in oq:iter_captures(root, bufnr, s0, e0) do
+      local nm = node:field('name')[1]
+      local ar = node:field('arguments')[1]
+      if nm and ar and nm:type() == 'type_identifier' and vim.treesitter.get_node_text(nm, bufnr) == 'optional' then
+        local nsr, nsc = nm:range()
+        local asr, asc, aer, aec = ar:range()
+        if nsr ~= cur and not diag[nsr] and not covered(nsr) and nsr == asr then
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, nsr, nsc, { end_col = asc + 1, conceal = '' })
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, aer, aec - 1, { end_col = aec, conceal = '?' })
         end
       end
     end
