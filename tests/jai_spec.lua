@@ -195,15 +195,17 @@ do
   end
 end
 
--- ===================== designated init (conceal-based) =====================
+-- ===================== designated init (conceal + inline pad) =====================
 do
   local b = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(b, 0, -1, false, {
     'auto fn() -> void', '{',
-    '    const auto cfg = Config{',
-    '        .width = 800,',
-    '        .height = height,',
+    '    const auto m = Metrics{',
+    '        .x = a,',
+    '        .width = b,',
+    '        .same = same,',
     '    };',
+    '    render({.x = 1, .y = 2});',
     '}',
   })
   vim.bo[b].filetype = 'cpp'
@@ -213,9 +215,10 @@ do
   vim.cmd 'doautocmd FileType'
   vim.cmd 'doautocmd BufEnter'
   local dns = vim.api.nvim_create_namespace 'ds_cpp_designated'
-  local function visible(row0)
+  -- displayed text: apply conceals (hide) and inline virt_text (insert), then trim.
+  local function display(row0)
     local line = vim.api.nvim_buf_get_lines(b, row0, row0 + 1, false)[1] or ''
-    local hidden, hl = {}, false
+    local hidden, inserts, hint = {}, {}, false
     for _, m in ipairs(vim.api.nvim_buf_get_extmarks(b, dns, { row0, 0 }, { row0, -1 }, { details = true })) do
       local d = m[4]
       if d.conceal ~= nil and d.end_col then
@@ -223,17 +226,27 @@ do
           hidden[c] = true
         end
       end
+      if d.virt_text and d.virt_text_pos == 'inline' then
+        local t = ''
+        for _, ch in ipairs(d.virt_text) do
+          t = t .. ch[1]
+        end
+        inserts[m[3]] = (inserts[m[3]] or '') .. t
+      end
       if d.hl_group == 'DansHint' then
-        hl = true
+        hint = true
       end
     end
     local s = {}
-    for c = 0, #line - 1 do
-      if not hidden[c] then
+    for c = 0, #line do
+      if inserts[c] then
+        s[#s + 1] = inserts[c]
+      end
+      if c < #line and not hidden[c] then
         s[#s + 1] = line:sub(c + 1, c + 1)
       end
     end
-    return vim.trim(table.concat(s)), hl
+    return (table.concat(s):gsub('^%s+', '')), hint
   end
   local function chk(desc, got, exp)
     if got == exp then
@@ -243,11 +256,12 @@ do
       fails[#fails + 1] = string.format('FAIL  %s\n        exp: %s\n        got: %s', desc, tostring(exp), tostring(got))
     end
   end
-  local v4, hint4 = visible(3)
-  local v5 = visible(4)
-  chk('designated tighten', v4, 'width=800,')
-  chk('designated pun', v5, 'height,')
-  chk('designated field hint color', hint4, true)
+  local d3, hint3 = display(3)
+  chk('designated align narrow', d3, 'x     = a,')
+  chk('designated align wide', display(4), 'width = b,')
+  chk('designated pun', display(5), 'same,')
+  chk('designated single-line tight', display(7), 'render({x=1, y=2});')
+  chk('designated field hint color', hint3, true)
 end
 
 -- ===================== caret / const colors =====================

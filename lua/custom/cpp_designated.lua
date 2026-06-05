@@ -54,6 +54,37 @@ local function refresh(bufnr)
   if not okq or not q then
     return
   end
+  -- Per-list cache: a multi-line aggregate aligns its `=` (like struct fields);
+  -- a single-line one stays tight (`field=value`). maxw = widest field name.
+  local list_info = {}
+  local function list_meta(pair)
+    local list = pair:parent()
+    if not list or list:type() ~= 'initializer_list' then
+      return { multiline = false, maxw = 0 }
+    end
+    local lsr, lsc, ler = list:range()
+    local key = lsr .. ',' .. lsc
+    if list_info[key] then
+      return list_info[key]
+    end
+    local maxw = 0
+    if lsr ~= ler then
+      for child in list:iter_children() do
+        if child:type() == 'initializer_pair' then
+          for d in child:iter_children() do
+            if d:type() == 'field_designator' then
+              local _, dc, _, dec = d:range()
+              maxw = math.max(maxw, dec - dc - 1) -- field width (minus the dot)
+            end
+          end
+        end
+      end
+    end
+    local meta = { multiline = lsr ~= ler, maxw = maxw }
+    list_info[key] = meta
+    return meta
+  end
+
   for _, node in q:iter_captures(root, bufnr, s0, e0) do
     local sr, sc, ser, fec = node:range() -- field_designator `.field`
     local pair = node:parent()
@@ -74,13 +105,21 @@ local function refresh(bufnr)
             -- pun: `.field = field` -> `field` (hide ` = field`)
             pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, fec, { end_col = pec, conceal = '' })
           else
-            -- tighten: hide the spaces around `=`
             local eqcol = fec + eqs - 1
             local valstart = fec + eqe
+            local meta = list_meta(pair)
+            -- hide the original space(s) before `=` either way.
             if eqcol > fec then
               pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, fec, { end_col = eqcol, conceal = '' })
             end
-            if valstart > eqcol + 1 then
+            if meta.multiline then
+              -- align: pad the field so every `=` lands at maxw+1; keep ` = value`.
+              pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, eqcol, {
+                virt_text = { { string.rep(' ', meta.maxw - #field + 1), 'Normal' } },
+                virt_text_pos = 'inline',
+              })
+            elseif valstart > eqcol + 1 then
+              -- single-line: tighten the space after `=` too -> `field=value`.
               pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, eqcol + 1, { end_col = valstart, conceal = '' })
             end
           end
