@@ -241,20 +241,28 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
   local sb_sigil, sb_binds, sb_expr = core:match '^auto([&*]?)%s*%[(.-)%]%s*=%s*(.+)$'
 
   local sigil, name, expr = core:match '^auto([&*]?)%s+([%w_]+)%s*=%s*(.+)$'
-  local typ, nm, init
+  local typ, nm, init, paren
   if not forp and not iflet and not sb_binds and not name then
     typ, nm, init = core:match '^(.-)%s+([%w_]+)%s*{(.*)}$'
     -- A brace-init declaration is a terminated statement; require the `;`.
     -- Without it this is a continuation / constructor temporary in an argument
     -- list (e.g. `local_ray, Aabb{.min = a}`), where `local_ray,` is not a type.
     if not (nm and had_semi and P.looks_like_type(typ)) then
-      -- No-brace reference/pointer member: `T& name` / `T* name` (a struct
-      -- reference can't be brace-defaulted). The sigil must touch the type, so
-      -- bitwise/multiply statements like `a & b;` aren't grabbed.
-      typ, nm = core:match '^(.-[%w_>][&*]+)%s*([%w_]+)$'
-      init = ''
-      if not (typ and nm and had_semi and P.looks_like_type(typ)) then
-        return nil
+      -- paren-init `T name(args)` (ctor call), kept as `name: T(args)` since paren
+      -- and brace init differ in meaning. The most-vexing-parse (function decl vs
+      -- variable) is semantic, so only accept args that look like a value.
+      local ptyp, pnm, pargs = core:match '^(.-)%s+([%w_]+)%s*%((.+)%)$'
+      if ptyp and pnm and had_semi and P.looks_like_type(ptyp) and (pargs:find('[%.%d(]') or pargs:find('::')) then
+        typ, nm, init, paren = ptyp, pnm, nil, pargs
+      else
+        -- No-brace reference/pointer member: `T& name` / `T* name` (a struct
+        -- reference can't be brace-defaulted). The sigil must touch the type, so
+        -- bitwise/multiply statements like `a & b;` aren't grabbed.
+        typ, nm = core:match '^(.-[%w_>][&*]+)%s*([%w_]+)$'
+        init = ''
+        if not (typ and nm and had_semi and P.looks_like_type(typ)) then
+          return nil
+        end
       end
     end
   end
@@ -461,7 +469,12 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
       end
       add_type(shown_typ)
     end
-    if init ~= '' then
+    if paren then
+      -- paren-init `T name(args)`: keep the parens (ctor call, not assignment).
+      add '('
+      add_value(paren)
+      add ')'
+    elseif init ~= '' then
       -- Pad the type only when there's an initializer, so the `=` aligns across
       -- the block; a no-init line's `;` stays at its natural end position.
       if align then

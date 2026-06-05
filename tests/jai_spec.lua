@@ -166,6 +166,9 @@ run('std move value', 'fn', { 'auto y = std::move(x);' }, { 'mut y := move(x);' 
 run('std forward value', 'fn', { 'auto y = std::forward<T>(x);' }, { 'mut y := forward<T>(x);' })
 run('cast pointer arg', 'fn', { 'auto y = reinterpret_cast<u8*>(p);' }, { 'mut y := $rc<u8^>(p);' })
 run('cast nested pointer', 'fn', { 'auto z = static_cast<std::vector<int*>>(v);' }, { 'mut z := $sc<vector<int^>>(v);' })
+run('paren init', 'fn', { 'std::vector<stbtt_bakedchar> out(config.codepoint_count);' }, { 'out: mut vector<stbtt_bakedchar>(config.codepoint_count);' })
+run('paren init digit', 'fn', { 'Buffer buf(1024);' }, { 'buf: mut Buffer(1024);' })
+run('function decl raw', 'fn', { 'Foo make(Bar);' }, { false })
 
 -- std::move / forward must render red (DansMarkerMut); the text suite can't see hl
 do
