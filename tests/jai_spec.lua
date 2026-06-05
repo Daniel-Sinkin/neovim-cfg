@@ -331,6 +331,48 @@ do
   end
 end
 
+-- ===================== golden regression (real dans-vk fixtures) =====================
+-- Render frozen first-party files end to end and diff against committed snapshots.
+-- Regenerate intentionally with tests/golden/update.lua, then review the diff.
+do
+  local here = debug.getinfo(1, 'S').source:sub(2):gsub('[^/\\]+$', '')
+  local ok, R = pcall(dofile, here .. 'golden/render.lua')
+  if not ok then
+    fail = fail + 1
+    fails[#fails + 1] = 'FAIL  golden: render.lua failed to load: ' .. tostring(R)
+  else
+    local gdir = here .. 'golden/'
+    for _, name in ipairs(vim.fn.readdir(gdir .. 'fixtures')) do
+      local got = R.render_file(gdir .. 'fixtures/' .. name)
+      local ef = io.open(gdir .. 'expected/' .. name .. '.txt', 'r')
+      if not ef then
+        fail = fail + 1
+        fails[#fails + 1] = 'FAIL  golden ' .. name .. ': no expected snapshot (run update.lua)'
+      else
+        local exp_src = ef:read('*a'):gsub('\r\n', '\n'):gsub('\r', '\n')
+        ef:close()
+        local exp = vim.split(exp_src, '\n', { plain = true })
+        if exp[#exp] == '' then
+          exp[#exp] = nil
+        end
+        local bad
+        for i = 1, math.max(#got, #exp) do
+          if got[i] ~= exp[i] then
+            bad = i
+            break
+          end
+        end
+        if bad then
+          fail = fail + 1
+          fails[#fails + 1] = string.format('FAIL  golden %s:%d\n        exp: %s\n        got: %s', name, bad, tostring(exp[bad]), tostring(got[bad]))
+        else
+          pass = pass + 1
+        end
+      end
+    end
+  end
+end
+
 -- ===================== report =====================
 local report = { string.format('jai_spec: %d passed, %d failed', pass, fail) }
 for _, f in ipairs(fails) do

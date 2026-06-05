@@ -1,0 +1,110 @@
+// dans/camera/camera.hpp
+//
+#pragma once
+
+#include "dans/geom/geometry.hpp"
+#include "dans/linalg/linalg.hpp"
+// Externals
+#include "dans/dans-core/types.hpp"
+//
+
+namespace camera
+{
+using geom::Ray;
+using linalg::Mat4;
+using linalg::Vec2;
+using linalg::Vec3;
+
+enum class ProjectionMode : u8
+{
+    perspective = 0,
+    orthographic = 1,
+};
+
+struct CameraConfig
+{
+    pivot               : Vec3           = 0.0f, 0.0f, 0.5f;
+    distance            : f32            = 5.0f;
+    yaw                 : f32            = glm::radians(45.0f);
+    pitch               : f32            = glm::radians(24.0f);
+    fov_y               : f32            = glm::radians(55.0f);
+    orbit_sensitivity   : f32            = 1.0f;
+    pivot_sensitivity   : f32            = 1.0f;
+    zoom_sensitivity    : f32            = 1.0f;
+    z_near              : f32            = 0.02f;
+    z_far               : f32            = 200.0f;
+    allow_pivot_move    : bool           = true;
+    clamp_position_z_min: bool;
+    min_position_z      : f32;
+    projection_mode     : ProjectionMode = ProjectionMode::perspective;
+};
+
+class Camera
+{
+  public:
+    // clang-format off
+    auto configure(const CameraConfig&) mut $ne -> mut Camera&;
+
+    $nd auto pivot() const $ne                -> const Vec3&;
+    $nd auto distance() const $ne             -> f32;
+    $nd auto yaw() const $ne                  -> f32;
+    $nd auto pitch() const $ne                -> f32;
+    $nd auto fov_y() const $ne                -> f32;
+    $nd auto orbit_sensitivity() const $ne    -> f32;
+    $nd auto pivot_sensitivity() const $ne    -> f32;
+    $nd auto zoom_sensitivity() const $ne     -> f32;
+    $nd auto z_near() const $ne               -> f32;
+    $nd auto z_far() const $ne                -> f32;
+    $nd auto allow_pivot_move() const $ne     -> bool;
+    $nd auto clamp_position_z_min() const $ne -> bool;
+    $nd auto min_position_z() const $ne       -> f32;
+    $nd auto projection_mode() const $ne      -> ProjectionMode;
+
+    auto set_pivot(Vec3) mut $ne                         -> mut Camera&;
+    auto translate_pivot(Vec3) mut $ne                   -> mut Camera&;
+    auto set_distance(f32) mut $ne                       -> mut Camera&;
+    auto set_yaw(f32) mut $ne                            -> mut Camera&;
+    auto set_pitch(f32) mut $ne                          -> mut Camera&;
+    auto set_fov_y(f32) mut $ne                          -> mut Camera&;
+    auto set_orbit_sensitivity(f32) mut $ne              -> mut Camera&;
+    auto set_pivot_sensitivity(f32) mut $ne              -> mut Camera&;
+    auto set_zoom_sensitivity(f32) mut $ne               -> mut Camera&;
+    auto set_z_near(f32) mut $ne                         -> mut Camera&;
+    auto set_z_far(f32) mut $ne                          -> mut Camera&;
+    auto set_allow_pivot_move(bool) mut $ne              -> mut Camera&;
+    auto set_clamp_position_z_min(bool) mut $ne          -> mut Camera&;
+    auto set_min_position_z(f32) mut $ne                 -> mut Camera&;
+    auto set_projection_mode(ProjectionMode) mut $ne     -> mut Camera&;
+    auto apply_constraints() mut $ne                     -> void;
+
+    $nd auto position() const $ne                                                     -> Vec3;
+    $nd auto view_matrix() const $ne                                                  -> Mat4;
+    $nd auto projection_matrix(f32 aspect) const $ne                                  -> Mat4;
+    $nd auto view_projection_matrix(f32 aspect) const $ne                             -> Mat4;
+    $nd auto right() const $ne                                                        -> Vec3;
+    $nd auto up() const $ne                                                           -> Vec3;
+    $nd auto view_height() const $ne                                                  -> f32;
+    $nd auto units_per_pixel_y(f32 viewport_height_px) const $ne                      -> f32;
+    $nd auto pan_offset_world(f32 dx_px, f32 dy_px, f32 viewport_height_px) const $ne -> Vec3;
+    // clang-format on
+
+  private:
+    pivot_               : Vec3           = 0.0f, 0.0f, 0.5f;
+    distance_            : f32            = 5.0f;
+    yaw_                 : f32            = glm::radians(45.0f);
+    pitch_               : f32            = glm::radians(24.0f);
+    fov_y_               : f32            = glm::radians(55.0f);
+    orbit_sensitivity_   : f32            = 1.0f;
+    pivot_sensitivity_   : f32            = 1.0f;
+    zoom_sensitivity_    : f32            = 1.0f;
+    z_near_              : f32            = 0.02f;
+    z_far_               : f32            = 200.0f;
+    allow_pivot_move_    : bool           = true;
+    clamp_position_z_min_: bool;
+    min_position_z_      : f32;
+    projection_mode_     : ProjectionMode = ProjectionMode::perspective;
+};
+
+$nd auto make_camera_ray(const Camera&, Vec2 cursor_logical_px, Vec2 viewport_logical_px) $ne -> Ray;
+
+}  // namespace camera
