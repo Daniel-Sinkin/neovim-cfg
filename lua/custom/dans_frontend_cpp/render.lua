@@ -146,6 +146,11 @@ local function colorize(text)
               end
             end
           end
+        elseif word:match '^LLDB_' or word:match '^SB%u' or word == 'StateType' then
+          -- LLDB class used as a qualifier (SBTarget::...): keep the class orange.
+          out[#out + 1] = { word, 'DansLLDB' }
+          out[#out + 1] = { '::', 'DansNamespace' }
+          i = e + 3
         else
           -- Other namespace qualifier: gray it.
           out[#out + 1] = { word .. '::', 'DansNamespace' }
@@ -159,6 +164,8 @@ local function colorize(text)
           out[#out + 1] = { word, 'DansVulkan' } -- Vk*/VK_*/vk*, matches markers
         elseif word:match '^SDL_' then
           out[#out + 1] = { word, 'DansSDL' }
+        elseif word:match '^LLDB_' or word:match '^SB%u' or word == 'StateType' then
+          out[#out + 1] = { word, 'DansLLDB' } -- LLDB_*/SB*/StateType, matches markers
         elseif word:match '^[A-Z][A-Z0-9_]+$' and not MACRO_DENY[word] then
           out[#out + 1] = { word, 'DansMacro' } -- other all-caps macro
         else
@@ -226,6 +233,9 @@ local function type_hl(t)
   end
   if t:match '^SDL_' then
     return 'DansSDL'
+  end
+  if t:match '^LLDB_' or t:match '^SB%u' or t == 'StateType' then
+    return 'DansLLDB'
   end
   return 'DansInlayType'
 end

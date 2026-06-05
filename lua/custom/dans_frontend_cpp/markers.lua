@@ -18,6 +18,7 @@ local MATCH_GROUPS = {
   DansMacro = true,
   DansVulkan = true,
   DansSDL = true,
+  DansLLDB = true,
   DansString = true,
   DansAssert = true,
   DansCommentMask = true,
@@ -103,6 +104,12 @@ local function apply(ev)
   -- SDL identifiers (SDL_*) -> teal. Same priority; SDL_FOO also matches the
   -- macro pattern, so the higher priority makes the teal win.
   vim.fn.matchadd('DansSDL', [[\<SDL_[A-Za-z0-9_]*\>]], 25)
+  -- LLDB identifiers -> orange: the LLDB_ macros, the SB* API classes
+  -- (SBDebugger/SBTarget/...), and the bare StateType enum. Priority 25 so the
+  -- all-caps LLDB_* wins over the generic macro purple (like VK_*/SDL_*).
+  vim.fn.matchadd('DansLLDB', [[\<LLDB_[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansLLDB', [[\<SB[A-Z][A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansLLDB', [[\<StateType\>]], 25)
   -- std::move / std::forward -> red: ownership-transfer points worth seeing (the
   -- source is left moved-from). `\zs` colors only the move/forward word; a member
   -- `.move()` (e.g. a widget) isn't std::-qualified so it's untouched.

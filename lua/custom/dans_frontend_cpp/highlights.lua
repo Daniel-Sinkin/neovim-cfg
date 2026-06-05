@@ -26,6 +26,9 @@ function M.apply()
   hi('DansMacro', { fg = '#bb9af7' })
   -- SDL identifiers (SDL_*) -- teal/cyan, its own category.
   hi('DansSDL', { fg = '#2ac3de' })
+  -- LLDB identifiers (LLDB_*, SB* API classes, the bare StateType enum) -- orange,
+  -- clear of the purples/teal/greens so an LLDB-heavy file reads distinctly.
+  hi('DansLLDB', { fg = '#ff9e64' })
   -- String literals -- muted green. A calm color (strings are inert content);
   -- applied at high priority so no other coloring/conceal leaks inside them.
   hi('DansString', { fg = '#a3be8c' })
