@@ -42,4 +42,35 @@ function M.visible_range(bufnr)
   return math.max(0, vim.fn.line 'w0' - 1 - M.VISIBLE_MARGIN), math.min(n, vim.fn.line 'w$' + M.VISIBLE_MARGIN)
 end
 
+-- Per-refresh skip predicates, capturing the cursor row, diagnostic rows, and
+-- view-overlay coverage once (so a module computes them a single time, not per
+-- line/capture). `.skip` is for virt_text decorations -- it also skips the
+-- cursor line, whose real text must show under the inline text. `.skip_conceal`
+-- is for pure conceals, where the cursor line is revealed by concealcursor
+-- instead, so it isn't skipped. `line` is optional, fetched only if a coverage
+-- check needs it.
+function M.make_skipper(bufnr)
+  local cur = M.cursor_row0(bufnr)
+  local diag = M.diagnostic_lines(bufnr)
+  local view_ok, view = pcall(require, 'custom.dans_frontend_cpp.view')
+  local view_on = view_ok and view.is_enabled(bufnr)
+  local function covered(row0, line)
+    if not view_on then
+      return false
+    end
+    if line == nil then
+      line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
+    end
+    return line ~= nil and view.covers(line)
+  end
+  return {
+    skip = function(row0, line)
+      return row0 == cur or diag[row0] == true or covered(row0, line)
+    end,
+    skip_conceal = function(row0, line)
+      return diag[row0] == true or covered(row0, line)
+    end,
+  }
+end
+
 return M

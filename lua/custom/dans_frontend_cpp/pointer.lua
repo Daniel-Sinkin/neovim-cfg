@@ -76,25 +76,15 @@ local function refresh(bufnr)
   local root = trees[1]:root()
   local lang = parser:lang()
 
-  local cur = vu.cursor_row0(bufnr)
-  local diag = vu.diagnostic_lines(bufnr)
+  local skip = vu.make_skipper(bufnr)
   local s0, e0 = vu.visible_range(bufnr)
-  local view_ok, view = pcall(require, 'custom.dans_frontend_cpp.view')
-  local view_on = view_ok and view.is_enabled(bufnr)
-  local function covered(row0)
-    if not view_on then
-      return false
-    end
-    local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
-    return line ~= nil and view.covers(line)
-  end
 
   -- 1. pointer `*` -> `^` (virt_text, skip the cursor line so the real `*` shows)
   local okp, pq = pcall(vim.treesitter.query.parse, lang, PTR_QUERY)
   if okp and pq then
     for _, node in pq:iter_captures(root, bufnr, s0, e0) do
       local sr, sc, _, ec = node:range()
-      if sr ~= cur and not diag[sr] and not covered(sr) then
+      if not skip.skip(sr) then
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc, {
           end_col = ec,
           conceal = '',
@@ -112,7 +102,7 @@ local function refresh(bufnr)
   if okc and cq then
     for _, node in cq:iter_captures(root, bufnr, s0, e0) do
       local sr, sc, _, ec = node:range()
-      if not diag[sr] and not covered(sr) and vim.treesitter.get_node_text(node, bufnr) == 'const' then
+      if not skip.skip_conceal(sr) and vim.treesitter.get_node_text(node, bufnr) == 'const' then
         local decl = node:parent()
         if decl and not declares_ptr_ref(decl) then
           local line = vim.api.nvim_buf_get_lines(bufnr, sr, sr + 1, false)[1] or ''
@@ -138,7 +128,7 @@ local function refresh(bufnr)
       if nm and ar and nm:type() == 'type_identifier' and vim.treesitter.get_node_text(nm, bufnr) == 'optional' then
         local nsr, nsc = nm:range()
         local asr, asc, aer, aec = ar:range()
-        if nsr ~= cur and not diag[nsr] and not covered(nsr) and nsr == asr then
+        if not skip.skip(nsr) and nsr == asr then
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, nsr, nsc, { end_col = asc + 1, conceal = '' })
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, aer, aec - 1, { end_col = aec, conceal = '?' })
         end

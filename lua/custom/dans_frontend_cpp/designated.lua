@@ -37,18 +37,8 @@ local function refresh(bufnr)
   local root = trees[1]:root()
   local lang = parser:lang()
 
-  local cur = vu.cursor_row0(bufnr)
-  local diag = vu.diagnostic_lines(bufnr)
+  local skip = vu.make_skipper(bufnr)
   local s0, e0 = vu.visible_range(bufnr)
-  local view_ok, view = pcall(require, 'custom.dans_frontend_cpp.view')
-  local view_on = view_ok and view.is_enabled(bufnr)
-  local function covered(row0)
-    if not view_on then
-      return false
-    end
-    local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
-    return line ~= nil and view.covers(line)
-  end
 
   local okq, q = pcall(vim.treesitter.query.parse, lang, DESIG_QUERY)
   if not okq or not q then
@@ -88,7 +78,7 @@ local function refresh(bufnr)
   for _, node in q:iter_captures(root, bufnr, s0, e0) do
     local sr, sc, ser, fec = node:range() -- field_designator `.field`
     local pair = node:parent()
-    if sr == ser and sr ~= cur and not diag[sr] and pair and pair:type() == 'initializer_pair' and not covered(sr) then
+    if sr == ser and not skip.skip(sr) and pair and pair:type() == 'initializer_pair' then
       local psr, _, per, pec = pair:range()
       if psr == sr and per == sr then -- single-line pair only
         local line = vim.api.nvim_buf_get_lines(bufnr, sr, sr + 1, false)[1] or ''

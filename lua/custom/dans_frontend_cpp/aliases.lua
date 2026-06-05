@@ -198,22 +198,16 @@ local function refresh(bufnr)
 
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
 
-  -- Skip the cursor line: concealcursor is empty for these buffers, so the real
-  -- text shows there; the inline alias virt_text would otherwise double up with
-  -- it (e.g. `$scstatic_cast`). Re-hidden once the cursor leaves the line.
-  local cur = vu.cursor_row0(bufnr)
-  local diag = vu.diagnostic_lines(bufnr)
-
-  -- Defer to view on lines it rewrites: it draws a full-line overlay there,
-  -- which would orphan our inline alias to the end of the line.
-  local view_ok, view = pcall(require, 'custom.dans_frontend_cpp.view')
-  local view_on = view_ok and view.is_enabled(bufnr)
-
+  -- skip.skip hides our inline aliases on the cursor line (concealcursor shows
+  -- the real text there, so the virt_text would otherwise double up like
+  -- `$scstatic_cast`), on diagnostic lines, and on lines the view overlay
+  -- already rewrites (it would orphan our alias to the end of the line).
+  local skip = vu.make_skipper(bufnr)
   local s0, e0 = vu.visible_range(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
   for idx, line in ipairs(lines) do
     local row0 = s0 + idx - 1
-    if row0 ~= cur and not diag[row0] and not (view_on and view.covers(line)) then
+    if not skip.skip(row0, line) then
       for _, alias in ipairs(ALIASES) do
         local keyword, replacement, hl = alias[1], alias[2], alias[3] or 'Comment'
         local start_pos = 1
