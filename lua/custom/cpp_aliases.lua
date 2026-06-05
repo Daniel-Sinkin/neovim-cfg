@@ -23,7 +23,7 @@ local ALIASES = {
   { 'const_cast', '$cc' },
   { 'noexcept', '$ne' },
   { '[[nodiscard]]', '$nd' },
-  { 'static_assert', '$as' },
+  { 'static_assert', '$sa' },
   { 'VK_NULL_HANDLE', '{}', 'DansVulkan' },
 }
 
