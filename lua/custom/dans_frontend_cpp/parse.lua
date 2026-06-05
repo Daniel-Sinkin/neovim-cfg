@@ -255,6 +255,51 @@ function M.strip_type(typ)
   return M.ptr(t)
 end
 
+-- Trailing identifier of a *pure* member-access chain (`cfg.center` -> "center",
+-- `obj->p` -> "p", `center` -> "center"), or nil if `v` is anything else (a call,
+-- index, operator, literal). Drives the designated-init pun: `.center = cfg.center`
+-- collapses to `center` because the last access already matches the field name.
+function M.access_tail(v)
+  local norm = vim.trim(v):gsub('%s*%->%s*', '.'):gsub('%s*%.%s*', '.')
+  if norm:match '^[%a_][%w_]*$' or norm:match '^[%a_][%w_]*%.[%w_.]*[%w_]$' then
+    return norm:match '([%w_]+)$'
+  end
+  return nil
+end
+
+-- Split a designated-init body (`.a = x, .b = y`) into { {field, value}, ... } on
+-- top-level commas, or nil if any element isn't `.field = value`. Lets the value
+-- renderer fold designated inits the same way cpp_designated does on raw lines.
+function M.designated_pairs(body)
+  local out = {}
+  local depth, start = 0, 1
+  local function push(chunk)
+    local field, value = chunk:match '^%s*%.([%w_]+)%s*=%s*(.-)%s*$'
+    if not field then
+      return false
+    end
+    out[#out + 1] = { field = field, value = value }
+    return true
+  end
+  for i = 1, #body do
+    local c = body:sub(i, i)
+    if c == '(' or c == '[' or c == '{' or c == '<' then
+      depth = depth + 1
+    elseif c == ')' or c == ']' or c == '}' or c == '>' then
+      depth = depth - 1
+    elseif c == ',' and depth == 0 then
+      if not push(body:sub(start, i - 1)) then
+        return nil
+      end
+      start = i + 1
+    end
+  end
+  if not push(body:sub(start)) then
+    return nil
+  end
+  return #out > 0 and out or nil
+end
+
 -- A std smart-pointer type (after strip_type already removed std::): returns the
 -- inner type and 'unique'/'shared', else nil. Lets the view render
 -- `unique_ptr<T>` / `shared_ptr<T>` as `T^` with an ownership-colored caret.

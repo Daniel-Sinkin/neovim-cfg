@@ -132,6 +132,19 @@ local function colorize(text)
             i = e + 3 + #mv
           else
             i = e + 3
+            if word == 'std' then
+              -- swallow std::ranges:: / std::ranges::views:: / std::views:: too,
+              -- so ranges algorithms / views render at their bare name (matches
+              -- the matchadd conceals on raw lines).
+              while true do
+                local seg = text:sub(i)
+                local q2 = seg:match '^ranges::' or seg:match '^views::'
+                if not q2 then
+                  break
+                end
+                i = i + #q2
+              end
+            end
           end
         else
           -- Other namespace qualifier: gray it.
@@ -481,7 +494,24 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
         add(string.rep(' ', math.max(0, align.tw - vim.fn.strwidth(disp_typ))))
       end
       add(is_constexpr and ' : ' or ' = ')
-      add_value(init)
+      local dpairs = P.designated_pairs(init)
+      if dpairs then
+        -- aggregate designated init: fold each `.field = value` like cpp_designated
+        -- does on raw lines -- `field=value`, or just `field` when the value's last
+        -- access already matches the field (`.center = cfg.center` -> `center`).
+        for i, p in ipairs(dpairs) do
+          if i > 1 then
+            add ', '
+          end
+          add(p.field, 'DansHint')
+          if P.access_tail(p.value) ~= p.field then
+            add '='
+            add_value(p.value)
+          end
+        end
+      else
+        add_value(init)
+      end
     end
     add(semi)
   end

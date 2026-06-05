@@ -14,6 +14,7 @@ local M = {}
 
 local ns = vim.api.nvim_create_namespace 'ds_cpp_designated'
 local vu = require 'custom.dans_frontend_cpp.util'
+local P = require 'custom.dans_frontend_cpp.parse'
 
 local DESIG_QUERY = [[(field_designator) @fd]]
 
@@ -94,8 +95,9 @@ local function refresh(bufnr)
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc, { end_col = sc + 1, conceal = '' })
           -- muted hint color on the field name
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc + 1, { end_col = fec, hl_group = 'DansHint' })
-          if value == field then
-            -- pun: `.field = field` -> `field` (hide ` = field`)
+          if P.access_tail(value) == field then
+            -- pun: `.center = center` or `.center = cfg.center` -> `center` (the
+            -- value's last access already names the field, so hide ` = value`).
             pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, fec, { end_col = pec, conceal = '' })
           else
             local eqcol = fec + eqs - 1
