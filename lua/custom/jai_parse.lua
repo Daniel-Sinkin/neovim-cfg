@@ -69,12 +69,22 @@ function M.split_markers(s)
     end
 
     if not matched then
-      -- Pure storage/linkage specifiers: hidden, no effect on const/mut.
+      -- static / thread_local are kept as a shown prefix: meaningful storage
+      -- duration worth seeing (thread_local especially is rare and notable).
       after = rest:match '^static%s+(.*)$'
-        or rest:match '^inline%s+(.*)$'
-        or rest:match '^thread_local%s+(.*)$'
-        or rest:match '^extern%s+(.*)$'
-        or rest:match '^constinit%s+(.*)$'
+      if after then
+        prefix, rest, matched = prefix .. 'static ', after, true
+      end
+    end
+    if not matched then
+      after = rest:match '^thread_local%s+(.*)$'
+      if after then
+        prefix, rest, matched = prefix .. 'thread_local ', after, true
+      end
+    end
+    if not matched then
+      -- inline / extern / constinit: pure noise, hidden.
+      after = rest:match '^inline%s+(.*)$' or rest:match '^extern%s+(.*)$' or rest:match '^constinit%s+(.*)$'
       if after then
         rest, matched = after, true
       end
@@ -221,10 +231,12 @@ function M.parse_if_let(core)
   if not name then
     name, rhs = init:match '^auto%s+([%w_]+)%s*=%s*(.+)$'
   end
-  if not name or cond ~= name then
+  if not name then
     return nil
   end
-  return { name = name, rhs = rhs, tail = tail }
+  -- `cond` kept so the caller can show a real test (`res == 0`); a bare
+  -- truthiness check (`cond == name`) is redundant and gets dropped.
+  return { name = name, rhs = rhs, cond = cond, tail = tail }
 end
 
 -- Render pointer-type `*` as `^` (type positions only). `&` is left alone.

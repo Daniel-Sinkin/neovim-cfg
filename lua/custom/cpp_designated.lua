@@ -38,6 +38,7 @@ local function refresh(bufnr)
   local lang = parser:lang()
 
   local cur = vu.cursor_row0(bufnr)
+  local diag = vu.diagnostic_lines(bufnr)
   local s0, e0 = vu.visible_range(bufnr)
   local jai_ok, jai = pcall(require, 'custom.jai_view')
   local jai_on = jai_ok and jai.is_enabled(bufnr)
@@ -56,7 +57,7 @@ local function refresh(bufnr)
   for _, node in q:iter_captures(root, bufnr, s0, e0) do
     local sr, sc, ser, fec = node:range() -- field_designator `.field`
     local pair = node:parent()
-    if sr == ser and sr ~= cur and pair and pair:type() == 'initializer_pair' and not covered(sr) then
+    if sr == ser and sr ~= cur and not diag[sr] and pair and pair:type() == 'initializer_pair' and not covered(sr) then
       local psr, _, per, pec = pair:range()
       if psr == sr and per == sr then -- single-line pair only
         local line = vim.api.nvim_buf_get_lines(bufnr, sr, sr + 1, false)[1] or ''
@@ -98,7 +99,7 @@ function M.setup()
       refresh(ev.buf)
     end,
   })
-  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'BufEnter', 'CursorMoved', 'CursorMovedI', 'WinScrolled' }, {
+  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'BufEnter', 'CursorMoved', 'CursorMovedI', 'WinScrolled', 'DiagnosticChanged' }, {
     group = group,
     callback = function(ev)
       refresh(ev.buf)

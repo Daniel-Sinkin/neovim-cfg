@@ -72,9 +72,10 @@ local function refresh(bufnr)
   local s0, e0 = vu.visible_range(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
   local align = P.compute_align(lines, s0)
+  local diag = vu.diagnostic_lines(bufnr)
   for idx, line in ipairs(lines) do
     local row0 = s0 + idx - 1
-    if not set[row0] then
+    if not set[row0] and not diag[row0] then
       local start_col, chunks = R.render_line(line, type_for(bufnr, row0), align[row0], bufnr, row0)
       if start_col then
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, start_col, {
@@ -221,7 +222,7 @@ function M.setup()
   -- and the cursor/selection reveal (CursorMoved / ModeChanged recompute
   -- reveal_set). Cheap because it only touches on-screen lines.
   vim.api.nvim_create_autocmd(
-    { 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI', 'ModeChanged', 'WinScrolled' },
+    { 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI', 'ModeChanged', 'WinScrolled', 'DiagnosticChanged' },
     {
       group = group,
       callback = function(ev)

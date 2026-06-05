@@ -65,7 +65,7 @@ run('local value float', 'fn', { 'f32 y{1.0f};' }, { 'y: mut f32 = 1.0f;' })
 run('local value empty-init', 'fn', { 'Vec2 p{};' }, { 'p: mut Vec2;' })
 run('local const', 'fn', { 'const int x{7};' }, { 'x: int = 7;' })
 run('local constexpr', 'fn', { 'constexpr int x{7};' }, { 'x: int : 7;' })
-run('local static constexpr', 'fn', { 'static constexpr usize n{4};' }, { 'n: usize : 4;' })
+run('local static constexpr', 'fn', { 'static constexpr usize n{4};' }, { 'static n: usize : 4;' })
 run('local inline constexpr', 'fn', { 'inline constexpr f32 k{2.0f};' }, { 'k: f32 : 2.0f;' })
 
 -- ===================== auto bindings =====================
@@ -122,7 +122,7 @@ run('member unique_ptr', 'struct', { 'std::unique_ptr<Foo> up{};' }, { 'up: Foo^
 run('member shared_ptr', 'struct', { 'std::shared_ptr<Foo> sp{};' }, { 'sp: Foo^;' })
 run('member optional', 'struct', { 'std::optional<int> o{};' }, { 'o: int?;' })
 run('member vulkan null', 'struct', { 'VkBuffer buf{VK_NULL_HANDLE};' }, { 'buf: VkBuffer = {};' })
-run('member static constexpr', 'struct', { 'static constexpr usize cap{16};' }, { 'cap: usize : 16;' })
+run('member static constexpr', 'struct', { 'static constexpr usize cap{16};' }, { 'static cap: usize : 16;' })
 
 -- ===================== alignment block =====================
 run('aligned members', 'struct', {
@@ -159,6 +159,8 @@ run('optional pointer', 'struct', { 'std::optional<int> o{};' }, { 'o: int?;' })
 run('for destructure', 'fn', { 'for (const auto& [k, v] : items)' }, { 'for (k, v& : items)' })
 run('if let', 'fn', { 'if (const auto res = find(x); res)' }, { 'if let res := find(x)' })
 run('if let with brace', 'fn', { 'if (const auto p = lookup(k); p) {' }, { 'if let p := lookup(k) {' })
+run('if let with cond', 'fn', { 'if (const auto res = find(x); res == 0)' }, { 'if let res := find(x); res == 0' })
+run('static thread_local', 'fn', { 'static thread_local std::mt19937_64 engine{std::random_device{}()};' }, { 'static thread_local engine: mut mt19937_64 = random_device{}();' })
 run('if plain (raw)', 'fn', { 'if (ready) {' }, { false })
 run('std move value', 'fn', { 'auto y = std::move(x);' }, { 'mut y := move(x);' })
 run('std forward value', 'fn', { 'auto y = std::forward<T>(x);' }, { 'mut y := forward<T>(x);' })

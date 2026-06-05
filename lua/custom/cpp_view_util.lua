@@ -18,6 +18,17 @@ function M.cursor_row0(bufnr)
   return nil
 end
 
+-- Set of 0-based rows carrying a diagnostic (clangd / clang-tidy / etc). The view
+-- modules skip these lines so their overlay doesn't collide with the diagnostic's
+-- own inline virtual text (which would garble both).
+function M.diagnostic_lines(bufnr)
+  local set = {}
+  for _, d in ipairs(vim.diagnostic.get(bufnr)) do
+    set[d.lnum] = true
+  end
+  return set
+end
+
 -- 0-based [start, end) line range to decorate: the on-screen window plus a
 -- margin, so a big file isn't re-scanned whole on every edit / scroll / cursor
 -- move. Off-screen rows are (re)decorated as they scroll in (WinScrolled). A

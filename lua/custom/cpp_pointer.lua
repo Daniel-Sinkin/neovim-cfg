@@ -68,6 +68,7 @@ local function refresh(bufnr)
   local lang = parser:lang()
 
   local cur = vu.cursor_row0(bufnr)
+  local diag = vu.diagnostic_lines(bufnr)
   local s0, e0 = vu.visible_range(bufnr)
   local jai_ok, jai = pcall(require, 'custom.jai_view')
   local jai_on = jai_ok and jai.is_enabled(bufnr)
@@ -84,7 +85,7 @@ local function refresh(bufnr)
   if okp and pq then
     for _, node in pq:iter_captures(root, bufnr, s0, e0) do
       local sr, sc, _, ec = node:range()
-      if sr ~= cur and not covered(sr) then
+      if sr ~= cur and not diag[sr] and not covered(sr) then
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc, {
           end_col = ec,
           conceal = '',
@@ -102,7 +103,7 @@ local function refresh(bufnr)
   if okc and cq then
     for _, node in cq:iter_captures(root, bufnr, s0, e0) do
       local sr, sc, _, ec = node:range()
-      if not covered(sr) and vim.treesitter.get_node_text(node, bufnr) == 'const' then
+      if not diag[sr] and not covered(sr) and vim.treesitter.get_node_text(node, bufnr) == 'const' then
         local decl = node:parent()
         if decl and not declares_ptr_ref(decl) then
           local line = vim.api.nvim_buf_get_lines(bufnr, sr, sr + 1, false)[1] or ''
@@ -128,7 +129,7 @@ function M.setup()
       refresh(ev.buf)
     end,
   })
-  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'BufEnter', 'CursorMoved', 'CursorMovedI', 'WinScrolled' }, {
+  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'BufEnter', 'CursorMoved', 'CursorMovedI', 'WinScrolled', 'DiagnosticChanged' }, {
     group = group,
     callback = function(ev)
       refresh(ev.buf)

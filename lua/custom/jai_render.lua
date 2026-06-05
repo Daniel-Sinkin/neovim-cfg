@@ -318,11 +318,16 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
   end
 
   if iflet then
-    -- if (const auto x = e; x)  ->  if let x := e   (truthiness-on-the-bound-name)
+    -- if (const auto x = e; COND)  ->  if let x := e[; COND]. A bare truthiness
+    -- check (COND == x) is dropped; a real test (`x == 0`) is kept after `;`.
     add 'if let '
     add(iflet.name)
     add ' := '
     add_value(iflet.rhs)
+    if iflet.cond ~= iflet.name then
+      add '; '
+      add_value(iflet.cond)
+    end
     if iflet.tail ~= '' then
       add(' ' .. iflet.tail)
     end

@@ -202,6 +202,7 @@ local function refresh(bufnr)
   -- text shows there; the inline alias virt_text would otherwise double up with
   -- it (e.g. `$scstatic_cast`). Re-hidden once the cursor leaves the line.
   local cur = vu.cursor_row0(bufnr)
+  local diag = vu.diagnostic_lines(bufnr)
 
   -- Defer to jai_view on lines it rewrites: it draws a full-line overlay there,
   -- which would orphan our inline alias to the end of the line.
@@ -212,7 +213,7 @@ local function refresh(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
   for idx, line in ipairs(lines) do
     local row0 = s0 + idx - 1
-    if row0 ~= cur and not (jai_on and jai.covers(line)) then
+    if row0 ~= cur and not diag[row0] and not (jai_on and jai.covers(line)) then
       for _, alias in ipairs(ALIASES) do
         local keyword, replacement, hl = alias[1], alias[2], alias[3] or 'Comment'
         local start_pos = 1
@@ -277,7 +278,7 @@ end
 
 function M.setup()
   local group = vim.api.nvim_create_augroup('ds_cpp_aliases', { clear = true })
-  vim.api.nvim_create_autocmd({ 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI', 'WinScrolled' }, {
+  vim.api.nvim_create_autocmd({ 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI', 'WinScrolled', 'DiagnosticChanged' }, {
     group = group,
     callback = function(ev)
       refresh(ev.buf)
