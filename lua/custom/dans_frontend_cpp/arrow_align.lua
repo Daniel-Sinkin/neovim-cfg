@@ -4,14 +4,14 @@
 -- line up.
 --
 -- Why a custom width model instead of plain source alignment: const/std::/dans::
--- are concealed (config/autocmds.lua) and $nd/$ne/... aliases shrink their
--- keywords (custom/cpp_aliases.lua), so arrows aligned in the source render
+-- are concealed (markers.lua) and $nd/$ne/... aliases shrink their
+-- keywords (aliases.lua), so arrows aligned in the source render
 -- ragged by exactly those deltas. This recomputes each line's *rendered* arrow
 -- column and pads up to the block max.
 --
 -- COUPLING (accepted by the user): the width model below mirrors the conceals
--- in config/autocmds.lua (leading/param `const`, `std::`, `dans::`, `dans_`)
--- and the alias list in custom/cpp_aliases.lua (consumed via M.ALIASES). A new
+-- in markers.lua / pointer.lua (leading/param `const`, `std::`, `dans::`, `dans_`)
+-- and the alias list in aliases.lua (consumed via M.ALIASES). A new
 -- conceal/alias that can appear before a `->` and isn't reflected here will
 -- skew alignment. Recomputed on BufWritePost/BufReadPost, .hpp only. The cursor
 -- line renders raw (no pad), matching the other C++ view modules.
@@ -56,7 +56,7 @@ local function arrow_pos(code)
   end
 end
 
--- Width concealed by the leading `const` rule  ^\s*\zsconst\>\s*  (autocmds.lua):
+-- Width concealed by the leading `const` rule  ^\s*\zsconst\>\s*  (pointer.lua):
 -- a whole-word `const` at line start (a const value local). const in params /
 -- return types is no longer concealed, so it isn't removed here.
 local function const_removed(prefix)
@@ -102,7 +102,7 @@ local function literal_removed(prefix, lit)
 end
 
 -- Width concealed by a whole-word conceal that also eats trailing whitespace
--- (\<word\>\s*), e.g. `inline ` (config/autocmds.lua).
+-- (\<word\>\s*), e.g. `inline ` (markers.lua).
 local function word_ws_removed(prefix, word)
   local removed, i = 0, 1
   while true do
@@ -124,7 +124,7 @@ local function word_ws_removed(prefix, word)
   return removed
 end
 
--- Net width change from cpp_aliases: each whole-word keyword is concealed and
+-- Net width change from aliases: each whole-word keyword is concealed and
 -- replaced by its (shorter) virt_text. Returns (removed, added).
 local function alias_delta(prefix)
   local ok, aliases = pcall(function()
@@ -167,7 +167,7 @@ local function rendered_arrow_col(line, bufnr, row0)
     + literal_removed(prefix, 'dans::')
     + literal_removed(prefix, 'dans_')
   local arem, aadd = alias_delta(prefix)
-  -- cpp_aliases injects `mut ` (4 cells) before non-const ref/ptr args, and where
+  -- aliases injects `mut ` (4 cells) before non-const ref/ptr args, and where
   -- a non-const member function's trailing const would be; both add width before
   -- the arrow, so account for them or the arrows drift.
   local mut_added = 0

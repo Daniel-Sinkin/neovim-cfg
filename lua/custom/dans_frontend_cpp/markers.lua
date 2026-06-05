@@ -103,7 +103,7 @@ local function apply(ev)
   vim.fn.matchadd('DansMarkerMut', [[\<std::\zs\%(move\|forward\)\>]], 25)
   -- assert / static_assert -> gray the whole `...assert(...);` statement (priority
   -- 26 beats the macro/Vk/SDL coloring inside the condition). static_assert also
-  -- still renders as `$as` (cpp_aliases); this just grays the rest of its line.
+  -- still renders as `$as` (aliases); this just grays the rest of its line.
   vim.fn.matchadd('DansAssert', [[\<\%(static_\)\?assert\>.\{-};]], 26)
   -- String literals -> green, priority 35 (above the color matches AND the
   -- conceals at 30) so nothing else colors or conceals inside a string. Quoted

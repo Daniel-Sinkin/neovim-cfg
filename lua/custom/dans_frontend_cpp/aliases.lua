@@ -27,7 +27,7 @@ local ALIASES = {
   { 'VK_NULL_HANDLE', '{}', 'DansVulkan' },
 }
 
--- Exposed so hpp_arrow_align.lua can mirror these widths when it computes the
+-- Exposed so arrow_align.lua can mirror these widths when it computes the
 -- rendered arrow column (each alias shrinks its keyword to the replacement).
 M.ALIASES = ALIASES
 
@@ -106,7 +106,7 @@ end
 -- by-value param never qualifies, even when its default value contains a `*`
 -- (`T eps = a * b`) or its type nests `&`/`*` in template args
 -- (`std::function<void(int&)>`). Pointers don't get mut either. Only on
--- trailing-return decls (a `->` follows the parens). Exposed for hpp_arrow_align.
+-- trailing-return decls (a `->` follows the parens). Exposed for arrow_align.
 function M.arg_mut_cols(line)
   local open, close = balanced_parens(line)
   if not open or not line:sub(close + 1):find('->', 1, true) then
@@ -149,7 +149,7 @@ end
 -- 0-based column right after the param `)` of a NON-const member function (where
 -- the trailing `const`/`mut` sits), or nil. Member functions only -- a free
 -- function has no receiver const. Needs treesitter to tell a member function
--- from a free one / a data member. Exposed for hpp_arrow_align.
+-- from a free one / a data member. Exposed for arrow_align.
 function M.member_mut_col(line, bufnr, row0)
   if not bufnr or not row0 then
     return nil
@@ -183,7 +183,7 @@ function M.member_mut_col(line, bufnr, row0)
   end
   -- 0-based column right after `)` (close is its 1-based position). Placing the
   -- marker here -- not at the first following token -- keeps it ahead of a
-  -- `noexcept` that cpp_aliases renders as `$ne` at that token's own column.
+  -- `noexcept` that aliases renders as `$ne` at that token's own column.
   return close
 end
 
@@ -249,7 +249,7 @@ local function refresh(bufnr)
       end
 
       -- Inject `mut` before each non-const reference/pointer parameter (the
-      -- source token is gone; the frontend shows it). hpp_arrow_align mirrors
+      -- source token is gone; the frontend shows it). arrow_align mirrors
       -- these widths via M.arg_mut_cols so header arrows stay aligned.
       for _, col0 in ipairs(M.arg_mut_cols(line)) do
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, col0, {

@@ -20,7 +20,7 @@ local LAMBDA_CAP_SEP = ':'
 -- `&vertex` (before it). const is hidden; a non-const binding shows `mut`.
 local FOR_REF_SUFFIX = true
 
--- Marker word -> highlight group, shared with cpp_markers.lua. Only `cpy` can
+-- Marker word -> highlight group, shared with markers.lua. Only `cpy` can
 -- still appear as a real prefix (mut/mut_unchecked are source-removed), but the
 -- mut entries stay so an inferred-mut prefix colors correctly.
 local MARKER_HL = {
@@ -42,11 +42,11 @@ local EXPR_MARKERS = {
 -- All-caps stdlib tokens that aren't user macros worth coloring -- left normal.
 local MACRO_DENY = { FILE = true, SEEK_SET = true, SEEK_CUR = true, SEEK_END = true, EOF = true, NULL = true }
 
--- Single-word C++ aliases ($sc, $dc, ...) reused from cpp_aliases so casts in
+-- Single-word C++ aliases ($sc, $dc, ...) reused from aliases so casts in
 -- frontend-rendered value expressions read the same as on non-overlaid lines. This
--- overlay conceals the whole source line, so cpp_aliases defers here (its inline
+-- overlay conceals the whole source line, so aliases defers here (its inline
 -- alias would be orphaned); without this the casts rendered verbatim. Built
--- lazily and cached from cpp_aliases.ALIASES, keeping only identifier-shaped
+-- lazily and cached from aliases.ALIASES, keeping only identifier-shaped
 -- keywords (`[[nodiscard]]` is dropped -- it can't occur inside a value).
 local expr_aliases_cache = nil
 local function expr_aliases()
@@ -143,7 +143,7 @@ local function colorize(text)
         if alias then
           out[#out + 1] = { alias[1], alias[2] }
         elseif word:match '^Vk' or word:match '^VK_' or word:match '^vk%u' then
-          out[#out + 1] = { word, 'DansVulkan' } -- Vk*/VK_*/vk*, matches cpp_markers
+          out[#out + 1] = { word, 'DansVulkan' } -- Vk*/VK_*/vk*, matches markers
         elseif word:match '^SDL_' then
           out[#out + 1] = { word, 'DansSDL' }
         elseif word:match '^[A-Z][A-Z0-9_]+$' and not MACRO_DENY[word] then

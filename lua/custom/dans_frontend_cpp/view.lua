@@ -209,7 +209,7 @@ function M.is_enabled(bufnr)
 end
 
 -- Whether a line is one the overlay rewrites. Lets other view modules
--- (cpp_aliases) defer so they don't double-render on top of the full-line
+-- (aliases) defer so they don't double-render on top of the full-line
 -- overlay (which orphans their inline virt_text to the end of the line).
 function M.covers(line)
   return (R.render_line(line, nil)) ~= nil
