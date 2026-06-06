@@ -43,7 +43,10 @@ return {
         end,
         additional_vim_regex_highlighting = { 'ruby' },
       },
-      indent = { enable = true, disable = { 'ruby' } },
+      -- Treesitter indent (frozen master on nvim 0.12) goes stale mid-edit, so
+      -- pressing Enter would land at column 0. C/C++/CUDA fall back to the
+      -- deterministic built-in `cindent` instead (set in config/autocmds.lua).
+      indent = { enable = true, disable = { 'ruby', 'c', 'cpp', 'cuda' } },
     },
     config = function(_, opts)
       -- Windows: zig is a hermetic C compiler (ships its own libc headers), so

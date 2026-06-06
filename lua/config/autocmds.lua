@@ -46,12 +46,16 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   end,
 })
 
--- C/C++/headers: 4-space tabs.
+-- C/C++/CUDA: 4-space tabs and the built-in `cindent`. Treesitter indent is
+-- disabled for these in custom/plugins/treesitter.lua because the frozen master
+-- module goes stale mid-edit and drops the Enter indent to column 0; cindent is
+-- deterministic.
 vim.api.nvim_create_autocmd('FileType', {
-  pattern = { 'cpp', 'c', 'h', 'hpp' },
+  pattern = { 'cpp', 'c', 'h', 'hpp', 'cuda' },
   callback = function()
     vim.opt_local.tabstop = 4
     vim.opt_local.shiftwidth = 4
     vim.opt_local.expandtab = true
+    vim.opt_local.cindent = true
   end,
 })
