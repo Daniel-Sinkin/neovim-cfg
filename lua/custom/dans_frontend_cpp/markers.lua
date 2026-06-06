@@ -104,6 +104,10 @@ local function apply(ev)
   -- SDL identifiers (SDL_*) -> teal. Same priority; SDL_FOO also matches the
   -- macro pattern, so the higher priority makes the teal win.
   vim.fn.matchadd('DansSDL', [[\<SDL_[A-Za-z0-9_]*\>]], 25)
+  -- GLFW shares the SDL color (you wouldn't use both in one project): GLFW_*
+  -- macros + GLFWwindow/GLFWmonitor types, and glfw* functions.
+  vim.fn.matchadd('DansSDL', [[\<GLFW[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansSDL', [[\<glfw[A-Z][A-Za-z0-9_]*\>]], 25)
   -- LLDB identifiers -> orange: the LLDB_ macros, the SB* API classes
   -- (SBDebugger/SBTarget/...), and the bare StateType enum. Priority 25 so the
   -- all-caps LLDB_* wins over the generic macro purple (like VK_*/SDL_*).

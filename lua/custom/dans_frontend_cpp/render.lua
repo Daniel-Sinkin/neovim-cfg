@@ -162,8 +162,8 @@ local function colorize(text)
           out[#out + 1] = { alias[1], alias[2] }
         elseif word:match '^Vk' or word:match '^VK_' or word:match '^vk%u' then
           out[#out + 1] = { word, 'DansVulkan' } -- Vk*/VK_*/vk*, matches markers
-        elseif word:match '^SDL_' then
-          out[#out + 1] = { word, 'DansSDL' }
+        elseif word:match '^SDL_' or word:match '^GLFW' or word:match '^glfw%u' then
+          out[#out + 1] = { word, 'DansSDL' } -- SDL_*/GLFW*/glfw*, matches markers
         elseif word:match '^LLDB_' or word:match '^SB%u' or word == 'StateType' then
           out[#out + 1] = { word, 'DansLLDB' } -- LLDB_*/SB*/StateType, matches markers
         elseif word:match '^[A-Z][A-Z0-9_]+$' and not MACRO_DENY[word] then
@@ -231,7 +231,7 @@ local function type_hl(t)
   if t:match '^Vk' or t:match '^VK_' then
     return 'DansVulkan'
   end
-  if t:match '^SDL_' then
+  if t:match '^SDL_' or t:match '^GLFW' then
     return 'DansSDL'
   end
   if t:match '^LLDB_' or t:match '^SB%u' or t == 'StateType' then
