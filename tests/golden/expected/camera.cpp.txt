@@ -37,20 +37,20 @@ auto Camera::configure(const CameraConfig& config) $ne -> mut Camera&
 }
 
 // clang-format off
-auto Camera::pivot() const $ne                  -> const Vec3&     { return pivot_; }
-auto Camera::distance() const $ne               -> f32             { return distance_; }
-auto Camera::yaw() const $ne                    -> f32             { return yaw_; }
-auto Camera::pitch() const $ne                  -> f32             { return pitch_; }
-auto Camera::fov_y() const $ne                  -> f32             { return fov_y_; }
-auto Camera::orbit_sensitivity() const $ne      -> f32             { return orbit_sensitivity_; }
-auto Camera::pivot_sensitivity() const $ne      -> f32             { return pivot_sensitivity_; }
-auto Camera::zoom_sensitivity() const $ne       -> f32             { return zoom_sensitivity_; }
-auto Camera::z_near() const $ne                 -> f32             { return z_near_; }
-auto Camera::z_far() const $ne                  -> f32             { return z_far_; }
-auto Camera::allow_pivot_move() const $ne       -> bool            { return allow_pivot_move_; }
-auto Camera::clamp_position_z_min() const $ne   -> bool            { return clamp_position_z_min_; }
-auto Camera::min_position_z() const $ne         -> f32             { return min_position_z_; }
-auto Camera::projection_mode() const $ne        -> ProjectionMode  { return projection_mode_; }
+auto Camera::pivot() const noexcept                  -> const Vec3&     { return pivot_; }
+auto Camera::distance() const noexcept               -> f32             { return distance_; }
+auto Camera::yaw() const noexcept                    -> f32             { return yaw_; }
+auto Camera::pitch() const noexcept                  -> f32             { return pitch_; }
+auto Camera::fov_y() const noexcept                  -> f32             { return fov_y_; }
+auto Camera::orbit_sensitivity() const noexcept      -> f32             { return orbit_sensitivity_; }
+auto Camera::pivot_sensitivity() const noexcept      -> f32             { return pivot_sensitivity_; }
+auto Camera::zoom_sensitivity() const noexcept       -> f32             { return zoom_sensitivity_; }
+auto Camera::z_near() const noexcept                 -> f32             { return z_near_; }
+auto Camera::z_far() const noexcept                  -> f32             { return z_far_; }
+auto Camera::allow_pivot_move() const noexcept       -> bool            { return allow_pivot_move_; }
+auto Camera::clamp_position_z_min() const noexcept   -> bool            { return clamp_position_z_min_; }
+auto Camera::min_position_z() const noexcept         -> f32             { return min_position_z_; }
+auto Camera::projection_mode() const noexcept        -> ProjectionMode  { return projection_mode_; }
 // clang-format on
 
 auto Camera::set_pivot(const Vec3 pivot) $ne -> mut Camera&

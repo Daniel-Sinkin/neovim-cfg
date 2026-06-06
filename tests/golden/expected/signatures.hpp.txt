@@ -7,3 +7,15 @@ class Foo
     auto trailing() const -> int;
 };
 freeFunc(int x) -> bool;
+
+class Bar
+{
+    $nd auto x() const $ne    -> int;
+    $nd auto name() const $ne -> const char^;
+    auto reset(int n) mut $ne -> mut Bar&;
+};
+
+// clang-format off
+auto kept_raw(int a,    int b) -> int;
+auto and_this  (float x)       -> float;
+// clang-format on

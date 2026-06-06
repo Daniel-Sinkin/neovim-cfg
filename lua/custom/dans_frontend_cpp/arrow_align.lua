@@ -200,6 +200,7 @@ end
 -- consecutive arrow lines; within a block each arrow pads up to the max.
 local function compute(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local cfoff = vu.clang_format_off(bufnr)
   local n = #lines
   local result = {}
   local i = 1
@@ -208,8 +209,8 @@ local function compute(bufnr)
     local j = i
     while j <= n do
       local r, ap = rendered_arrow_col(lines[j], bufnr, j - 1)
-      if not r then
-        break
+      if not r or cfoff[j - 1] then
+        break -- a clang-format-off line is left hand-aligned, never re-padded
       end
       block[#block + 1] = { row0 = j - 1, rendered = r, col0 = ap - 1 }
       j = j + 1

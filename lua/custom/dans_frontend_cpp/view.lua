@@ -43,39 +43,21 @@ local function type_for(bufnr, row0)
   return m and m[row0] or nil
 end
 
--- Set of rows to show raw (no overlay): the cursor line, or the whole visual
--- selection while in a visual mode. Reveal is cursor/selection driven.
-local function reveal_set(bufnr)
-  local cur = vu.cursor_row0(bufnr)
-  if cur == nil then
-    return {}
-  end
-  local m = vim.fn.mode():sub(1, 1)
-  if m == 'v' or m == 'V' or m == string.char(22) then
-    local vstart = vim.fn.getpos('v')[2] - 1
-    local lo, hi = math.min(cur, vstart), math.max(cur, vstart)
-    local set = {}
-    for r = lo, hi do
-      set[r] = true
-    end
-    return set
-  end
-  return { [cur] = true }
-end
-
 local function refresh(bufnr)
   if not (enabled[bufnr] and vim.api.nvim_buf_is_valid(bufnr)) then
     return
   end
   clear(bufnr)
-  local set = reveal_set(bufnr)
+  -- reveal_set (cursor + visual selection) and clang-format-off both stay raw.
+  local set = vu.reveal_set(bufnr)
+  local cfoff = vu.clang_format_off(bufnr)
   local s0, e0 = vu.visible_range(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
   local align = P.compute_align(lines, s0)
   local diag = vu.diagnostic_lines(bufnr)
   for idx, line in ipairs(lines) do
     local row0 = s0 + idx - 1
-    if not set[row0] and not diag[row0] then
+    if not set[row0] and not diag[row0] and not cfoff[row0] then
       local start_col, chunks = R.render_line(line, type_for(bufnr, row0), align[row0], bufnr, row0)
       if start_col then
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, start_col, {

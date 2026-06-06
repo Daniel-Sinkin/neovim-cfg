@@ -24,18 +24,18 @@ struct Color
     }
 
     // clang-format off
-    $nd constexpr auto data()       $ne -> f32^       { return channels.data(); }
-    $nd constexpr auto data() const $ne -> const f32^ { return channels.data(); }
+    [[nodiscard]] constexpr auto data()       noexcept -> f32*       { return channels.data(); }
+    [[nodiscard]] constexpr auto data() const noexcept -> const f32* { return channels.data(); }
 
-    $nd constexpr auto r()          $ne -> mut f32&       { return channels[0]; }
-    $nd constexpr auto g()          $ne -> mut f32&       { return channels[1]; }
-    $nd constexpr auto b()          $ne -> mut f32&       { return channels[2]; }
-    $nd constexpr auto a()          $ne -> mut f32&       { return channels[3]; }
+    [[nodiscard]] constexpr auto r()          noexcept -> f32&       { return channels[0]; }
+    [[nodiscard]] constexpr auto g()          noexcept -> f32&       { return channels[1]; }
+    [[nodiscard]] constexpr auto b()          noexcept -> f32&       { return channels[2]; }
+    [[nodiscard]] constexpr auto a()          noexcept -> f32&       { return channels[3]; }
 
-    $nd constexpr auto r()    const $ne -> f32        { return channels[0]; }
-    $nd constexpr auto g()    const $ne -> f32        { return channels[1]; }
-    $nd constexpr auto b()    const $ne -> f32        { return channels[2]; }
-    $nd constexpr auto a()    const $ne -> f32        { return channels[3]; }
+    [[nodiscard]] constexpr auto r()    const noexcept -> f32        { return channels[0]; }
+    [[nodiscard]] constexpr auto g()    const noexcept -> f32        { return channels[1]; }
+    [[nodiscard]] constexpr auto b()    const noexcept -> f32        { return channels[2]; }
+    [[nodiscard]] constexpr auto a()    const noexcept -> f32        { return channels[3]; }
     // clang-format on
 
     static const Color black;
@@ -73,18 +73,18 @@ struct ColorU8
     }
 
     // clang-format off
-    $nd constexpr auto data()       $ne -> u8^       { return channels.data(); }
-    $nd constexpr auto data() const $ne -> const u8^ { return channels.data(); }
+    [[nodiscard]] constexpr auto data()       noexcept -> u8*       { return channels.data(); }
+    [[nodiscard]] constexpr auto data() const noexcept -> const u8* { return channels.data(); }
 
-    $nd constexpr auto r()          $ne -> mut u8&       { return channels[0]; }
-    $nd constexpr auto g()          $ne -> mut u8&       { return channels[1]; }
-    $nd constexpr auto b()          $ne -> mut u8&       { return channels[2]; }
-    $nd constexpr auto a()          $ne -> mut u8&       { return channels[3]; }
+    [[nodiscard]] constexpr auto r()          noexcept -> u8&       { return channels[0]; }
+    [[nodiscard]] constexpr auto g()          noexcept -> u8&       { return channels[1]; }
+    [[nodiscard]] constexpr auto b()          noexcept -> u8&       { return channels[2]; }
+    [[nodiscard]] constexpr auto a()          noexcept -> u8&       { return channels[3]; }
 
-    $nd constexpr auto r()    const $ne -> u8        { return channels[0]; }
-    $nd constexpr auto g()    const $ne -> u8        { return channels[1]; }
-    $nd constexpr auto b()    const $ne -> u8        { return channels[2]; }
-    $nd constexpr auto a()    const $ne -> u8        { return channels[3]; }
+    [[nodiscard]] constexpr auto r()    const noexcept -> u8        { return channels[0]; }
+    [[nodiscard]] constexpr auto g()    const noexcept -> u8        { return channels[1]; }
+    [[nodiscard]] constexpr auto b()    const noexcept -> u8        { return channels[2]; }
+    [[nodiscard]] constexpr auto a()    const noexcept -> u8        { return channels[3]; }
     // clang-format on
 };
 

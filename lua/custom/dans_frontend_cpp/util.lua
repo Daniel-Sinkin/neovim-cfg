@@ -29,6 +29,53 @@ function M.diagnostic_lines(bufnr)
   return set
 end
 
+-- 0-based rows to show raw: the cursor line, or the whole visual selection while
+-- in a visual mode. Both the overlay and the decoration modules reveal this set,
+-- so a multi-line select shows the original everywhere (otherwise the overlay
+-- reveals but a pointer `^` etc. lingers on the non-cursor selected lines).
+function M.reveal_set(bufnr)
+  local cur = M.cursor_row0(bufnr)
+  if cur == nil then
+    return {}
+  end
+  local m = vim.fn.mode():sub(1, 1)
+  if m == 'v' or m == 'V' or m == string.char(22) then
+    local vstart = vim.fn.getpos('v')[2] - 1
+    local lo, hi = math.min(cur, vstart), math.max(cur, vstart)
+    local set = {}
+    for r = lo, hi do
+      set[r] = true
+    end
+    return set
+  end
+  return { [cur] = true }
+end
+
+-- 0-based rows inside a `// clang-format off` ... `// clang-format on` region.
+-- Those are hand-aligned (data encoded in code); the frontend leaves them
+-- verbatim so it never fights the manual layout. Cached per changedtick.
+local cfoff_cache = {}
+function M.clang_format_off(bufnr)
+  local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+  local c = cfoff_cache[bufnr]
+  if c and c.tick == tick then
+    return c.set
+  end
+  local set, off = {}, false
+  for i, line in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+    if line:match '//%s*clang%-format%s+off' then
+      off = true
+    elseif line:match '//%s*clang%-format%s+on' then
+      off = false
+    end
+    if off then
+      set[i - 1] = true
+    end
+  end
+  cfoff_cache[bufnr] = { tick = tick, set = set }
+  return set
+end
+
 -- 0-based [start, end) line range to decorate: the on-screen window plus a
 -- margin, so a big file isn't re-scanned whole on every edit / scroll / cursor
 -- move. Off-screen rows are (re)decorated as they scroll in (WinScrolled). A
@@ -42,15 +89,15 @@ function M.visible_range(bufnr)
   return math.max(0, vim.fn.line 'w0' - 1 - M.VISIBLE_MARGIN), math.min(n, vim.fn.line 'w$' + M.VISIBLE_MARGIN)
 end
 
--- Per-refresh skip predicates, capturing the cursor row, diagnostic rows, and
--- view-overlay coverage once (so a module computes them a single time, not per
--- line/capture). `.skip` is for virt_text decorations -- it also skips the
--- cursor line, whose real text must show under the inline text. `.skip_conceal`
--- is for pure conceals, where the cursor line is revealed by concealcursor
--- instead, so it isn't skipped. `line` is optional, fetched only if a coverage
--- check needs it.
+-- Per-refresh skip predicate, capturing the reveal set (cursor + visual
+-- selection), diagnostic rows, clang-format-off rows, and view-overlay coverage
+-- once (so a module computes them a single time, not per line/capture). A
+-- decoration skips any row it returns true for. `line` is optional, fetched only
+-- if a coverage check needs it. `.skip` / `.skip_conceal` are kept as distinct
+-- names for call-site readability though they now coincide.
 function M.make_skipper(bufnr)
-  local cur = M.cursor_row0(bufnr)
+  local reveal = M.reveal_set(bufnr)
+  local cfoff = M.clang_format_off(bufnr)
   local diag = M.diagnostic_lines(bufnr)
   local view_ok, view = pcall(require, 'custom.dans_frontend_cpp.view')
   local view_on = view_ok and view.is_enabled(bufnr)
@@ -63,14 +110,10 @@ function M.make_skipper(bufnr)
     end
     return line ~= nil and view.covers(line, bufnr, row0)
   end
-  return {
-    skip = function(row0, line)
-      return row0 == cur or diag[row0] == true or covered(row0, line)
-    end,
-    skip_conceal = function(row0, line)
-      return diag[row0] == true or covered(row0, line)
-    end,
-  }
+  local function any(row0, line)
+    return reveal[row0] or diag[row0] == true or cfoff[row0] or covered(row0, line)
+  end
+  return { skip = any, skip_conceal = any }
 end
 
 -- Per-buffer module enable/disable (default enabled). The umbrella's
