@@ -240,11 +240,42 @@ local function type_hl(t)
   return 'DansInlayType'
 end
 
+-- Render a type string into { text, hl } chunks for virt_text *outside* the
+-- overlay (the trailing-return reorder): strip_type cleans it (std::/dans::,
+-- optional->?, *->^), the caret stays Normal/gray like add_type, and type_hl
+-- colors the rest. Exposed for the pointer module.
+function M.type_chunks(t)
+  local shown = P.strip_type(t)
+  local hl = type_hl(shown)
+  local out, i = {}, 1
+  while true do
+    local c = shown:find('%^', i)
+    if not c then
+      if i <= #shown then
+        out[#out + 1] = { shown:sub(i), hl }
+      end
+      break
+    end
+    if c > i then
+      out[#out + 1] = { shown:sub(i, c - 1), hl }
+    end
+    out[#out + 1] = { '^', 'Normal' }
+    i = c + 1
+  end
+  return out
+end
+
 -- Build the virt_text chunk list for a parsed declaration, or nil if `core`
 -- isn't a recognized declaration form. `align` (optional) is { nw, tw } column
 -- widths to pad the name/type to. `was_const` + (bufnr,row0) drive the inferred
 -- `mut` on non-const locals.
 local function build_chunks(prefix, core, had_semi, type_hint, align, was_const, is_constexpr, bufnr, row0)
+  -- Classic (non-trailing) function declarations are reordered to trailing form
+  -- by the pointer module's decoration pass, not overlaid -- bail so they aren't
+  -- mangled as a `name: T(args)` paren-init variable.
+  if P.classic_function(bufnr, row0) then
+    return nil
+  end
   local semi = had_semi and ';' or ''
   -- Lazy (treesitter): only the branches that infer mut pay for it, and only on
   -- lines that actually render (non-decls return before reaching a branch).

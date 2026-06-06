@@ -211,8 +211,8 @@ end
 -- Whether a line is one the overlay rewrites. Lets other view modules
 -- (aliases) defer so they don't double-render on top of the full-line
 -- overlay (which orphans their inline virt_text to the end of the line).
-function M.covers(line)
-  return (R.render_line(line, nil)) ~= nil
+function M.covers(line, bufnr, row0)
+  return (R.render_line(line, nil, nil, bufnr, row0)) ~= nil
 end
 
 function M.setup()

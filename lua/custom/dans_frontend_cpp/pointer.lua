@@ -19,6 +19,8 @@ local M = {}
 
 local ns = vim.api.nvim_create_namespace 'ds_cpp_pointer'
 local vu = require 'custom.dans_frontend_cpp.util'
+local P = require 'custom.dans_frontend_cpp.parse'
+local R = require 'custom.dans_frontend_cpp.render'
 
 local PTR_QUERY = [[
   (pointer_declarator "*" @star)
@@ -82,12 +84,40 @@ local function refresh(bufnr)
   local skip = vu.make_skipper(bufnr)
   local s0, e0 = vu.visible_range(bufnr)
 
+  -- 0. classic (non-trailing) function decl -> trailing return: conceal the
+  -- leading return type and append ` -> RET`, so `bool foo(args)` reads
+  -- `foo(args) -> bool`. Runs first and records the concealed return-type spans
+  -- so the `*`/optional passes below don't orphan a `^`/`?` into them (e.g.
+  -- `SBValue *GetValue` -- the `*` belongs to the moved return type).
+  local hide = {} -- row -> { {s, e}, ... } concealed return-type ranges
+  for row0 = s0, e0 - 1 do
+    local cf = P.classic_function(bufnr, row0)
+    if cf and not skip.skip(row0) then
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, cf.conceal_s, { end_col = cf.conceal_e, conceal = '' })
+      local vt = { { ' -> ', 'Normal' } }
+      for _, c in ipairs(R.type_chunks(cf.ret_text)) do
+        vt[#vt + 1] = c
+      end
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, cf.append_col, { virt_text = vt, virt_text_pos = 'inline' })
+      hide[row0] = hide[row0] or {}
+      hide[row0][#hide[row0] + 1] = { cf.conceal_s, cf.conceal_e }
+    end
+  end
+  local function in_reorder(row, col)
+    for _, r in ipairs(hide[row] or {}) do
+      if col >= r[1] and col < r[2] then
+        return true
+      end
+    end
+    return false
+  end
+
   -- 1. pointer `*` -> `^` (virt_text, skip the cursor line so the real `*` shows)
   local okp, pq = pcall(vim.treesitter.query.parse, lang, PTR_QUERY)
   if okp and pq then
     for _, node in pq:iter_captures(root, bufnr, s0, e0) do
       local sr, sc, _, ec = node:range()
-      if not skip.skip(sr) then
+      if not skip.skip(sr) and not in_reorder(sr, sc) then
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc, {
           end_col = ec,
           conceal = '',
@@ -131,13 +161,14 @@ local function refresh(bufnr)
       if nm and ar and nm:type() == 'type_identifier' and vim.treesitter.get_node_text(nm, bufnr) == 'optional' then
         local nsr, nsc = nm:range()
         local asr, asc, aer, aec = ar:range()
-        if not skip.skip(nsr) and nsr == asr then
+        if not skip.skip(nsr) and not in_reorder(nsr, nsc) and nsr == asr then
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, nsr, nsc, { end_col = asc + 1, conceal = '' })
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, aer, aec - 1, { end_col = aec, conceal = '?' })
         end
       end
     end
   end
+
 end
 
 M.refresh = refresh

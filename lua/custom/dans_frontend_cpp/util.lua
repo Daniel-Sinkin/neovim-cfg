@@ -61,7 +61,7 @@ function M.make_skipper(bufnr)
     if line == nil then
       line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
     end
-    return line ~= nil and view.covers(line)
+    return line ~= nil and view.covers(line, bufnr, row0)
   end
   return {
     skip = function(row0, line)

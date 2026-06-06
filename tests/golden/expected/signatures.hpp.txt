@@ -1,0 +1,9 @@
+namespace lldb { struct SBEvent {}; }
+class Foo
+{
+    static EventIsTargetEvent(const lldb::SBEvent &event) -> bool;
+    GetValue(int idx) const -> SBValue^;
+    run() mut $ne -> void;
+    auto trailing() const -> int;
+};
+freeFunc(int x) -> bool;

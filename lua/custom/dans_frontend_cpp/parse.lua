@@ -300,6 +300,65 @@ function M.designated_pairs(body)
   return #out > 0 and out or nil
 end
 
+-- For a classic (non-trailing) function declaration on `row0` -- `RET name(params)`
+-- with the return type BEFORE the name -- return the spans to reorder it into
+-- trailing form `name(params) -> RET`: { conceal_s, conceal_e } over the leading
+-- return type (incl a pointer/ref sigil), `append_col` after the params/trailing
+-- qualifiers, and `ret_text` (the return type + sigil). nil for trailing-return
+-- functions (`auto f() -> R`), constructors/destructors (no return type),
+-- non-functions, or multi-line decls. A cheap text pre-check gates the treesitter
+-- walk so non-function lines pay almost nothing.
+function M.classic_function(bufnr, row0)
+  if not bufnr then
+    return nil
+  end
+  local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
+  if not line or not line:match '[%w_]+%s*%b()' then
+    return nil -- no `ident(...)` at all -> can't be a function decl
+  end
+  local col = #(line:match '^%s*' or '')
+  local ok, node = pcall(vim.treesitter.get_node, { bufnr = bufnr, pos = { row0, col } })
+  if not ok or not node then
+    return nil
+  end
+  while node and node:type() ~= 'declaration' and node:type() ~= 'field_declaration' do
+    node = node:parent()
+  end
+  if not node then
+    return nil
+  end
+  local tfield = node:field('type')[1]
+  local dtor = node:field('declarator')[1]
+  if not tfield or not dtor or tfield:type() == 'placeholder_type_specifier' then
+    return nil -- no return type, or `auto` (deduced / trailing-return)
+  end
+  local sigil, fnode = '', dtor
+  if dtor:type() == 'pointer_declarator' then
+    sigil, fnode = '*', dtor:field('declarator')[1]
+  elseif dtor:type() == 'reference_declarator' then
+    sigil, fnode = '&', dtor:field('declarator')[1]
+  end
+  if not fnode or fnode:type() ~= 'function_declarator' then
+    return nil
+  end
+  for child in fnode:iter_children() do
+    if child:type() == 'trailing_return_type' then
+      return nil -- already trailing
+    end
+  end
+  local ts_row, ts_col = tfield:range()
+  local fs_row, fs_col, fe_row, fe_col = fnode:range()
+  if ts_row ~= row0 or fs_row ~= row0 or fe_row ~= row0 then
+    return nil -- single-line declarations only
+  end
+  return {
+    conceal_s = ts_col,
+    conceal_e = fs_col,
+    append_col = fe_col,
+    ret_text = vim.treesitter.get_node_text(tfield, bufnr) .. sigil,
+  }
+end
+
 -- A std smart-pointer type (after strip_type already removed std::): returns the
 -- inner type and 'unique'/'shared', else nil. Lets the view render
 -- `unique_ptr<T>` / `shared_ptr<T>` as `T^` with an ownership-colored caret.
