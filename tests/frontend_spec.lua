@@ -90,7 +90,8 @@ run('lambda copy cap', 'fn', { 'const auto h = [=](int n) { return n; };' }, { '
 
 -- ===================== structured bindings =====================
 run('structured binding', 'fn', { 'auto [a, b] = pair;' }, { 'mut a, b := pair;' })
-run('structured ref binding', 'fn', { 'const auto& [k, v] = *it;' }, { 'k, v& := *it;' })
+run('structured ref binding', 'fn', { 'const auto& [k, v] = *it;' }, { 'k&, v& := *it;' })
+run('structured mut ref binding', 'fn', { 'auto& [xpos, ypos] = *res;' }, { 'mut xpos&, ypos& := *res;' })
 
 -- ===================== range-for =====================
 run('for const ref', 'fn', { 'for (const auto& v : items)' }, { 'for (v& : items)' })

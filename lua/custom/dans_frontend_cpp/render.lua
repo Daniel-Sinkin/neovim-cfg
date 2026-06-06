@@ -424,9 +424,20 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     if is_local() and not was_const then
       add('mut ', 'DansMarkerMut')
     end
-    add(sb_binds)
     if sb_sigil == '&' then
-      add('&')
+      -- ref structured binding: every name binds a reference, so suffix each
+      -- (`[a, b]` -> `a&, b&`), not just the last.
+      local first = true
+      for nm in sb_binds:gmatch '[^,]+' do
+        if not first then
+          add ', '
+        end
+        add(vim.trim(nm))
+        add '&'
+        first = false
+      end
+    else
+      add(sb_binds)
     end
     add(' := ')
     add_value(sb_expr)
