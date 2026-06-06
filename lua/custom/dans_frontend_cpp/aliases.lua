@@ -60,9 +60,18 @@ local function in_string_or_comment(line, col0)
   end
 end
 
--- First balanced (...) group: returns 1-based open/close byte positions, or nil.
+-- First balanced (...) group -- the parameter list -- as 1-based open/close byte
+-- positions, or nil. Skips the call operator's own `()` (`operator()(args)`) so
+-- the args are found, not the empty operator parens; the trailing const after
+-- the real `)` is then detected too. (operator[] / operator== have no `(` in the
+-- name, so the scan isn't fooled by them.)
 local function balanced_parens(line)
-  local open = line:find('(', 1, true)
+  local from = 1
+  local _, op_e = line:find 'operator%s*%(%s*%)'
+  if op_e then
+    from = op_e + 1
+  end
+  local open = line:find('(', from, true)
   if not open then
     return nil
   end

@@ -295,6 +295,12 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
   local sb_sigil, sb_binds, sb_expr = core:match '^auto([&*]?)%s*%[(.-)%]%s*=%s*(.+)$'
 
   local sigil, name, expr = core:match '^auto([&*]?)%s+([%w_]+)%s*=%s*(.+)$'
+  -- `auto operator==(...)` / `auto operator=(...)` are operator declarations, not
+  -- an `auto operator = ...` binding -- the `==`/`=` in the operator name fooled
+  -- the match. Drop it so they fall through and render raw (trailing functions).
+  if name == 'operator' then
+    name = nil
+  end
   local typ, nm, init, paren
   if not forp and not iflet and not sb_binds and not name then
     typ, nm, init = core:match '^(.-)%s+([%w_]+)%s*{(.*)}$'

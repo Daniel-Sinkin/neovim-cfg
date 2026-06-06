@@ -15,6 +15,14 @@ class Bar
     auto reset(int n) mut $ne -> mut Bar&;
 };
 
+class Ops
+{
+    auto operator()(GLFWwindow^ window) const $ne -> void;
+    auto operator[](int i) mut $ne                -> mut int&;
+    Ops& operator=(const Ops& other) mut $ne;
+    auto operator==(const Ops& o) const $ne -> bool;
+};
+
 // clang-format off
 auto kept_raw(int a,    int b) -> int;
 auto and_this  (float x)       -> float;

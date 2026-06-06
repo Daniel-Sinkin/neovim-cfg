@@ -15,6 +15,14 @@ class Bar
     auto reset(int n) noexcept -> Bar&;
 };
 
+class Ops
+{
+    auto operator()(GLFWwindow* window) const noexcept -> void;
+    auto operator[](int i) noexcept -> int&;
+    Ops& operator=(const Ops& other) noexcept;
+    auto operator==(const Ops& o) const noexcept -> bool;
+};
+
 // clang-format off
 auto kept_raw(int a,    int b) -> int;
 auto and_this  (float x)       -> float;
