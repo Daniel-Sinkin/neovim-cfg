@@ -228,6 +228,11 @@ end
 -- their purple even here, so a type doesn't flip blue<->purple as the cursor
 -- enters/leaves its line; everything else is the blue inlay-type color.
 local function type_hl(t)
+  -- std::string (-> stripped to `string`, with an optional &/^ suffix) reads as
+  -- a string: the "..."-literal green, matching the raw-line matchadd.
+  if t:match '^string[&^]?$' then
+    return 'DansString'
+  end
   if t:match '^Vk' or t:match '^VK_' then
     return 'DansVulkan'
   end
@@ -245,8 +250,9 @@ end
 -- optional->?, *->^), the caret stays Normal/gray like add_type, and type_hl
 -- colors the rest. Exposed for the pointer module.
 function M.type_chunks(t)
-  local shown = P.strip_type(t)
-  local hl = type_hl(shown)
+  local stripped = P.strip_type(t)
+  local hl = type_hl(stripped) -- color from the std-stripped (GLFW* -> DansSDL)
+  local shown = P.strip_glfw(stripped) -- then drop the GLFW/glfw prefix
   local out, i = {}, 1
   while true do
     local c = shown:find('%^', i)
@@ -263,6 +269,54 @@ function M.type_chunks(t)
     i = c + 1
   end
   return out
+end
+
+-- Whether `cond` references `name` as a whole identifier (so the condition
+-- tests the binding: `res`, `res.has_value()`, `res != end()`, `res == 0`).
+local function checks_binding(cond, name)
+  local from = 1
+  while true do
+    local a, b = cond:find(name, from, true)
+    if not a then
+      return false
+    end
+    local before = a > 1 and cond:sub(a - 1, a - 1) or ''
+    local after = cond:sub(b + 1, b + 1)
+    if not before:match '[%w_]' and not after:match '[%w_]' then
+      return true
+    end
+    from = b + 1
+  end
+end
+
+-- Whether `cond` has a top-level boolean operator (`&&` / `||` / `and` / `or`
+-- outside any parens). Such a condition welds the binding check to another term
+-- -- `res.has_value() && ready` -- one operand of which may be independent of
+-- the binding, so the if-let render keeps it visible rather than dropping it.
+local function compound_cond(cond)
+  local depth = 0
+  local i, n = 1, #cond
+  while i <= n do
+    local c = cond:sub(i, i)
+    if c == '(' or c == '[' or c == '{' then
+      depth = depth + 1
+      i = i + 1
+    elseif c == ')' or c == ']' or c == '}' then
+      depth = depth - 1
+      i = i + 1
+    elseif depth == 0 and (cond:sub(i, i + 1) == '&&' or cond:sub(i, i + 1) == '||') then
+      return true
+    elseif c:match '[%a_]' then
+      local s, e = cond:find('^[%w_]+', i)
+      if depth == 0 and (cond:sub(s, e) == 'and' or cond:sub(s, e) == 'or') then
+        return true
+      end
+      i = e + 1
+    else
+      i = i + 1
+    end
+  end
+  return false
 end
 
 -- Build the virt_text chunk list for a parsed declaration, or nil if `core`
@@ -343,15 +397,16 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
   -- keeps its type color. type_hl keys off the leading token (Vk*/SDL_*/...), so
   -- compute it once on the whole string and reuse it for the non-`^` segments.
   local function add_type(t)
-    local hl = type_hl(t)
+    local hl = type_hl(t) -- color from the original (GLFW*/glfw* stay DansSDL)
+    local shown = P.strip_glfw(t) -- drop the GLFW/glfw prefix for display
     local i = 1
     while true do
-      local c = t:find('%^', i)
+      local c = shown:find('%^', i)
       if not c then
-        add(t:sub(i), hl)
+        add(shown:sub(i), hl)
         break
       end
-      add(t:sub(i, c - 1), hl)
+      add(shown:sub(i, c - 1), hl)
       add('^', 'Normal')
       i = c + 1
     end
@@ -386,13 +441,16 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
   end
 
   if iflet then
-    -- if (const auto x = e; COND)  ->  if let x := e[; COND]. A bare truthiness
-    -- check (COND == x) is dropped; a real test (`x == 0`) is kept after `;`.
+    -- if (auto x = e; COND)  ->  if let x := e. Drop COND only when it's a
+    -- *simple* check on the binding -- it names x and has no top-level && / ||
+    -- (`x`, `x.has_value()`, `x != end()`, `x == 0`). A compound COND
+    -- (`x.has_value() && ready`) or one that never names x is kept after `;`.
     add 'if let '
     add(iflet.name)
     add ' := '
     add_value(iflet.rhs)
-    if iflet.cond ~= iflet.name then
+    local simple_check = checks_binding(iflet.cond, iflet.name) and not compound_cond(iflet.cond)
+    if not simple_check then
       add '; '
       add_value(iflet.cond)
     end
@@ -494,11 +552,13 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
         add_value(expr)
         add(semi)
       else
-        -- Reference binding: a `&` suffix on the name (matches the range-for
-        -- `v&` style) rather than a `ref` keyword or gluing `&` to the value.
+        -- Ref/pointer binding: a sigil suffix on the name (`&` for a reference,
+        -- `^` for `auto*` -- P.ptr maps `*`->`^`), matching the range-for `v&` /
+        -- `p^` style rather than a `ref` keyword or gluing it to the value. A
+        -- plain `auto` value binding has no sigil.
         add(name)
-        if sigil == '&' then
-          add('&')
+        if sigil ~= '' then
+          add(P.ptr(sigil))
         end
         add(' := ')
         add_value(expr)
@@ -511,8 +571,13 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     -- becomes Odin's constant binding -- `name: T : value` (a `:` in place of the
     -- `=`), since `::` / `: T :` is how frontend spells a compile-time constant.
     local shown_typ = P.strip_type(typ)
-    local sp_inner, sp_kind = P.smart_ptr(shown_typ)
-    local disp_typ = sp_inner and (sp_inner .. '^') or shown_typ
+    local sp_inner, sp_kind, sp_del = P.smart_ptr(shown_typ)
+    local disp_typ
+    if sp_inner then
+      disp_typ = sp_del and (sp_inner .. '^, ' .. sp_del .. '~') or (sp_inner .. '^')
+    else
+      disp_typ = shown_typ
+    end
     add(nm)
     if align then
       add(string.rep(' ', math.max(0, align.nw - vim.fn.strwidth(nm))))
@@ -524,10 +589,18 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     -- (value members/globals aren't marked -- would be noise). constexpr counts
     -- as const. Placed after the colon like `-> mut T&` so names stay aligned.
     if sp_inner then
-      -- smart pointer: `T^` with the caret colored by ownership (unique = mut red,
-      -- shared = cpy yellow); a raw pointer's caret stays normal text.
+      -- smart pointer: `T^`, caret colored by ownership (unique = mut red, shared
+      -- = cpy yellow). A custom deleter renders as `T^, Del~` -- the caret stays on
+      -- the pointee, and a matching-colored `~` ties the deleter to the pointer
+      -- (the deleter keeps its own type color).
+      local mk = sp_kind == 'unique' and 'DansMarkerMut' or 'DansMarkerCpy'
       add_type(sp_inner)
-      add('^', sp_kind == 'unique' and 'DansMarkerMut' or 'DansMarkerCpy')
+      add('^', mk)
+      if sp_del then
+        add ', '
+        add_type(sp_del)
+        add('~', mk)
+      end
     else
       if top_level_ptr_ref(shown_typ) then
         if was_const then

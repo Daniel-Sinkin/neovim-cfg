@@ -212,10 +212,10 @@ function M.parse_for(core)
   return { is_const = is_const, sigil = sigil, name = name, iter = iter, tail = tail }
 end
 
--- `if (const auto NAME = RHS; NAME) TAIL` -> { name, rhs, tail } for an `if let`
--- render, else nil. Only the truthiness-on-the-bound-name form (the condition is
--- exactly the declared name); anything else (e.g. `it != end()`) is left raw so
--- the real test is never hidden.
+-- `if (auto NAME = RHS; COND) TAIL` (NAME bound with `[const] auto`) ->
+-- { name, rhs, cond, tail } for an `if let` render, else nil. COND is returned
+-- raw; the render drops it when it's a validity check on NAME and shows it
+-- otherwise.
 function M.parse_if_let(core)
   local inside, tail = core:match '^if%s*%((.+)%)%s*(.*)$'
   if not inside then
@@ -234,8 +234,8 @@ function M.parse_if_let(core)
   if not name then
     return nil
   end
-  -- `cond` kept so the caller can show a real test (`res == 0`); a bare
-  -- truthiness check (`cond == name`) is redundant and gets dropped.
+  -- `cond` returned raw; the render decides whether to show it (it drops any
+  -- condition that checks the binding -- `res`, `res.has_value()`, ...).
   return { name = name, rhs = rhs, cond = cond, tail = tail }
 end
 
@@ -253,6 +253,18 @@ function M.strip_type(typ)
   -- optional<T>& -> T?&, optional<T>* -> T?^ (once M.ptr rewrites the star).
   t = t:gsub('^optional<(.+)>%s*([&*]*)$', '%1?%2')
   return M.ptr(t)
+end
+
+-- Drop the GLFW/glfw prefix from a type token for the overlay, matching the
+-- raw-line conceal in markers.lua: GLFWwindow -> window, glfwFoo -> Foo,
+-- GLFW_X -> X. Only the prefix; the caller computes the DansSDL color BEFORE
+-- calling this so the teal survives. `%f[%w]` anchors to a token start so an
+-- embedded GLFW isn't touched.
+function M.strip_glfw(t)
+  t = t:gsub('%f[%w]GLFW_([A-Z0-9])', '%1')
+  t = t:gsub('%f[%w]GLFW([a-z])', '%1')
+  t = t:gsub('%f[%w]glfw([A-Z])', '%1')
+  return t
 end
 
 -- Trailing identifier of a *pure* member-access chain (`cfg.center` -> "center",
@@ -359,19 +371,44 @@ function M.classic_function(bufnr, row0)
   }
 end
 
+-- Split `s` at the first top-level comma (templates/parens/brackets balanced):
+-- returns (first, rest) or (s, nil) if there is none. Used to peel a smart
+-- pointer's custom deleter off the pointee type without being fooled by the
+-- commas inside a nested template like `pair<int, int>`.
+local function split_first_arg(s)
+  local depth = 0
+  for i = 1, #s do
+    local c = s:sub(i, i)
+    if c == '<' or c == '(' or c == '[' then
+      depth = depth + 1
+    elseif c == '>' or c == ')' or c == ']' then
+      depth = depth - 1
+    elseif c == ',' and depth == 0 then
+      return vim.trim(s:sub(1, i - 1)), vim.trim(s:sub(i + 1))
+    end
+  end
+  return s, nil
+end
+
 -- A std smart-pointer type (after strip_type already removed std::): returns the
--- inner type and 'unique'/'shared', else nil. Lets the view render
--- `unique_ptr<T>` / `shared_ptr<T>` as `T^` with an ownership-colored caret.
+-- pointee type, 'unique'/'shared', and a custom deleter (or nil), else nil. Lets
+-- the view render `unique_ptr<T>` as `T^` with an ownership-colored caret, and
+-- `unique_ptr<T, Del>` as `T^, Del~` -- the caret on the pointee, a `~` tying the
+-- deleter to it (instead of the caret landing on the deleter).
 function M.smart_ptr(t)
   local inner = t:match '^unique_ptr<(.+)>$'
+  local kind
   if inner then
-    return inner, 'unique'
+    kind = 'unique'
+  else
+    inner = t:match '^shared_ptr<(.+)>$'
+    if not inner then
+      return nil
+    end
+    kind = 'shared'
   end
-  inner = t:match '^shared_ptr<(.+)>$'
-  if inner then
-    return inner, 'shared'
-  end
-  return nil
+  local pointee, deleter = split_first_arg(inner)
+  return pointee, kind, deleter
 end
 
 -- For an explicit-type brace declaration (`T name{init}`), return the rendered
@@ -395,9 +432,9 @@ function M.field_dims(line)
     end
   end
   local disp = M.strip_type(typ)
-  local inner, kind = M.smart_ptr(disp)
+  local inner, _, deleter = M.smart_ptr(disp)
   if inner then
-    disp = inner .. '^'
+    disp = deleter and (inner .. '^, ' .. deleter .. '~') or (inner .. '^')
   end
   return nm, disp
 end

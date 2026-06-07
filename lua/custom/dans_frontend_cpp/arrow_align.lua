@@ -124,6 +124,26 @@ local function word_ws_removed(prefix, word)
   return removed
 end
 
+-- Width concealed by the GLFW prefix rules (markers.lua): the prefix only, the
+-- rest stays visible. `glfw` before [A-Z] (function) and `GLFW` before [a-z]
+-- (type) hide 4 cells; `GLFW_` before [A-Z0-9] (macro) hides 5. `glfw_foo`
+-- (yours) matches none. Mirrors the \ze conceals so a `->` after a GLFW token
+-- stays aligned.
+local function glfw_removed(prefix)
+  local removed = 0
+  local function count(pat, n)
+    for pos in prefix:gmatch('()' .. pat) do
+      if pos == 1 or not is_word_char(prefix:sub(pos - 1, pos - 1)) then
+        removed = removed + n
+      end
+    end
+  end
+  count('glfw[A-Z]', 4)
+  count('GLFW[a-z]', 4)
+  count('GLFW_[A-Z0-9]', 5)
+  return removed
+end
+
 -- Net width change from aliases: each whole-word keyword is concealed and
 -- replaced by its (shorter) virt_text. Returns (removed, added).
 local function alias_delta(prefix)
@@ -166,6 +186,7 @@ local function rendered_arrow_col(line, bufnr, row0)
     + literal_removed(prefix, 'std::')
     + literal_removed(prefix, 'dans::')
     + literal_removed(prefix, 'dans_')
+    + glfw_removed(prefix)
   local arem, aadd = alias_delta(prefix)
   -- aliases injects `mut ` (4 cells) before non-const ref/ptr args, and where
   -- a non-const member function's trailing const would be; both add width before
