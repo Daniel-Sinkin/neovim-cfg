@@ -105,17 +105,17 @@ $nd constexpr auto to_color(ColorU8 color) $ne -> Color
 {
     inv_255 := 1.0f / 255.0f;
     return Color{
-        $sc<f32>(color.r()) * inv_255,
-        $sc<f32>(color.g()) * inv_255,
-        $sc<f32>(color.b()) * inv_255,
-        $sc<f32>(color.a()) * inv_255,
+        $scast<f32>(color.r()) * inv_255,
+        $scast<f32>(color.g()) * inv_255,
+        $scast<f32>(color.b()) * inv_255,
+        $scast<f32>(color.a()) * inv_255,
     };
 }
 
 $nd constexpr auto color_channel_to_u8(f32 value) $ne -> u8
 {
     scaled := clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f;
-    return $sc<u8>(scaled);
+    return $scast<u8>(scaled);
 }
 
 $nd constexpr auto to_color_u8(Color color) $ne -> ColorU8
@@ -156,4 +156,4 @@ $nd constexpr auto grayscale(Color color) $ne -> Color
     return Color{y, y, y, color.a()};
 }
 
-}  // namespace gfx
+}  // namespace dans::gfx

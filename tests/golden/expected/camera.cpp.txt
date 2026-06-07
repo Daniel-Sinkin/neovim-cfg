@@ -258,4 +258,4 @@ auto make_camera_ray(const Camera& camera, Vec2 cursor_logical_px, Vec2 viewport
     };
 }
 
-}  // namespace camera
+}  // namespace dans::camera

@@ -107,4 +107,4 @@ class Camera
 
 $nd auto make_camera_ray(const Camera&, Vec2 cursor_logical_px, Vec2 viewport_logical_px) $ne -> Ray;
 
-}  // namespace camera
+}  // namespace dans::camera

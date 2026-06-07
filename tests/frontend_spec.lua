@@ -73,7 +73,9 @@ run('auto local', 'fn', { 'auto a = foo();' }, { 'mut a := foo();' })
 run('const auto local', 'fn', { 'const auto a = foo();' }, { 'a := foo();' })
 run('auto& ref', 'fn', { 'auto& r = x;' }, { 'mut r& := x;' })
 run('const auto& ref', 'fn', { 'const auto& r = x;' }, { 'r& := x;' })
-run('auto* ptr', 'fn', { 'auto* p = &x;' }, { 'mut p := &x;' })
+run('auto* ptr', 'fn', { 'auto* p = &x;' }, { 'mut p^ := &x;' })
+run('const auto* ptr', 'fn', { 'const auto* s = get();' }, { 's^ := get();' })
+run('const auto* glfw', 'fn', { 'const auto* p = glfwGetVersionString();' }, { 'p^ := glfwGetVersionString();' })
 run('auto&& fwd (raw)', 'fn', { 'auto&& z = f();' }, { false })
 
 -- ===================== pointers / references =====================
@@ -81,7 +83,7 @@ run('local pointer', 'fn', { 'int* p{};' }, { 'p: mut int^;' })
 run('local const pointer', 'fn', { 'const char* s{};' }, { 's: const char^;' })
 
 -- ===================== casts inside values =====================
-run('static_cast value', 'fn', { 'auto v = static_cast<int>(y);' }, { 'mut v := $sc<int>(y);' })
+run('static_cast value', 'fn', { 'auto v = static_cast<int>(y);' }, { 'mut v := $scast<int>(y);' })
 
 -- ===================== lambdas =====================
 run('lambda cap+params', 'fn', { 'const auto f = [&](int a) { return a; };' }, { 'lambda f(& : int a) { return a; };' })
@@ -115,13 +117,17 @@ run('multiline opener', 'fn', { 'auto big = compute(' }, { false })
 run('member value', 'struct', { 'int x{7};' }, { 'x: int = 7;' })
 run('member empty', 'struct', { 'Vec2 pos{};' }, { 'pos: Vec2;' })
 run('member pointer', 'struct', { 'Foo* ptr{};' }, { 'ptr: mut Foo^;' })
-run('member glfw pointer', 'struct', { 'GLFWwindow* window_{};' }, { 'window_: mut GLFWwindow^;' })
+run('member glfw pointer', 'struct', { 'GLFWwindow* window_{};' }, { 'window_: mut window^;' })
 run('member const pointer', 'struct', { 'const Foo* cptr{};' }, { 'cptr: const Foo^;' })
 run('member array', 'struct', { 'std::array<f32, 3> arr{};' }, { 'arr: array<f32, 3>;' })
 run('member nested template', 'struct', { 'std::vector<std::pair<int, int>> v{};' }, { 'v: vector<pair<int, int>>;' })
 run('member ref-in-template', 'struct', { 'std::pair<int&, int> pr{};' }, { 'pr: pair<int&, int>;' })
 run('member unique_ptr', 'struct', { 'std::unique_ptr<Foo> up{};' }, { 'up: Foo^;' })
 run('member shared_ptr', 'struct', { 'std::shared_ptr<Foo> sp{};' }, { 'sp: Foo^;' })
+run('member unique_ptr deleter', 'struct', { 'std::unique_ptr<Foo, FooDeleter> p{};' }, { 'p: Foo^, FooDeleter~;' })
+run('member unique_ptr nested deleter', 'struct', { 'std::unique_ptr<std::pair<int, int>> p{};' }, { 'p: pair<int, int>^;' })
+run('member glfw type (overlay strips prefix)', 'struct', { 'GLFWwindow win{};' }, { 'win: window;' })
+run('member glfw unique_ptr deleter', 'struct', { 'std::unique_ptr<GLFWwindow, WindowDeleter> w{};' }, { 'w: window^, WindowDeleter~;' })
 run('member optional', 'struct', { 'std::optional<int> o{};' }, { 'o: int?;' })
 run('member vulkan null', 'struct', { 'VkBuffer buf{VK_NULL_HANDLE};' }, { 'buf: VkBuffer = {};' })
 run('member static constexpr', 'struct', { 'static constexpr usize cap{16};' }, { 'static cap: usize : 16;' })
@@ -167,15 +173,20 @@ run('designated non-pun', 'fn', { 'const Cfg c{.width = 800, .height = h};' }, {
 run('ranges value', 'fn', { 'auto a = std::ranges::transform(xs, fn);' }, { 'mut a := transform(xs, fn);' })
 run('views value', 'fn', { 'auto a = std::ranges::views::filter(xs, p);' }, { 'mut a := filter(xs, p);' })
 run('for destructure', 'fn', { 'for (const auto& [k, v] : items)' }, { 'for (k, v& : items)' })
-run('if let', 'fn', { 'if (const auto res = find(x); res)' }, { 'if let res := find(x)' })
+run('if let bare', 'fn', { 'if (const auto res = find(x); res)' }, { 'if let res := find(x)' })
 run('if let with brace', 'fn', { 'if (const auto p = lookup(k); p) {' }, { 'if let p := lookup(k) {' })
-run('if let with cond', 'fn', { 'if (const auto res = find(x); res == 0)' }, { 'if let res := find(x); res == 0' })
+run('if let has_value drop', 'fn', { 'if (auto res = from_glfw_get_window_pos(); res.has_value())' }, { 'if let res := from_glfw_get_window_pos()' })
+run('if let iterator drop', 'fn', { 'if (auto it = m.find(x); it != m.end())' }, { 'if let it := m.find(x)' })
+run('if let value-cmp drop', 'fn', { 'if (const auto res = find(x); res == 0)' }, { 'if let res := find(x)' })
+run('if let independent cond kept', 'fn', { 'if (auto res = f(); ready)' }, { 'if let res := f(); ready' })
+run('if let compound && kept', 'fn', { 'if (auto res = f(); res.has_value() && ready)' }, { 'if let res := f(); res.has_value() && ready' })
+run('if let compound and-keyword kept', 'fn', { 'if (auto res = m.find(k); res != m.end() and res->ok)' }, { 'if let res := m.find(k); res != m.end() and res->ok' })
 run('static thread_local', 'fn', { 'static thread_local std::mt19937_64 engine{std::random_device{}()};' }, { 'static thread_local engine: mut mt19937_64 = random_device{}();' })
 run('if plain (raw)', 'fn', { 'if (ready) {' }, { false })
 run('std move value', 'fn', { 'auto y = std::move(x);' }, { 'mut y := move(x);' })
 run('std forward value', 'fn', { 'auto y = std::forward<T>(x);' }, { 'mut y := forward<T>(x);' })
-run('cast pointer arg', 'fn', { 'auto y = reinterpret_cast<u8*>(p);' }, { 'mut y := $rc<u8^>(p);' })
-run('cast nested pointer', 'fn', { 'auto z = static_cast<std::vector<int*>>(v);' }, { 'mut z := $sc<vector<int^>>(v);' })
+run('cast pointer arg', 'fn', { 'auto y = reinterpret_cast<u8*>(p);' }, { 'mut y := $rcast<u8^>(p);' })
+run('cast nested pointer', 'fn', { 'auto z = static_cast<std::vector<int*>>(v);' }, { 'mut z := $scast<vector<int^>>(v);' })
 run('paren init', 'fn', { 'std::vector<stbtt_bakedchar> out(config.codepoint_count);' }, { 'out: mut vector<stbtt_bakedchar>(config.codepoint_count);' })
 run('paren init digit', 'fn', { 'Buffer buf(1024);' }, { 'buf: mut Buffer(1024);' })
 run('function decl raw', 'fn', { 'Foo make(Bar);' }, { false })
@@ -283,6 +294,7 @@ do
     '    std::unique_ptr<Foo> uni{};',
     '    std::shared_ptr<Foo> sha{};',
     '    const Foo* cst{};',
+    '    std::unique_ptr<Foo, Del> del{};',
     '};',
   })
   vim.bo[b].filetype = 'cpp'
@@ -311,6 +323,50 @@ do
   chk('unique caret mut', chunk_hl(3, '^'), 'DansMarkerMut')
   chk('shared caret cpy', chunk_hl(4, '^'), 'DansMarkerCpy')
   chk('const ptr normal', chunk_hl(5, 'const '), 'Normal')
+  chk('deleter caret mut', chunk_hl(6, '^'), 'DansMarkerMut')
+  chk('deleter tilde mut', chunk_hl(6, '~'), 'DansMarkerMut')
+end
+
+-- ===================== string type color =====================
+do
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, {
+    'struct S', '{',
+    '    std::string name{};',
+    '    std::string& ref;',
+    '};',
+  })
+  vim.bo[b].filetype = 'cpp'
+  vim.api.nvim_set_current_buf(b)
+  pcall(function() vim.treesitter.get_parser(b, 'cpp'):parse() end)
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+  vim.cmd 'doautocmd FileType'
+  vim.cmd 'doautocmd BufEnter'
+  local function chunk_hl(row0, txt)
+    local m = vim.api.nvim_buf_get_extmarks(b, jns, { row0, 0 }, { row0, -1 }, { details = true })
+    for _, c in ipairs(m[1] and m[1][4].virt_text or {}) do
+      if c[1] == txt then
+        return c[2]
+      end
+    end
+  end
+  local function chk2(d, g, e)
+    if g == e then
+      pass = pass + 1
+    else
+      fail = fail + 1
+      fails[#fails + 1] = 'FAIL  ' .. d .. '  got ' .. tostring(g)
+    end
+  end
+  chk2('std::string type green', chunk_hl(2, 'string'), 'DansString')
+  chk2('std::string& ref green', chunk_hl(3, 'string&'), 'DansString')
+  local found = false
+  for _, m in ipairs(vim.fn.getmatches()) do
+    if m.group == 'DansString' and tostring(m.pattern):find('std::string', 1, true) then
+      found = true
+    end
+  end
+  chk2('std::string raw matchadd', found, true)
 end
 
 -- ===================== fold levels (Expects / Ensures blocks) =====================
