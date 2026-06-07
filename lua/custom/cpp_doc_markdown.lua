@@ -12,7 +12,10 @@
 --
 -- Fenced code: a ``` line opens a region rendered verbatim (no markdown) on a
 -- separate code-block background until the closing ```; the fence lines are
--- hidden. Scope: heading / bullet / inline-code / fenced code / leader / block
+-- hidden. With vim.g.dans_doc_md_inline_frontend set, fenced code additionally
+-- gets the cpp frontend's text transforms (alias collapse + std:: strip) so
+-- examples read in the dans dialect -- a load-time setting, off by default.
+-- Scope: heading / bullet / inline-code / fenced code / leader / block
 -- background. Not yet: **bold** / *italic* inline, numbered lists. On by default
 -- for .hpp; toggle per buffer with :DansDocMarkdown.
 
@@ -74,6 +77,63 @@ end
 local function hl(bufnr, row0, s, e, group, priority)
   if e > s then
     pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, s, { end_col = e, hl_group = group, priority = priority })
+  end
+end
+
+-- Opt-in "inline frontend" over fenced code (set vim.g.dans_doc_md_inline_frontend
+-- in your config; load-time, reload to change). Applies the cheap text transforms
+-- of the cpp frontend -- the $-alias collapse (reusing the SAME aliases.ALIASES
+-- table, so there is one source of truth) and the std::/dans:: strip -- so code
+-- examples read in the dans dialect. The declaration overlay (x: T, carets) is
+-- deliberately NOT applied: examples are rarely declarations, and that would need
+-- treesitter over comment-embedded code.
+local function inline_frontend_on()
+  return vim.g.dans_doc_md_inline_frontend == true
+end
+
+local function is_word(c)
+  return c ~= '' and c:match '[%w_]' ~= nil
+end
+
+local function apply_inline_frontend(bufnr, row0, content, base_col)
+  -- alias collapse first, so std::runtime_error -> $re before the std:: strip.
+  local ok, aliases = pcall(function()
+    return require('custom.dans_frontend_cpp.aliases').ALIASES
+  end)
+  if ok and aliases then
+    for _, a in ipairs(aliases) do
+      local kw, rep = a[1], a[2]
+      local from = 1
+      while true do
+        local s, e = content:find(kw, from, true)
+        if not s then
+          break
+        end
+        local before = s > 1 and content:sub(s - 1, s - 1) or ''
+        if not is_word(before) and not is_word(content:sub(e + 1, e + 1)) then
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, base_col + s - 1, {
+            end_col = base_col + e,
+            conceal = '',
+            virt_text = { { rep, 'DansDocCodeBlock' } },
+            virt_text_pos = 'inline',
+          })
+        end
+        from = e + 1
+      end
+    end
+  end
+  for _, q in ipairs { 'std::', 'dans::' } do
+    local from = 1
+    while true do
+      local s, e = content:find(q, from, true)
+      if not s then
+        break
+      end
+      if not is_word(s > 1 and content:sub(s - 1, s - 1) or '') then
+        conceal(bufnr, row0, base_col + s - 1, base_col + e)
+      end
+      from = e + 1
+    end
   end
 end
 
@@ -174,9 +234,14 @@ local function refresh(bufnr)
             -- left behind delimits the block.
             conceal(bufnr, row0, #indent, #lines[k])
           elseif in_fence then
-            -- code line: conceal only the leader; the code shows verbatim, colored
-            -- by the DansDocCodeBlock line highlight (no markdown parsing).
-            conceal(bufnr, row0, #indent, #lines[k] - #content)
+            -- code line: conceal the leader; the code shows verbatim, colored by
+            -- the DansDocCodeBlock line highlight. With the inline-frontend
+            -- setting on, also apply the dans text transforms to the code.
+            local content_col = #lines[k] - #content
+            conceal(bufnr, row0, #indent, content_col)
+            if inline_frontend_on() then
+              apply_inline_frontend(bufnr, row0, content, content_col)
+            end
           else
             render_line(bufnr, row0, lines[k])
           end
