@@ -3,7 +3,7 @@
 -- profiler), and set the font size. A small floating grid.
 --
 --   j / k (count ok, e.g. 3j)  move between rows
---   h / l                      move between the two columns
+--   h / l, b / w, arrows       move between the two columns (b = left, w = right)
 --   <CR> / <Space>             toggle, or (font) open an input to type a value
 --   q / <Esc>                  close
 --
@@ -323,10 +323,24 @@ function M.open()
   map('<Up>', function()
     nav(-1, 0)
   end)
+  -- columns: h/l, plus w/b (left hand stays home -- you navigate by word anyway)
+  -- and the arrows. b = left (like h), w = right (a comfier `l`).
   map('h', function()
     nav(0, -1)
   end)
   map('l', function()
+    nav(0, 1)
+  end)
+  map('b', function()
+    nav(0, -1)
+  end)
+  map('w', function()
+    nav(0, 1)
+  end)
+  map('<Left>', function()
+    nav(0, -1)
+  end)
+  map('<Right>', function()
     nav(0, 1)
   end)
   map('<CR>', activate)
