@@ -43,6 +43,42 @@ local function type_for(bufnr, row0)
   return m and m[row0] or nil
 end
 
+-- Field alignment is computed over the whole visible window; cache it per buffer
+-- per (changedtick, window) so the incremental per-row repaint on a cursor move
+-- reuses it instead of rescanning, and the full refresh below shares the lines it
+-- fetched. Invalidated by any edit (tick) or scroll (window) -- the only things
+-- that change alignment.
+local align_cache = {}
+local function align_for(bufnr)
+  local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+  local s0, e0 = vu.visible_range(bufnr)
+  local c = align_cache[bufnr]
+  if not (c and c.tick == tick and c.s0 == s0 and c.e0 == e0) then
+    local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
+    c = { tick = tick, s0 = s0, e0 = e0, lines = lines, align = P.compute_align(lines, s0) }
+    align_cache[bufnr] = c
+  end
+  return c
+end
+
+-- Render the overlay for one row (or leave it raw if revealed / a diagnostic /
+-- clang-format-off line). The row's namespace must already be cleared by the
+-- caller. Shared by the full refresh and the per-row incremental path.
+local function render_one(bufnr, row0, line, set, cfoff, diag, align)
+  if set[row0] or diag[row0] or cfoff[row0] then
+    return
+  end
+  local start_col, chunks = R.render_line(line, type_for(bufnr, row0), align[row0], bufnr, row0)
+  if start_col then
+    pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, start_col, {
+      end_col = #line,
+      conceal = '',
+      virt_text = chunks,
+      virt_text_pos = 'overlay',
+    })
+  end
+end
+
 local function refresh(bufnr)
   if not (enabled[bufnr] and vim.api.nvim_buf_is_valid(bufnr)) then
     return
@@ -54,23 +90,30 @@ local function refresh(bufnr)
   -- reveal_set (cursor + visual selection) and clang-format-off both stay raw.
   local set = vu.reveal_set(bufnr)
   local cfoff = vu.clang_format_off(bufnr)
-  local s0, e0 = vu.visible_range(bufnr)
-  local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
-  local align = P.compute_align(lines, s0)
   local diag = vu.diagnostic_lines(bufnr)
-  for idx, line in ipairs(lines) do
-    local row0 = s0 + idx - 1
-    if not set[row0] and not diag[row0] and not cfoff[row0] then
-      local start_col, chunks = R.render_line(line, type_for(bufnr, row0), align[row0], bufnr, row0)
-      if start_col then
-        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, start_col, {
-          end_col = #line,
-          conceal = '',
-          virt_text = chunks,
-          virt_text_pos = 'overlay',
-        })
-      end
-    end
+  local c = align_for(bufnr)
+  for idx, line in ipairs(c.lines) do
+    render_one(bufnr, c.s0 + idx - 1, line, set, cfoff, diag, c.align)
+  end
+end
+
+-- Repaint just one row (the two flipped rows on a cursor move go through here).
+-- Same render_one as the full pass, so the result is identical for that row.
+function M.render_row(bufnr, row0)
+  if not (enabled[bufnr] and vim.api.nvim_buf_is_valid(bufnr)) then
+    return
+  end
+  vim.api.nvim_buf_clear_namespace(bufnr, ns, row0, row0 + 1)
+  if vu.is_recording() then
+    return
+  end
+  local c = align_for(bufnr)
+  if row0 < c.s0 or row0 >= c.e0 then
+    return -- off-screen; the next scroll/full refresh covers it
+  end
+  local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
+  if line then
+    render_one(bufnr, row0, line, vu.reveal_set(bufnr), vu.clang_format_off(bufnr), vu.diagnostic_lines(bufnr), c.align)
   end
 end
 
@@ -243,7 +286,8 @@ function M.setup()
   vu.on_decorate(
     group,
     { 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI', 'ModeChanged', 'DiagnosticChanged' },
-    refresh
+    refresh,
+    M.render_row -- a plain cursor move repaints only the two reveal-flipped rows
   )
   -- Refresh deduced types: BufEnter/InsertLeave plus CursorHold (a natural
   -- debounce for the async clangd response after edits).

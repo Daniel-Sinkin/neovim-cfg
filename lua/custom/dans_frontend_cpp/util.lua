@@ -225,14 +225,43 @@ end
 -- immediately; the debounced VIEWPORT_SETTLED event drives the scroll repaint.
 -- Do NOT pass WinScrolled in `events` -- scrolling goes through the settled event.
 -- Scroll-dragged CursorMoved is dropped (the settled event covers it).
-function M.on_decorate(group, events, cb)
+--
+-- Cursor-move handling, since a pure cursor move only flips the reveal set (the
+-- row you leave re-renders, the row you enter goes raw):
+--   * if neither the changedtick nor the cursor row changed since the last paint,
+--     skip entirely -- this kills the CursorMovedI that trails every insert
+--     keystroke (TextChangedI already painted) and every horizontal h/l/w move.
+--   * if `render_row` is given and it's a plain vertical move on unchanged text
+--     (normal mode), repaint ONLY the two flipped rows instead of the whole window.
+--   * otherwise (visual mode, an edit, first paint) fall back to the full `cb`.
+function M.on_decorate(group, events, cb, render_row)
+  local last = {} -- buf -> { tick, row }
+  local function note(buf)
+    last[buf] = { tick = vim.api.nvim_buf_get_changedtick(buf), row = M.cursor_row0(buf) }
+  end
   vim.api.nvim_create_autocmd(events, {
     group = group,
     callback = function(ev)
-      if (ev.event == 'CursorMoved' or ev.event == 'CursorMovedI') and M.is_scrolling() then
-        return
+      local buf = ev.buf
+      if ev.event == 'CursorMoved' or ev.event == 'CursorMovedI' then
+        if M.is_scrolling() then
+          return
+        end
+        local tick = vim.api.nvim_buf_get_changedtick(buf)
+        local row = M.cursor_row0(buf)
+        local st = last[buf]
+        if st and st.tick == tick and st.row == row then
+          return -- nothing the decoration depends on changed
+        end
+        if render_row and st and st.tick == tick and row and st.row and vim.fn.mode():sub(1, 1) == 'n' then
+          render_row(buf, st.row) -- the row we left -> back to overlay
+          render_row(buf, row) -- the row we entered -> raw
+          last[buf] = { tick = tick, row = row }
+          return
+        end
       end
-      cb(ev.buf)
+      cb(buf)
+      note(buf)
     end,
   })
   vim.api.nvim_create_autocmd('User', {
@@ -240,6 +269,7 @@ function M.on_decorate(group, events, cb)
     pattern = M.VIEWPORT_SETTLED,
     callback = function(ev)
       cb(ev.buf)
+      note(ev.buf)
     end,
   })
 end
