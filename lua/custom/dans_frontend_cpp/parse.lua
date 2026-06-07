@@ -253,6 +253,24 @@ function M.strip_type(typ)
   -- std::optional<T> -> T?, keeping any trailing ref/ptr after the `?`:
   -- optional<T>& -> T?&, optional<T>* -> T?^ (once M.ptr rewrites the star).
   t = t:gsub('^optional<(.+)>%s*([&*]*)$', '%1?%2')
+  -- std::expected<T, E> -> T?E (value, then `?`, then the error arm), keeping any
+  -- trailing ref/ptr. Split at the top-level comma so a templated arm
+  -- (expected<vector<int>, Error>) isn't broken on its inner comma.
+  local exp_inner, exp_sig = t:match '^expected<(.+)>%s*([&*]*)$'
+  if exp_inner then
+    local depth = 0
+    for i = 1, #exp_inner do
+      local c = exp_inner:sub(i, i)
+      if c == '<' or c == '(' or c == '[' then
+        depth = depth + 1
+      elseif c == '>' or c == ')' or c == ']' then
+        depth = depth - 1
+      elseif c == ',' and depth == 0 then
+        t = vim.trim(exp_inner:sub(1, i - 1)) .. '?' .. vim.trim(exp_inner:sub(i + 1)) .. exp_sig
+        break
+      end
+    end
+  end
   -- std::array<T, N> -> [N]T (Odin array syntax). Split at the top-level comma so
   -- a templated element (array<pair<int, int>, 3>) isn't broken.
   local inner = t:match '^array<(.+)>$'
