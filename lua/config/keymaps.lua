@@ -10,6 +10,11 @@ vim.keymap.set({ 'n', 'i', 'v' }, '<ScrollWheelDown>', '<C-e><C-e><C-e>', { sile
 
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
+-- DANS frontend config menu: toggle modules + common settings (font size).
+vim.keymap.set('n', '<leader>da', function()
+  require('custom.dans_menu').open()
+end, { desc = 'D[A]NS frontend menu' })
+
 -- Nuke stale diagnostics and refresh Neo-tree's view. Use when a closed file
 -- is still marked orange in the tree.
 vim.keymap.set('n', '<leader>dc', function()

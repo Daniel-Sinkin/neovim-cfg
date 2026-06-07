@@ -190,6 +190,14 @@ function M.is_enabled(bufnr)
   return enabled[bufnr] == true
 end
 
+-- State getters for the config menu.
+function M.hints_enabled()
+  return show_hints
+end
+function M.lambda_enabled()
+  return R.lambda_enabled()
+end
+
 -- Whether a line is one the overlay rewrites. Lets other view modules
 -- (aliases) defer so they don't double-render on top of the full-line
 -- overlay (which orphans their inline virt_text to the end of the line).

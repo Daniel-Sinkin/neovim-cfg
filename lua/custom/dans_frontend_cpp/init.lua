@@ -48,6 +48,16 @@ local function set_on(name, buf, on)
   end
 end
 
+-- Public surface for the config menu (custom.dans_menu): the toggleable module
+-- names and per-buffer get/set, wrapping the same logic :DansFrontend drives.
+M.TOGGLEABLE = TOGGLEABLE
+function M.module_is_on(name, buf)
+  return is_on(name, buf)
+end
+function M.module_set(name, buf, on)
+  set_on(name, buf, on)
+end
+
 local function dispatch(cmd)
   local buf = vim.api.nvim_get_current_buf()
   local sub = vim.trim(cmd.args or '')
