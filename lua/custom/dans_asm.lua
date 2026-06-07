@@ -84,24 +84,37 @@ function M.split_command(s)
   return out
 end
 
--- Parse assembly text into { lines, files, line_src, blocks }:
---   files     fileidx -> basename (from `.file N ["dir"] "name"`)
+-- Parse assembly text into { lines, files, line_src, blocks }. Handles both
+-- toolchain dialects:
+--   DWARF (clang on linux/macos): `.file N ["dir"] "name"` + `.loc N line`
+--   CodeView (clang on windows-msvc): `.cv_file N "path" "csum"` + `.cv_loc fn N line`
+-- Functions are bracketed by .Lfunc_beginN:/.Lfunc_endN: in every format (the
+-- mach-o variant drops the leading dot), which is more reliable than .cfi_* (those
+-- are absent on a windows leaf function with no unwind).
+--   files     fileidx -> basename
 --   line_src  asm line (1-based) -> source line, for lines inside a function whose
---             current .loc points at `src_base`
---   blocks    { label, first, last, srcs={set}, lo, hi } per function, bracketed by
---             .cfi_startproc/.cfi_endproc, `first` at the function label line.
+--             current .loc/.cv_loc points at `src_base`
+--   blocks    { label, first, last, srcs={set}, lo, hi } per function, `first` at
+--             the function label line.
 function M.parse_asm(text, src_base)
   local lines = vim.split(text, '\n', { plain = true })
   local files = {}
   for _, ln in ipairs(lines) do
     local idx, rest = ln:match '^%s*%.file%s+(%d+)%s+(.+)$'
     if idx then
-      local name
+      local name -- DWARF: the LAST quoted token is the file (dir, if any, is first)
       for q in rest:gmatch '"([^"]*)"' do
-        name = q -- last quoted token is the file name (the dir, if any, comes first)
+        name = q
       end
       if name then
         files[tonumber(idx)] = name:match '[^/\\]+$'
+      end
+    end
+    local cidx, crest = ln:match '^%s*%.cv_file%s+(%d+)%s+(.+)$'
+    if cidx then
+      local path = crest:match '"([^"]*)"' -- CodeView: the FIRST quoted token is the path
+      if path then
+        files[tonumber(cidx)] = path:match '[^/\\]+$'
       end
     end
   end
@@ -116,25 +129,29 @@ function M.parse_asm(text, src_base)
   local cur_src, last_label, last_label_line, open = nil, nil, nil, nil
   for i, ln in ipairs(lines) do
     local t = ln:gsub('^%s+', '')
-    local locidx, locline = t:match '^%.loc%s+(%d+)%s+(%d+)'
-    if locidx then
-      if ours[tonumber(locidx)] then
-        cur_src = tonumber(locline)
+    local fidx, fline = t:match '^%.loc%s+(%d+)%s+(%d+)'
+    if not fidx then
+      fidx, fline = t:match '^%.cv_loc%s+%d+%s+(%d+)%s+(%d+)' -- funcid, fileidx, line
+    end
+    if fidx then
+      if ours[tonumber(fidx)] then
+        cur_src = tonumber(fline)
       end
-    elseif t:match '^%.cfi_startproc' then
+    elseif t:match '^%.?Lfunc_begin%d+:' then
       open = { label = last_label, first = last_label_line or i, last = i, srcs = {}, lo = nil, hi = nil }
-    elseif t:match '^%.cfi_endproc' then
+    elseif t:match '^%.?Lfunc_end%d+:' then
       if open then
         open.last = i
         blocks[#blocks + 1] = open
         open = nil
       end
     else
-      local lbl = t:match '^([%w_$.][%w_$.@]*):'
-      -- a function symbol label (not a compiler-local .L*/L*/Ltmp/Lfunc label);
-      -- reset the running source line so a new function's prologue isn't tagged
-      -- with the previous function's last line.
-      if lbl and not lbl:match '^%.?L' then
+      -- a function symbol label; MS-mangled names are "quoted". Skip compiler-local
+      -- .L*/L* labels. Reset the running source line so a new function's prologue
+      -- isn't tagged with the previous function's last line.
+      local q = t:match '^"([^"]*)":'
+      local lbl = q or t:match '^([%w_$.@][%w_$.@]*):'
+      if lbl and (q or not lbl:match '^%.?L') then
         last_label, last_label_line, cur_src = lbl, i, nil
       end
     end
@@ -260,7 +277,18 @@ local function compile_command(file)
       end
     end
   end
-  local cc = vim.g.dans_asm_compiler or 'c++'
+  -- no compile DB: pick the first compiler that's actually on PATH (so a Windows
+  -- box with clang++ but no `c++` doesn't ENOENT).
+  local cc
+  for _, c in ipairs { vim.g.dans_asm_compiler, 'c++', 'clang++', 'g++', 'clang', 'cc' } do
+    if c and vim.fn.executable(c) == 1 then
+      cc = c
+      break
+    end
+  end
+  if not cc then
+    return nil
+  end
   local argv = { cc }
   vim.list_extend(argv, vim.g.dans_asm_flags or { '-std=c++23' })
   vim.list_extend(argv, { '-S', '-g', '-O' .. opt, '-o', '-', file })
@@ -404,9 +432,12 @@ function M.show()
     return notify 'DansAsm: put the cursor inside a function body'
   end
   local cmd = compile_command(file)
+  if not cmd then
+    return notify('DansAsm: no C++ compiler on PATH -- set vim.g.dans_asm_compiler (e.g. "clang++")', vim.log.levels.ERROR)
+  end
   local base = file:match '[^/\\]+$'
   notify('DansAsm: compiling ' .. (fn.name or base) .. '...')
-  vim.system(cmd.argv, { cwd = cmd.cwd, text = true }, vim.schedule_wrap(function(res)
+  local ok, err = pcall(vim.system, cmd.argv, { cwd = cmd.cwd, text = true }, vim.schedule_wrap(function(res)
     local asm = res.stdout or ''
     if asm == '' then
       return notify('DansAsm: compile failed:\n' .. (res.stderr ~= '' and res.stderr or ('exit ' .. tostring(res.code))), vim.log.levels.ERROR)
@@ -418,6 +449,9 @@ function M.show()
     end
     open_split(sbuf, parsed, block, fn)
   end))
+  if not ok then
+    notify('DansAsm: cannot run "' .. cmd.argv[1] .. '": ' .. tostring(err) .. '\nset vim.g.dans_asm_compiler to a compiler on your PATH', vim.log.levels.ERROR)
+  end
 end
 
 function M.setup()

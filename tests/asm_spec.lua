@@ -29,7 +29,7 @@ local function read(p)
 end
 
 -- t.cpp: add(int,int) spans source lines 1-5 (body 3-4), mul(int,int) is line 7.
-for _, fx in ipairs { 'linux', 'macos' } do
+for _, fx in ipairs { 'linux', 'macos', 'windows' } do
   local parsed = A.parse_asm(read('E:/repos/neovim-cfg/tests/asm/' .. fx .. '.s'), 't.cpp')
   ok(fx .. ': two function blocks', #parsed.blocks == 2)
 
