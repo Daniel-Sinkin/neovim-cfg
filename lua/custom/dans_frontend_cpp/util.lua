@@ -134,17 +134,33 @@ end
 -- every WinScrolled, so a mouse-scroll burst reran the whole stack per notch.
 -- Instead the umbrella fires this user event once, DECORATE_DEBOUNCE_MS after
 -- scrolling stops; decoration modules listen to it (via on_decorate) rather than
--- WinScrolled. Edits and cursor moves stay immediate.
+-- WinScrolled. Edits stay immediate; cursor moves are immediate too, EXCEPT the
+-- per-notch CursorMoved a scroll fires when it drags the cursor at the scrolloff
+-- edge -- those are skipped (see is_scrolling) so scroll speed doesn't depend on
+-- where the cursor sits, with the settled event doing the one repaint.
 M.VIEWPORT_SETTLED = 'DansViewportSettled'
 local DECORATE_DEBOUNCE_MS = 100
+local last_scroll_ns = 0
+
+-- True for DECORATE_DEBOUNCE_MS after the last scroll. The window equals the
+-- debounce, so the settled repaint lands exactly as it closes: a real cursor move
+-- within it is still painted by that settled event, and one after it refreshes
+-- immediately. hrtime is monotonic ns.
+function M.is_scrolling()
+  return ((vim.uv or vim.loop).hrtime() - last_scroll_ns) < DECORATE_DEBOUNCE_MS * 1000000
+end
 
 -- Register decoration autocmds for `cb` (called with a bufnr): `events` fire it
 -- immediately; the debounced VIEWPORT_SETTLED event drives the scroll repaint.
 -- Do NOT pass WinScrolled in `events` -- scrolling goes through the settled event.
+-- Scroll-dragged CursorMoved is dropped (the settled event covers it).
 function M.on_decorate(group, events, cb)
   vim.api.nvim_create_autocmd(events, {
     group = group,
     callback = function(ev)
+      if (ev.event == 'CursorMoved' or ev.event == 'CursorMovedI') and M.is_scrolling() then
+        return
+      end
       cb(ev.buf)
     end,
   })
@@ -165,6 +181,7 @@ function M.setup_viewport_debounce()
   vim.api.nvim_create_autocmd('WinScrolled', {
     group = group,
     callback = function()
+      last_scroll_ns = (vim.uv or vim.loop).hrtime()
       if not scroll_timer then
         scroll_timer = (vim.uv or vim.loop).new_timer()
       end

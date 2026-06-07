@@ -584,7 +584,12 @@ function M.setup()
   vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'TextChanged', 'TextChangedI', 'BufEnter' }, {
     group = group,
     callback = function(ev)
-      schedule_update(ev.buf)
+      -- Julia only. Without this guard the scheduler (timer stop/start churn) ran
+      -- on every cursor move / scroll notch in *every* buffer (~8% of a C++ scroll
+      -- in the profiler) before update() bailed on the non-julia filetype.
+      if vim.bo[ev.buf].filetype == 'julia' then
+        schedule_update(ev.buf)
+      end
     end,
   })
 

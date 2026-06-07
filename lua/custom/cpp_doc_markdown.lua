@@ -412,6 +412,10 @@ function M.set_enabled(bufnr, on)
   refresh(bufnr)
 end
 
+function M.is_enabled(bufnr)
+  return is_on(bufnr)
+end
+
 function M.setup()
   set_hl()
   local group = vim.api.nvim_create_augroup('ds_cpp_doc_md', { clear = true })
@@ -443,6 +447,11 @@ function M.setup()
     group = group,
     pattern = '*.hpp',
     callback = function(ev)
+      -- a scroll dragging the cursor at the edge fires CursorMoved per notch; the
+      -- settled event repaints, so skip those here to keep scrolling smooth.
+      if vu.is_scrolling() then
+        return
+      end
       local r = vim.api.nvim_win_get_cursor(0)[1]
       if last_row[ev.buf] == r then
         return
