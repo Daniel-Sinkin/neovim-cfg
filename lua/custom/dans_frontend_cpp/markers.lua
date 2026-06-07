@@ -32,6 +32,132 @@ local function set_hl()
   require('custom.dans_frontend_cpp.highlights').apply()
 end
 
+-- Prefix conceals are extmarks (this namespace), not matchadds, so they can be
+-- treesitter-gated to skip string / char / comment literals -- a window matchadd
+-- is syntax-blind and would strip the prefix inside e.g. the "vkCreateInstance"
+-- passed to vkGetInstanceProcAddr. The color matchadds below stay matchadds:
+-- coloring inside a literal shifts nothing, only concealing hides text.
+local ns = vim.api.nvim_create_namespace 'ds_cpp_markers_conceal'
+
+local SKIP_NODES = {
+  string_literal = true,
+  raw_string_literal = true,
+  char_literal = true,
+  comment = true,
+  system_lib_string = true,
+  string_content = true,
+  escape_sequence = true,
+}
+local function in_literal(bufnr, row, col)
+  local ok, node = pcall(vim.treesitter.get_node, { bufnr = bufnr, pos = { row, col } })
+  if not ok or not node then
+    return false
+  end
+  while node do
+    if SKIP_NODES[node:type()] then
+      return true
+    end
+    node = node:parent()
+  end
+  return false
+end
+
+-- Prefix conceals (vim regex). `\ze` ends the match before the kept char so only
+-- the prefix is hidden; `\<` keeps `_` a word char (PFN_vkCreateX keeps its vk).
+-- No `code_only` wrapper -- in_literal (treesitter) does the comment/string skip,
+-- which also covers block comments and char literals the `//` guard missed.
+--   inline / dans_ noise; glfw/GLFW/GLFW_ (function/type/macro); the Vulkan
+--   Vk/VK_/vk plus the longer DebugUtils sub-prefix. std::/dans:: are cpp-only.
+local PREFIX_PATTERNS = {
+  [==[\<inline\>\s*]==],
+  [==[\<dans_]==],
+  [==[\<glfw\ze[A-Z]]==],
+  [==[\<GLFW\ze[a-z]]==],
+  [==[\<GLFW_\ze[A-Z0-9]]==],
+  [==[\<VkDebugUtils\ze[A-Z]]==],
+  [==[\<VK_DEBUG_UTILS_\ze[A-Z0-9]]==],
+  [==[\<Vk\ze[A-Z]]==],
+  [==[\<VK_\ze[A-Z0-9]]==],
+  [==[\<vk\ze[A-Z]]==],
+}
+local CPP_PATTERNS = {
+  [==[\<std::ranges::views::]==],
+  [==[\<std::ranges::]==],
+  [==[\<std::views::]==],
+  [==[\<std::]==],
+  [==[\<dans::]==],
+}
+local rx_cache = {}
+local function rx(pat)
+  local r = rx_cache[pat]
+  if not r then
+    r = vim.regex(pat)
+    rx_cache[pat] = r
+  end
+  return r
+end
+
+-- Conceal every match of `pat` on `line` (row0) whose start is a real `\<`
+-- boundary and not inside a literal. vim.regex has no start offset, so we scan a
+-- shrinking suffix; a suffix-start match that is actually mid-identifier in the
+-- full line is rejected by the prev-char check, so `\<` can't be faked.
+local function conceal_pattern(bufnr, row0, line, pat)
+  local regex = rx(pat)
+  local from, n = 0, #line
+  while from <= n do
+    local ms, me = regex:match_str(line:sub(from + 1))
+    if not ms then
+      break
+    end
+    local s, e = from + ms, from + me
+    if e <= s then
+      break -- zero-width match, avoid spinning
+    end
+    local prev = s > 0 and line:sub(s, s) or ''
+    if (prev == '' or not prev:match '[%w_]') and not in_literal(bufnr, row0, s) then
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, s, { end_col = e, conceal = '' })
+    end
+    from = e
+  end
+end
+
+-- (Re)apply the prefix conceals over the visible range. The cursor line shows raw
+-- via concealcursor='' (set in apply), so we conceal every visible line and need
+-- no CursorMoved refresh -- only edit / scroll / buffer-enter.
+local function conceal_refresh(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  local ft = vim.bo[bufnr].filetype
+  if not vu.is_cpp(ft) then
+    return
+  end
+  vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+  if not vu.module_enabled(bufnr, 'markers') then
+    return
+  end
+  local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
+  if ok and parser then
+    pcall(function()
+      parser:parse()
+    end)
+  end
+  local cpp = ft == 'cpp' or ft == 'cuda'
+  local s0, e0 = vu.visible_range(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
+  for idx, line in ipairs(lines) do
+    local row0 = s0 + idx - 1
+    for _, pat in ipairs(PREFIX_PATTERNS) do
+      conceal_pattern(bufnr, row0, line, pat)
+    end
+    if cpp then
+      for _, pat in ipairs(CPP_PATTERNS) do
+        conceal_pattern(bufnr, row0, line, pat)
+      end
+    end
+  end
+end
+
 -- Restrict a matchadd pattern to CODE: never match once a `//` line comment has
 -- started. This keeps the whole C++ frontend (conceals + coloring) out of comment
 -- prose, so `// doc blocks` are a separate document that cpp_doc_markdown renders
@@ -47,67 +173,25 @@ local function apply(ev)
   -- event; defining them on FileType guarantees they exist for this buffer.
   set_hl()
 
-  -- Conceal the visual noise that hides off the cursor line (moved here from
-  -- config/autocmds.lua so the frontend owns it): a leading `inline`, the
-  -- `dans_` identifier prefix, and -- C++ only -- the std::/dans:: scope
-  -- qualifiers. concealcursor is empty so the cursor line shows the real text.
+  -- concealcursor is empty so the cursor line shows the real text. The prefix
+  -- conceals themselves are extmarks applied by conceal_refresh (literal-aware);
+  -- only the colors below are window matchadds.
   vim.opt_local.conceallevel = 2
   vim.opt_local.concealcursor = ''
-  local conceals = {
-    { code_only [[\<inline\>\s*]], 30 },
-    { code_only [[\<dans_]], 10 },
-    -- GLFW/glfw prefix: keep the DansSDL teal on the rest, hide just the prefix.
-    -- `\ze` ends the match before the kept char, so only the prefix is concealed:
-    -- `glfw` before an uppercase is a function (glfwPollEvents -> PollEvents),
-    -- `GLFW` before a lowercase is a type (GLFWwindow -> window), `GLFW_` before
-    -- [A-Z0-9] is a macro (GLFW_TRUE -> TRUE, inner _ kept). None match a
-    -- `glfw_foo` (your own, lowercase + _), so those stay verbatim.
-    { code_only [==[\<glfw\ze[A-Z]]==], 30 },
-    { code_only [==[\<GLFW\ze[a-z]]==], 30 },
-    { code_only [==[\<GLFW_\ze[A-Z0-9]]==], 30 },
-    -- Vulkan prefix: same idea, the yellow coloring carries the library identity.
-    -- `Vk` before an uppercase is a type (VkResult -> Result), `VK_` before
-    -- [A-Z0-9] a macro (VK_SUCCESS -> SUCCESS), `vk` before an uppercase a function
-    -- (vkCreateInstance -> CreateInstance), exactly like glfw. The long DebugUtils
-    -- sub-prefix collapses too (VkDebugUtilsMessengerEXT -> MessengerEXT,
-    -- VK_DEBUG_UTILS_MESSAGE_... -> MESSAGE_...) at a higher priority so it wins
-    -- over the generic Vk/VK_ conceal on the overlapping start. `\<` keeps `_` a
-    -- word char, so an embedded PFN_vkCreateX keeps its vk.
-    { code_only [==[\<VkDebugUtils\ze[A-Z]]==], 31 },
-    { code_only [==[\<VK_DEBUG_UTILS_\ze[A-Z0-9]]==], 31 },
-    { code_only [==[\<Vk\ze[A-Z]]==], 30 },
-    { code_only [==[\<VK_\ze[A-Z0-9]]==], 30 },
-    { code_only [==[\<vk\ze[A-Z]]==], 30 },
-  }
-  if ev and (ev.match == 'cpp' or ev.match == 'cuda') then
-    -- ranges/views are unusable at `ranges::transform` / `views::filter` length;
-    -- hide the whole qualifier (these cover more than `\<std::`, so the union
-    -- hides `std::ranges::views::` down to the bare algorithm/view name).
-    conceals[#conceals + 1] = { code_only [[\<std::ranges::views::]], 31 }
-    conceals[#conceals + 1] = { code_only [[\<std::ranges::]], 31 }
-    conceals[#conceals + 1] = { code_only [[\<std::views::]], 31 }
-    conceals[#conceals + 1] = { code_only [[\<std::]], 30 }
-    conceals[#conceals + 1] = { code_only [[\<dans::]], 30 }
-  end
+  local bufnr = (ev and ev.buf) or vim.api.nvim_get_current_buf()
 
-  -- Drop our own previous matches (color + conceal) so repeated FileType events
-  -- don't stack.
-  local ours_conceal = {}
-  for _, c in ipairs(conceals) do
-    ours_conceal[c[1]] = true
-  end
+  -- Drop our own previous color matches so repeated FileType events don't stack.
   for _, m in ipairs(vim.fn.getmatches()) do
-    if MATCH_GROUPS[m.group] or (m.group == 'Conceal' and ours_conceal[m.pattern]) then
+    if MATCH_GROUPS[m.group] then
       pcall(vim.fn.matchdelete, m.id)
     end
   end
 
-  if not vu.module_enabled((ev and ev.buf) or vim.api.nvim_get_current_buf(), 'markers') then
-    return -- disabled: matches cleared above, conceallevel left for the overlay
-  end
+  -- Prefix conceals (extmarks, skip string/comment literals).
+  conceal_refresh(bufnr)
 
-  for _, c in ipairs(conceals) do
-    vim.fn.matchadd('Conceal', c[1], c[2], -1, { conceal = '' })
+  if not vu.module_enabled(bufnr, 'markers') then
+    return -- disabled: colors cleared above, conceals cleared in conceal_refresh
   end
 
   -- Window-local matches, priority above the flattened monochrome syntax.
@@ -160,10 +244,12 @@ local function apply(ev)
   -- 26 beats the macro/Vk/SDL coloring inside the condition). static_assert also
   -- still renders as `$as` (aliases); this just grays the rest of its line.
   vim.fn.matchadd('DansAssert', code_only [[\<\%(static_\)\?assert\>.\{-};]], 26)
-  -- String literals -> green, priority 35 (above the color matches AND the
-  -- conceals at 30) so nothing else colors or conceals inside a string. Quoted
-  -- pattern (a "..." literal with escapes); not [[...]] -- the [^"\] class
-  -- would trip the long-string parser. Single-line strings only.
+  -- String literals -> green, priority 35 (above the other color matches) so a
+  -- Vk*/macro token inside a string is not recolored. Concealing inside strings is
+  -- separately prevented: the prefix conceals are treesitter-gated extmarks, not
+  -- matchadds, so priority isn't what guards them. Quoted pattern (a "..." literal
+  -- with escapes); not [[...]] -- the [^"\] class would trip the long-string
+  -- parser. Single-line strings only.
   vim.fn.matchadd('DansString', code_only '"\\%(\\\\.\\|[^"\\\\]\\)*"', 35)
   -- The string TYPE reads like a string: std::string and const char* get the
   -- same "..."-literal green so a function returning a string stands out. \> keeps
@@ -197,6 +283,10 @@ function M.setup()
       apply(ev)
     end,
   })
+  -- The prefix conceals are visible-range extmarks, so re-scan on edit, scroll
+  -- (the debounced settled event), and buffer enter. No CursorMoved: the cursor
+  -- line is revealed by concealcursor='', not by skipping it in the scan.
+  vu.on_decorate(group, { 'BufEnter', 'TextChanged', 'TextChangedI' }, conceal_refresh)
   -- Re-assert colors after a colorscheme change (tokyonight day/night swap).
   vim.api.nvim_create_autocmd('ColorScheme', { group = group, callback = set_hl })
 end
