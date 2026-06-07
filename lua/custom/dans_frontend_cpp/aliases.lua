@@ -116,14 +116,21 @@ local function split_args(s)
   return args
 end
 
--- `static_assert<A, B>` -> `A === B` (a compile-time type-equality assertion):
--- conceal `static_assert<`, turn the top-level `,` into ` === `, and conceal the
--- closing `>`. A `std::`/`dans::` qualifier is concealed separately by markers, so
--- it isn't handled here. Only the exact 2-argument form is rewritten.
-local function static_assert_eq(bufnr, row0, line)
+-- A binary `keyword<A, B>` rendered infix as `A <op> B`: conceal `keyword<`, turn
+-- the top-level `,` into the op, conceal the closing `>`. A leading std::/dans:: is
+-- concealed separately by markers. Only the exact 2-argument form is rewritten.
+--   static_assert<S, T>  -> S === T   (compile-time type-equality assertion)
+--   same_as<A, B>        -> A === B   (the std concept -- same idea, type identity)
+--   convertible_to<V, T> -> V -> T    (V is convertible to T)
+local BINARY_RELATIONS = {
+  { kw = 'static_assert', op = ' === ' },
+  { kw = 'same_as', op = ' === ' },
+  { kw = 'convertible_to', op = ' -> ' },
+}
+local function binary_relation(bufnr, row0, line, kw, op)
   local from = 1
   while true do
-    local ms, me = line:find('static_assert%s*<', from)
+    local ms, me = line:find(kw .. '%s*<', from)
     if not ms then
       return
     end
@@ -155,13 +162,19 @@ local function static_assert_eq(bufnr, row0, line)
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, a_end, {
             end_col = b_start - 1,
             conceal = '',
-            virt_text = { { ' === ', 'Comment' } },
+            virt_text = { { op, 'Comment' } },
             virt_text_pos = 'inline',
           })
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, b_end, { end_col = close, conceal = '' })
         end
       end
     end
+  end
+end
+
+local function binary_relations(bufnr, row0, line)
+  for _, rel in ipairs(BINARY_RELATIONS) do
+    binary_relation(bufnr, row0, line, rel.kw, rel.op)
   end
 end
 
@@ -276,9 +289,10 @@ local function refresh(bufnr)
   for idx, line in ipairs(lines) do
     local row0 = s0 + idx - 1
     if not skip.skip(row0, line) then
-      -- static_assert<A, B> -> A === B (before the generic loop, which would
-      -- otherwise turn the `static_assert` into `$sa`).
-      static_assert_eq(bufnr, row0, line)
+      -- binary relations: static_assert<A,B>/same_as<A,B> -> A === B,
+      -- convertible_to<V,T> -> V -> T. Before the generic loop, which would
+      -- otherwise turn `static_assert` into `$sa`.
+      binary_relations(bufnr, row0, line)
       for _, alias in ipairs(ALIASES) do
         local keyword, replacement, hl = alias[1], alias[2], alias[3] or 'Comment'
         local start_pos = 1

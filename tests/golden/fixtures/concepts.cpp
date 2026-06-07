@@ -1,0 +1,11 @@
+namespace dans::test
+{
+template <typename V>
+concept StringLike = std::convertible_to<V, std::string_view>;
+template <typename R>
+concept StringRange = input_range<R> and StringLike<ValueOf<R>>;
+template <typename T>
+concept IsInt = std::same_as<T, int>;
+
+static_assert(std::same_as<ValueOf<R>, char>);
+}  // namespace dans::test

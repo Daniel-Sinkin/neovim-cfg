@@ -1,0 +1,11 @@
+namespace test
+{
+template <typename V>
+concept StringLike = V -> string_view;
+template <typename R>
+concept StringRange = input_range<R> and StringLike<ValueOf<R>>;
+template <typename T>
+concept IsInt = T === int;
+
+$sa(ValueOf<R> === char);
+}  // namespace dans::test
