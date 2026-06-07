@@ -202,10 +202,29 @@ function M.lambda_enabled()
 end
 
 -- Whether a line is one the overlay rewrites. Lets other view modules
--- (aliases) defer so they don't double-render on top of the full-line
--- overlay (which orphans their inline virt_text to the end of the line).
+-- (aliases / pointer / designated / ...) defer so they don't double-render on top
+-- of the full-line overlay (which orphans their inline virt_text to the end).
+--
+-- This is the hottest call in the stack: every decoration module's skipper asks it
+-- for every visible line, and the answer needs the full (treesitter-heavy)
+-- render_line pipeline. Cache it per buffer per changedtick -- coverage depends
+-- only on the line's content (align / type-hint don't change whether a line is a
+-- decl), so a cursor move (no edit, same tick) is all cache hits, and within one
+-- refresh the N skippers compute each row's render_line once, not N times.
+local coverage = {} -- bufnr -> { tick, set = { [row0] = bool } }
 function M.covers(line, bufnr, row0)
-  return (R.render_line(line, nil, nil, bufnr, row0)) ~= nil
+  local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+  local c = coverage[bufnr]
+  if not c or c.tick ~= tick then
+    c = { tick = tick, set = {} }
+    coverage[bufnr] = c
+  end
+  local v = c.set[row0]
+  if v == nil then
+    v = (R.render_line(line, nil, nil, bufnr, row0)) ~= nil
+    c.set[row0] = v
+  end
+  return v
 end
 
 function M.setup()
