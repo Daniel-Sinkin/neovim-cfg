@@ -70,6 +70,7 @@ end
 --   Vk/VK_/vk plus the longer DebugUtils sub-prefix. std::/dans:: are cpp-only.
 local PREFIX_PATTERNS = {
   [==[\<inline\>\s*]==],
+  [==[\<static\>\s*]==], -- \> stops it matching static_assert (the `_` is a word char)
   [==[\<dans_]==],
   [==[\<glfw\ze[A-Z]]==],
   [==[\<GLFW\ze[a-z]]==],
@@ -143,16 +144,19 @@ local function conceal_refresh(bufnr)
     end)
   end
   local cpp = ft == 'cpp' or ft == 'cuda'
+  local sa = vu.static_assert_lines(bufnr) -- leave static_assert lines verbatim
   local s0, e0 = vu.visible_range(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
   for idx, line in ipairs(lines) do
     local row0 = s0 + idx - 1
-    for _, pat in ipairs(PREFIX_PATTERNS) do
-      conceal_pattern(bufnr, row0, line, pat)
-    end
-    if cpp then
-      for _, pat in ipairs(CPP_PATTERNS) do
+    if not sa[row0] then
+      for _, pat in ipairs(PREFIX_PATTERNS) do
         conceal_pattern(bufnr, row0, line, pat)
+      end
+      if cpp then
+        for _, pat in ipairs(CPP_PATTERNS) do
+          conceal_pattern(bufnr, row0, line, pat)
+        end
       end
     end
   end
@@ -240,10 +244,12 @@ local function apply(ev)
   -- source is left moved-from). `\zs` colors only the move/forward word; a member
   -- `.move()` (e.g. a widget) isn't std::-qualified so it's untouched.
   vim.fn.matchadd('DansMarkerMut', code_only [[\<std::\zs\%(move\|forward\)\>]], 25)
-  -- assert / static_assert -> gray the whole `...assert(...);` statement (priority
-  -- 26 beats the macro/Vk/SDL coloring inside the condition). static_assert also
-  -- still renders as `$as` (aliases); this just grays the rest of its line.
-  vim.fn.matchadd('DansAssert', code_only [[\<\%(static_\)\?assert\>.\{-};]], 26)
+  -- runtime assert(...) -> gray the whole statement (priority 26 beats the
+  -- macro/Vk/SDL coloring in the condition). static_assert is deliberately NOT
+  -- grayed: it's left fully verbatim (util.static_assert_lines skips every
+  -- conceal/sugar there) so its tokens keep their real color and full spelling --
+  -- graying it was what made a `VkResult` inside read as an unidentifiable `Result`.
+  vim.fn.matchadd('DansAssert', code_only [[\<assert\>.\{-};]], 26)
   -- String literals -> green, priority 35 (above the other color matches) so a
   -- Vk*/macro token inside a string is not recolored. Concealing inside strings is
   -- separately prevented: the prefix conceals are treesitter-gated extmarks, not

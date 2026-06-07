@@ -76,6 +76,33 @@ function M.clang_format_off(bufnr)
   return set
 end
 
+-- 0-based rows covered by a `static_assert(...)` declaration. Those are dedicated
+-- compile-time checks -- code you skim rarely and want to read with full fidelity
+-- when you do -- so the whole frontend leaves them verbatim (no conceals, sugar,
+-- prefix-stripping). Cached per changedtick. Treesitter: `static_assert_declaration`.
+local sa_cache = {}
+function M.static_assert_lines(bufnr)
+  local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+  local c = sa_cache[bufnr]
+  if c and c.tick == tick then
+    return c.set
+  end
+  local set = {}
+  pcall(function()
+    local parser = vim.treesitter.get_parser(bufnr)
+    local tree = parser:parse()[1]
+    local q = vim.treesitter.query.parse(parser:lang(), '(static_assert_declaration) @sa')
+    for _, node in q:iter_captures(tree:root(), bufnr, 0, -1) do
+      local sr, _, er = node:range()
+      for r = sr, er do
+        set[r] = true
+      end
+    end
+  end)
+  sa_cache[bufnr] = { tick = tick, set = set }
+  return set
+end
+
 -- 0-based [start, end) line range to decorate: the on-screen window plus a
 -- margin, so a big file isn't re-scanned whole on every edit / scroll / cursor
 -- move. Off-screen rows are (re)decorated as they scroll in (WinScrolled). A
@@ -98,6 +125,7 @@ end
 function M.make_skipper(bufnr)
   local reveal = M.reveal_set(bufnr)
   local cfoff = M.clang_format_off(bufnr)
+  local sa = M.static_assert_lines(bufnr)
   local diag = M.diagnostic_lines(bufnr)
   local view_ok, view = pcall(require, 'custom.dans_frontend_cpp.view')
   local view_on = view_ok and view.is_enabled(bufnr)
@@ -111,7 +139,7 @@ function M.make_skipper(bufnr)
     return line ~= nil and view.covers(line, bufnr, row0)
   end
   local function any(row0, line)
-    return reveal[row0] or diag[row0] == true or cfoff[row0] or covered(row0, line)
+    return reveal[row0] or diag[row0] == true or cfoff[row0] or sa[row0] or covered(row0, line)
   end
   return { skip = any, skip_conceal = any }
 end

@@ -8,4 +8,5 @@ template <typename T>
 concept IsInt = std::same_as<T, int>;
 
 static_assert(std::same_as<ValueOf<R>, char>);
+static_assert(std::same_as<std::underlying_type_t<VkResult>, int>);
 }  // namespace dans::test

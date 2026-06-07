@@ -38,16 +38,16 @@ struct Color
     [[nodiscard]] constexpr auto a()    const noexcept -> f32        { return channels[3]; }
     // clang-format on
 
-    static const Color black;
-    static const Color white;
-    static const Color red;
-    static const Color green;
-    static const Color blue;
-    static const Color yellow;
-    static const Color cyan;
-    static const Color magenta;
-    static const Color orange;
-    static const Color gray;
+    const Color black;
+    const Color white;
+    const Color red;
+    const Color green;
+    const Color blue;
+    const Color yellow;
+    const Color cyan;
+    const Color magenta;
+    const Color orange;
+    const Color gray;
 };
 
 // clang-format off
@@ -88,8 +88,8 @@ struct ColorU8
     // clang-format on
 };
 
-$sa(sizeof(Color) == 4zu * sizeof(f32));
-$sa(sizeof(ColorU8) == 4zu * sizeof(u8));
+static_assert(sizeof(Color) == 4zu * sizeof(f32));
+static_assert(sizeof(ColorU8) == 4zu * sizeof(u8));
 
 $nd constexpr auto to_vec4(Color color) $ne -> Vec4
 {

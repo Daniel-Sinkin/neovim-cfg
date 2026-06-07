@@ -69,22 +69,20 @@ function M.split_markers(s)
     end
 
     if not matched then
-      -- static / thread_local are kept as a shown prefix: meaningful storage
-      -- duration worth seeing (thread_local especially is rare and notable).
-      after = rest:match '^static%s+(.*)$'
-      if after then
-        prefix, rest, matched = prefix .. 'static ', after, true
-      end
-    end
-    if not matched then
+      -- thread_local is kept as a shown prefix: rare and notable storage duration.
       after = rest:match '^thread_local%s+(.*)$'
       if after then
         prefix, rest, matched = prefix .. 'thread_local ', after, true
       end
     end
     if not matched then
-      -- inline / extern / constinit: pure noise, hidden.
-      after = rest:match '^inline%s+(.*)$' or rest:match '^extern%s+(.*)$' or rest:match '^constinit%s+(.*)$'
+      -- static / inline / extern / constinit: hidden. static carries linkage /
+      -- storage meaning but reads as noise in the view (every file-scope constant
+      -- and helper has it); drop it like inline.
+      after = rest:match '^static%s+(.*)$'
+        or rest:match '^inline%s+(.*)$'
+        or rest:match '^extern%s+(.*)$'
+        or rest:match '^constinit%s+(.*)$'
       if after then
         rest, matched = after, true
       end

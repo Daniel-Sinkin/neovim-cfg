@@ -65,7 +65,7 @@ run('local value float', 'fn', { 'f32 y{1.0f};' }, { 'y: mut f32 = 1.0f;' })
 run('local value empty-init', 'fn', { 'Vec2 p{};' }, { 'p: mut Vec2;' })
 run('local const', 'fn', { 'const int x{7};' }, { 'x: int = 7;' })
 run('local constexpr', 'fn', { 'constexpr int x{7};' }, { 'x: int : 7;' })
-run('local static constexpr', 'fn', { 'static constexpr usize n{4};' }, { 'static n: usize : 4;' })
+run('local static constexpr', 'fn', { 'static constexpr usize n{4};' }, { 'n: usize : 4;' })
 run('local inline constexpr', 'fn', { 'inline constexpr f32 k{2.0f};' }, { 'k: f32 : 2.0f;' })
 
 -- ===================== auto bindings =====================
@@ -137,7 +137,7 @@ run('member glfw unique_ptr deleter', 'struct', { 'std::unique_ptr<GLFWwindow, W
 run('member optional', 'struct', { 'std::optional<int> o{};' }, { 'o: int?;' })
 run('member vulkan null', 'struct', { 'VkBuffer buf{VK_NULL_HANDLE};' }, { 'buf: Buffer = {};' })
 run('member vk PFN kept', 'struct', { 'PFN_vkCreateInstance fn{};' }, { 'fn: PFN_vkCreateInstance;' })
-run('member static constexpr', 'struct', { 'static constexpr usize cap{16};' }, { 'static cap: usize : 16;' })
+run('member static constexpr', 'struct', { 'static constexpr usize cap{16};' }, { 'cap: usize : 16;' })
 
 -- ===================== alignment block =====================
 run('aligned members', 'struct', {
@@ -192,7 +192,7 @@ run('if let value-cmp drop', 'fn', { 'if (const auto res = find(x); res == 0)' }
 run('if let independent cond kept', 'fn', { 'if (auto res = f(); ready)' }, { 'if let res := f(); ready' })
 run('if let compound && kept', 'fn', { 'if (auto res = f(); res.has_value() && ready)' }, { 'if let res := f(); res.has_value() && ready' })
 run('if let compound and-keyword kept', 'fn', { 'if (auto res = m.find(k); res != m.end() and res->ok)' }, { 'if let res := m.find(k); res != m.end() and res->ok' })
-run('static thread_local', 'fn', { 'static thread_local std::mt19937_64 engine{std::random_device{}()};' }, { 'static thread_local engine: mut mt19937_64 = random_device{}();' })
+run('static thread_local', 'fn', { 'static thread_local std::mt19937_64 engine{std::random_device{}()};' }, { 'thread_local engine: mut mt19937_64 = random_device{}();' })
 run('if plain (raw)', 'fn', { 'if (ready) {' }, { false })
 run('std move value', 'fn', { 'auto y = std::move(x);' }, { 'mut y := move(x);' })
 run('std forward value', 'fn', { 'auto y = std::forward<T>(x);' }, { 'mut y := forward<T>(x);' })

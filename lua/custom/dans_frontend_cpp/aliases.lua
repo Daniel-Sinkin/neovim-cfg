@@ -116,16 +116,18 @@ local function split_args(s)
   return args
 end
 
--- A binary `keyword<A, B>` rendered infix as `A <op> B`: conceal `keyword<`, turn
--- the top-level `,` into the op, conceal the closing `>`. A leading std::/dans:: is
--- concealed separately by markers. Only the exact 2-argument form is rewritten.
---   static_assert<S, T>  -> S === T   (compile-time type-equality assertion)
---   same_as<A, B>        -> A === B   (the std concept -- same idea, type identity)
---   convertible_to<V, T> -> V -> T    (V is convertible to T)
+-- A binary concept `keyword<A, B>` rendered infix as `A <op> B`: conceal
+-- `keyword<`, turn the top-level `,` into the op, conceal the closing `>`. A
+-- leading std::/dans:: is concealed separately by markers. Only the exact
+-- 2-argument form is rewritten. `~` reads as "the concept relation" (it's
+-- otherwise only destructors / bitwise-not, so it's free for this).
+--   same_as<A, B>        -> A ~= B    (type identity)
+--   convertible_to<V, T> -> V ~> T    (V is convertible to T)
+-- static_assert is intentionally absent: those statements are left fully verbatim
+-- (util.static_assert_lines), so this never fires inside one.
 local BINARY_RELATIONS = {
-  { kw = 'static_assert', op = ' === ' },
-  { kw = 'same_as', op = ' === ' },
-  { kw = 'convertible_to', op = ' -> ' },
+  { kw = 'same_as', op = ' ~= ' },
+  { kw = 'convertible_to', op = ' ~> ' },
 }
 local function binary_relation(bufnr, row0, line, kw, op)
   local from = 1
