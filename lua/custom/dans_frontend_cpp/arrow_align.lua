@@ -222,6 +222,9 @@ end
 local function compute(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local cfoff = vu.clang_format_off(bufnr)
+  -- special_members collapses some `operator= ... -> X&` lines to $copya/$movea;
+  -- those are not arrows to align, so they break a block.
+  local ok_sm, sm = pcall(require, 'custom.dans_frontend_cpp.special_members')
   local n = #lines
   local result = {}
   local i = 1
@@ -230,8 +233,8 @@ local function compute(bufnr)
     local j = i
     while j <= n do
       local r, ap = rendered_arrow_col(lines[j], bufnr, j - 1)
-      if not r or cfoff[j - 1] then
-        break -- a clang-format-off line is left hand-aligned, never re-padded
+      if not r or cfoff[j - 1] or (ok_sm and sm.covers(bufnr, j - 1)) then
+        break -- clang-format-off and special-member lines are left alone
       end
       block[#block + 1] = { row0 = j - 1, rendered = r, col0 = ap - 1 }
       j = j + 1

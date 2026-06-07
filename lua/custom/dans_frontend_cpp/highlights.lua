@@ -53,6 +53,9 @@ function M.apply()
   -- Closed contract-block fold line -- gray on the normal background (drops
   -- tokyonight's banded Folded bg; the `+-- N lines:` foldtext reads as quiet).
   hi('Folded', { fg = '#6b7280' })
+  -- Special-member collapse ($copy / $move / $constr / ...): a keyword-ish color
+  -- so the generic name reads as structure, not a comment or a regular ident.
+  hi('DansSpecialMember', { link = 'Special' })
 end
 
 return M
