@@ -1,0 +1,213 @@
+-- Macro highlighting driven by the project's actual `#define`s instead of an
+-- "all-caps must be a macro" guess. On opening a directory it scans recursively
+-- (ripgrep, async) for `#define NAME` and colors exactly those names; a header
+-- save merges that file's new defines. With no scan available (rg missing, empty,
+-- or a scratch file) it falls back to the old all-caps heuristic so something
+-- still reads as a macro.
+--
+-- Coloring is membership-by-lookup over the on-screen range (reusing the frontend
+-- decoration infra: visible range, the debounced settled event, is_scrolling), so
+-- the set can be any size without a giant matchadd alternation. Library-prefixed
+-- tokens (VK_/SDL_/stb/...) are skipped -- markers.lua already colors those.
+--
+--   :DansMacros        toggle macro coloring for the buffer
+--   :DansMacrosRescan  re-scan the project now
+
+local M = {}
+
+local vu = require 'custom.dans_frontend_cpp.util'
+local ns = vim.api.nvim_create_namespace 'ds_macros'
+
+local CPP_FT = { c = true, cpp = true, cuda = true }
+local DEFINE_GLOBS = '*.{h,hpp,hxx,hh,c,cc,cpp,cxx,cu,cuh,inl,ipp,ixx}'
+
+-- nil until a scan finishes; then a set of macro name -> true.
+M.names = nil
+local enabled = {} -- bufnr -> bool; nil = default on
+
+local DENY = { FILE = true, SEEK_SET = true, SEEK_CUR = true, SEEK_END = true, EOF = true, NULL = true }
+
+-- Tokens markers.lua already colors as their own library -- leave them to it.
+local function is_library(t)
+  return t:match '^VK_' ~= nil
+    or t:match '^Vk' ~= nil
+    or t:match '^vk%u' ~= nil
+    or t:match '^SDL_' ~= nil
+    or t:match '^GLFW' ~= nil
+    or t:match '^glfw%u' ~= nil
+    or t:match '^stb' ~= nil
+    or t:match '^STB' ~= nil
+    or t:match '^LLDB_' ~= nil
+    or t:match '^SB%u' ~= nil
+    or t == 'StateType'
+end
+
+local function is_macro(tok)
+  if DENY[tok] or is_library(tok) then
+    return false
+  end
+  if M.names then
+    return M.names[tok] == true
+  end
+  -- no scan yet: fall back to the all-caps heuristic (>=2 chars).
+  return #tok >= 2 and tok:match '^[A-Z][A-Z0-9_]*$' ~= nil
+end
+
+local function is_on(bufnr)
+  return enabled[bufnr] ~= false
+end
+
+-- Color macro identifiers on one line, skipping `//` comments and "..." strings.
+local function color_line(bufnr, row0, line)
+  local i, n = 1, #line
+  local in_str = false
+  while i <= n do
+    local c = line:sub(i, i)
+    if in_str then
+      if c == '\\' then
+        i = i + 2
+      else
+        if c == '"' then
+          in_str = false
+        end
+        i = i + 1
+      end
+    elseif c == '"' then
+      in_str = true
+      i = i + 1
+    elseif c == '/' and line:sub(i + 1, i + 1) == '/' then
+      break
+    elseif c:match '[%a_]' then
+      local s = i
+      while i <= n and line:sub(i, i):match '[%w_]' do
+        i = i + 1
+      end
+      local tok = line:sub(s, i - 1)
+      if is_macro(tok) then
+        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, s - 1, { end_col = i - 1, hl_group = 'DansMacro', priority = 120 })
+      end
+    else
+      i = i + 1
+    end
+  end
+end
+
+local function refresh(bufnr)
+  if not (vim.api.nvim_buf_is_valid(bufnr) and CPP_FT[vim.bo[bufnr].filetype]) then
+    return
+  end
+  vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+  if not is_on(bufnr) then
+    return
+  end
+  local s0, e0 = vu.visible_range(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
+  for i, line in ipairs(lines) do
+    color_line(bufnr, s0 + i - 1, line)
+  end
+end
+
+M.refresh = refresh
+
+local function refresh_all()
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(b) then
+      refresh(b)
+    end
+  end
+end
+
+-- Merge `#define` names found in `lines` into the set (used by a header save, and
+-- to seed before the async scan returns).
+local function harvest(lines)
+  M.names = M.names or {}
+  for _, line in ipairs(lines) do
+    local name = line:match '^%s*#%s*define%s+([%a_][%w_]*)'
+    if name then
+      M.names[name] = true
+    end
+  end
+end
+
+local scanning = false
+local function scan()
+  if scanning or vim.fn.executable 'rg' ~= 1 then
+    return -- rg missing -> M.names stays nil -> all-caps fallback
+  end
+  scanning = true
+  local cmd = {
+    'rg',
+    '-N',
+    '-o',
+    '--no-filename',
+    '-r',
+    '$1',
+    '-g',
+    DEFINE_GLOBS,
+    [[^\s*#\s*define\s+([A-Za-z_]\w*)]],
+    vim.fn.getcwd(),
+  }
+  local ok = pcall(vim.system, cmd, { text = true }, function(res)
+    scanning = false
+    if not res or not res.stdout or res.stdout == '' then
+      return
+    end
+    local set = {}
+    for name in res.stdout:gmatch '[^\r\n]+' do
+      set[name] = true
+    end
+    vim.schedule(function()
+      M.names = set
+      refresh_all()
+    end)
+  end)
+  if not ok then
+    scanning = false
+  end
+end
+
+function M.is_enabled(bufnr)
+  return is_on(bufnr)
+end
+
+function M.set_enabled(bufnr, on)
+  enabled[bufnr] = on and nil or false
+  refresh(bufnr)
+end
+
+function M.setup()
+  vim.api.nvim_create_autocmd({ 'VimEnter', 'DirChanged' }, {
+    group = vim.api.nvim_create_augroup('ds_macros_scan', { clear = true }),
+    callback = scan,
+  })
+  scan() -- in case setup runs after VimEnter
+
+  local group = vim.api.nvim_create_augroup('ds_macros', { clear = true })
+  vim.api.nvim_create_autocmd('FileType', {
+    group = group,
+    pattern = { 'c', 'cpp', 'cuda' },
+    callback = function(ev)
+      refresh(ev.buf)
+    end,
+  })
+  -- a header save can introduce new macros: merge that file's defines, repaint.
+  vim.api.nvim_create_autocmd('BufWritePost', {
+    group = group,
+    pattern = { '*.h', '*.hpp', '*.hxx', '*.hh', '*.c', '*.cc', '*.cpp', '*.cxx', '*.cu', '*.cuh', '*.inl', '*.ipp', '*.ixx' },
+    callback = function(ev)
+      harvest(vim.api.nvim_buf_get_lines(ev.buf, 0, -1, false))
+      refresh_all()
+    end,
+  })
+  -- repaint on edits / cursor moves and the debounced scroll-settled event.
+  vu.on_decorate(group, { 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI' }, refresh)
+
+  vim.api.nvim_create_user_command('DansMacrosRescan', scan, { desc = 'Re-scan the project for #define macros' })
+  vim.api.nvim_create_user_command('DansMacros', function()
+    local b = vim.api.nvim_get_current_buf()
+    M.set_enabled(b, not is_on(b))
+    vim.notify('macro coloring ' .. (is_on(b) and 'on' or 'off'), vim.log.levels.INFO)
+  end, { desc = 'Toggle #define-driven macro coloring' })
+end
+
+return M

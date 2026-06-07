@@ -15,6 +15,7 @@ local M = {}
 
 local frontend = require 'custom.dans_frontend_cpp'
 local docmd = require 'custom.cpp_doc_markdown'
+local macros = require 'custom.dans_macros'
 local view = require 'custom.dans_frontend_cpp.view'
 local perf = require 'custom.dans_perf'
 
@@ -73,6 +74,14 @@ local function build_sections(tbuf, twin)
       docmd.set_enabled(tbuf, not on)
     end)
   end)
+  mods[#mods + 1] = checkbox('macros', function()
+    return macros.is_enabled(tbuf)
+  end, function()
+    local on = macros.is_enabled(tbuf)
+    in_target(function()
+      macros.set_enabled(tbuf, not on)
+    end)
+  end)
 
   local all_on = function()
     for _, it in ipairs(mods) do
@@ -89,6 +98,7 @@ local function build_sections(tbuf, twin)
         frontend.module_set(name, tbuf, target)
       end
       docmd.set_enabled(tbuf, target)
+      macros.set_enabled(tbuf, target)
     end)
   end)
   all.full = true
