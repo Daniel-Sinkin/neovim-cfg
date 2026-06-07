@@ -466,7 +466,16 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
           typ, nm = core:match '^(.-[%w_>][&*]+)%s*([%w_]+)$'
           init = ''
           if not (typ and nm and had_semi and P.looks_like_type(typ)) then
-            return nil
+            -- bare value decl with no initializer: only rewritten for array types
+            -- (`std::array<T, N> x;` -> `x: [N]T;`), where the Odin form is wanted.
+            -- Other plain `Type name;` decls stay raw so two-word statements that
+            -- aren't declarations aren't grabbed.
+            local vtyp, vnm = core:match '^(.-)%s+([%w_]+)$'
+            if vtyp and vnm and had_semi and P.looks_like_type(vtyp) and P.strip_type(vtyp):match '^%[' then
+              typ, nm = vtyp, vnm
+            else
+              return nil
+            end
           end
         end
       end
