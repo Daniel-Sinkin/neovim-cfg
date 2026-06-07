@@ -76,6 +76,7 @@ run('const auto& ref', 'fn', { 'const auto& r = x;' }, { 'r& := x;' })
 run('auto* ptr', 'fn', { 'auto* p = &x;' }, { 'mut p^ := &x;' })
 run('const auto* ptr', 'fn', { 'const auto* s = get();' }, { 's^ := get();' })
 run('const auto* glfw', 'fn', { 'const auto* p = glfwGetVersionString();' }, { 'p^ := GetVersionString();' })
+run('vk function value', 'fn', { 'const auto r = vkCreateInstance(&info);' }, { 'r := CreateInstance(&info);' })
 run('auto&& fwd (raw)', 'fn', { 'auto&& z = f();' }, { false })
 
 -- ===================== pointers / references =====================
@@ -135,6 +136,7 @@ run('member glfw type (overlay strips prefix)', 'struct', { 'GLFWwindow win{};' 
 run('member glfw unique_ptr deleter', 'struct', { 'std::unique_ptr<GLFWwindow, WindowDeleter> w{};' }, { 'w: window^, WindowDeleter~;' })
 run('member optional', 'struct', { 'std::optional<int> o{};' }, { 'o: int?;' })
 run('member vulkan null', 'struct', { 'VkBuffer buf{VK_NULL_HANDLE};' }, { 'buf: Buffer = {};' })
+run('member vk PFN kept', 'struct', { 'PFN_vkCreateInstance fn{};' }, { 'fn: PFN_vkCreateInstance;' })
 run('member static constexpr', 'struct', { 'static constexpr usize cap{16};' }, { 'static cap: usize : 16;' })
 
 -- ===================== alignment block =====================

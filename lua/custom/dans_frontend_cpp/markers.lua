@@ -67,15 +67,17 @@ local function apply(ev)
     { code_only [==[\<GLFW_\ze[A-Z0-9]]==], 30 },
     -- Vulkan prefix: same idea, the yellow coloring carries the library identity.
     -- `Vk` before an uppercase is a type (VkResult -> Result), `VK_` before
-    -- [A-Z0-9] a macro (VK_SUCCESS -> SUCCESS). The lowercase `vk` functions stay
-    -- verbatim (colored, not hidden), like glfw. The long DebugUtils sub-prefix
-    -- collapses too (VkDebugUtilsMessengerEXT -> MessengerEXT,
+    -- [A-Z0-9] a macro (VK_SUCCESS -> SUCCESS), `vk` before an uppercase a function
+    -- (vkCreateInstance -> CreateInstance), exactly like glfw. The long DebugUtils
+    -- sub-prefix collapses too (VkDebugUtilsMessengerEXT -> MessengerEXT,
     -- VK_DEBUG_UTILS_MESSAGE_... -> MESSAGE_...) at a higher priority so it wins
-    -- over the generic Vk/VK_ conceal on the overlapping start.
+    -- over the generic Vk/VK_ conceal on the overlapping start. `\<` keeps `_` a
+    -- word char, so an embedded PFN_vkCreateX keeps its vk.
     { code_only [==[\<VkDebugUtils\ze[A-Z]]==], 31 },
     { code_only [==[\<VK_DEBUG_UTILS_\ze[A-Z0-9]]==], 31 },
     { code_only [==[\<Vk\ze[A-Z]]==], 30 },
     { code_only [==[\<VK_\ze[A-Z0-9]]==], 30 },
+    { code_only [==[\<vk\ze[A-Z]]==], 30 },
   }
   if ev and (ev.match == 'cpp' or ev.match == 'cuda') then
     -- ranges/views are unusable at `ranges::transform` / `views::filter` length;

@@ -297,6 +297,11 @@ function M.strip_glfw(t)
   t = t:gsub('%f[%w]VkDebugUtils([A-Z])', '%1')
   t = t:gsub('%f[%w]VK_([A-Z0-9])', '%1')
   t = t:gsub('%f[%w]Vk([A-Z])', '%1')
+  -- lowercase vk functions (vkCreateInstance -> CreateInstance), like glfw. The
+  -- `[%w_]` frontier treats `_` as a word char (matching the raw-line `\<vk`
+  -- conceal), so an embedded `PFN_vkCreateX` keeps its vk rather than becoming
+  -- `PFN_CreateX`.
+  t = t:gsub('%f[%w_]vk([A-Z])', '%1')
   return t
 end
 
