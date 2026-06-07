@@ -81,6 +81,34 @@ end
 -- from real code rather than competing with it; a distinct block background (the
 -- float bg, which adapts day/night) sits behind it. The text groups carry that bg
 -- so it shows BEHIND the prose -- a fg-only group would let Normal's bg through
+-- The fenced-code background, and a cache of fence-token groups that carry a
+-- captured group's fg ON the code-block bg (so the bg dominates -- a raw treesitter
+-- group like @number can have its own bg that would otherwise punch a lighter hole
+-- in the block). Both (re)set in set_hl.
+local code_bg
+local cpp_tok = {}
+
+-- A fg-only-over-code_bg variant of a treesitter highlight group, for fenced code.
+local function cpp_token_group(name)
+  local cached = cpp_tok[name]
+  if cached then
+    return cached
+  end
+  local src = vim.api.nvim_get_hl(0, { name = name, link = false })
+  local derived = 'DansDocCpp_' .. name:gsub('%W', '_')
+  vim.api.nvim_set_hl(0, derived, {
+    fg = src.fg,
+    bg = code_bg, -- the block bg dominates; only the fg comes from the token
+    bold = src.bold,
+    italic = src.italic,
+    underline = src.underline,
+    undercurl = src.undercurl,
+    sp = src.sp,
+  })
+  cpp_tok[name] = derived
+  return derived
+end
+
 -- and the block would only tint the margins. Re-asserted on ColorScheme.
 local function set_hl()
   local get = function(name)
@@ -102,8 +130,9 @@ local function set_hl()
   -- fenced ``` code: an even darker background (the doc-block bg darkened) so the
   -- code reads as a nested block. cpp fences get real treesitter highlighting on
   -- top, so this fg is only the neutral fallback for chars no capture colors.
-  local code_bg = darken(block_bg, 0.65) or (get '@markup.raw').bg or block_bg
+  code_bg = darken(block_bg, 0.65) or (get '@markup.raw').bg or block_bg
   vim.api.nvim_set_hl(0, 'DansDocCodeBlock', { fg = normal.fg, bg = code_bg })
+  cpp_tok = {} -- rebuild fence-token variants against the new code_bg
 end
 
 local function conceal(bufnr, row0, s, e, cchar)
@@ -304,7 +333,7 @@ local function highlight_cpp(bufnr, code_lines, cur)
         if cl and cl.row0 ~= cur then
           local s = (r == sr) and sc or 0
           local e = (r == er) and ec or #cl.content
-          hl(bufnr, cl.row0, cl.content_col + s, cl.content_col + e, '@' .. name, 160)
+          hl(bufnr, cl.row0, cl.content_col + s, cl.content_col + e, cpp_token_group('@' .. name), 160)
         end
       end
     end
@@ -356,6 +385,11 @@ local function refresh(bufnr)
         local indent, content = lines[k]:match '^(%s*)///%s?(.*)$'
         content = content or ''
         local full = lines[k]
+        -- a stray trailing CR (a \r\n file loaded as unix) renders as a `^M` cell
+        -- with SpecialKey bg, breaking the band -- conceal it. No-op under `dos`.
+        if full:sub(-1) == '\r' then
+          conceal(bufnr, row0, #full - 1, #full)
+        end
         local is_fence = content:match '^```' ~= nil
         local is_cursor = row0 == cur
 
