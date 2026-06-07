@@ -1,17 +1,18 @@
--- View-only markdown rendering inside `//` doc-comment blocks in .hpp headers.
--- Conceal + virt_text only; source bytes are never touched. The cursor line
--- shows the raw comment (concealcursor=''), like the other dans view modules.
+-- View-only markdown rendering of `///` doc-comment blocks in .hpp headers.
+-- Conceal + virt_text only; source bytes are never touched. `///` (not plain
+-- `//`) marks a doc block, so ordinary comments are left as comments. The block
+-- gets a distinct background so it reads as a block; the cursor line shows the
+-- raw `///` text (concealcursor=''), like the other dans view modules.
 --
--- Per `//` comment line inside a run of >= 2 consecutive `//` lines (a "block",
--- so one-off code comments are left alone):
---   // # Heading   ->  Heading        (bold/blue, the `#`s hidden)
---   // - item       ->  • item         (the `-` shown as a bullet)
---   // `code`       ->  code           (code-colored, backticks hidden)
--- and the `// ` leader is concealed so the prose reads as prose.
+-- Per `///` line in a run of `///` lines:
+--   /// # Heading   ->  Heading        (bold, the `#`s hidden)
+--   /// - item       ->  • item         (the `-` shown as a bullet)
+--   /// `code`       ->  code           (code-colored, backticks hidden)
+-- and the `/// ` leader is concealed so the prose reads as prose.
 --
--- v1 scope: heading / bullet / inline-code / leader. Not yet: **bold** / *italic*
--- inline, fenced ``` blocks, numbered lists, --- rules. Opt-in: :DansDocMarkdown.
--- Scoped to .hpp because that's where the big doc blocks live.
+-- Scope: heading / bullet / inline-code / leader / block background. Not yet:
+-- **bold** / *italic* inline, fenced ``` blocks, numbered lists. On by default
+-- for .hpp; toggle per buffer with :DansDocMarkdown.
 
 local M = {}
 
@@ -33,16 +34,28 @@ local function is_on(bufnr)
   return v
 end
 
--- Follow tokyonight's markdown, not the cpp monochrome. Links (not fixed colors)
--- so day/night switching carries through; re-asserted on ColorScheme.
+-- Follow tokyonight's markdown for the foreground, plus a distinct block
+-- background (the float bg, which adapts day/night). The text groups carry that
+-- same bg so it shows BEHIND the prose -- a fg-only group would let Normal's bg
+-- through and the block would only tint the margins. Re-asserted on ColorScheme.
 local function set_hl()
-  local link = function(g, t)
-    vim.api.nvim_set_hl(0, g, { link = t })
+  local get = function(name)
+    return vim.api.nvim_get_hl(0, { name = name, link = false })
   end
-  link('DansDocText', 'Normal') -- body prose (overrides the gray cpp Comment)
-  link('DansDocHeading', '@markup.heading') -- tokyonight heading
-  link('DansDocCode', '@markup.raw') -- tokyonight inline code
-  link('DansDocBullet', '@markup.list') -- tokyonight list marker
+  local normal = get 'Normal'
+  local block_bg = (get 'NormalFloat').bg or normal.bg
+  vim.api.nvim_set_hl(0, 'DansDocBlock', { bg = block_bg })
+  local on_block = function(g, src, extra)
+    local h = { fg = get(src).fg or normal.fg, bg = block_bg }
+    for k, v in pairs(extra or {}) do
+      h[k] = v
+    end
+    vim.api.nvim_set_hl(0, g, h)
+  end
+  on_block('DansDocText', 'Normal')
+  on_block('DansDocHeading', '@markup.heading', { bold = true })
+  on_block('DansDocCode', '@markup.raw')
+  on_block('DansDocBullet', '@markup.list')
 end
 
 local function conceal(bufnr, row0, s, e, cchar)
@@ -57,23 +70,21 @@ local function hl(bufnr, row0, s, e, group, priority)
   end
 end
 
--- Render one `// ...` line. row0/col are 0-based; content_col is the byte column
--- where the comment text starts (after `//` and one optional space).
+-- Render one `/// ...` line. row0 is 0-based; content_col is the byte column
+-- where the doc text starts (after `///` and one optional space).
 local function render_line(bufnr, row0, line)
-  local indent, content = line:match '^(%s*)//%s?(.*)$'
+  local indent, content = line:match '^(%s*)///%s?(.*)$'
   if not content or content == '' then
     return
   end
   local content_col = #line - #content -- byte col of the first content char
 
-  -- hide the `// ` leader
+  -- hide the `/// ` leader
   conceal(bufnr, row0, #indent, content_col)
-  -- repaint the whole comment body as tokyonight markdown text so the cpp
-  -- monochrome Comment gray never shows through; element spans below paint over
-  -- this at a higher priority.
+  -- repaint the whole body as doc text (block bg + tokyonight fg); element spans
+  -- below paint over this at a higher priority.
   hl(bufnr, row0, content_col, #line, 'DansDocText', 150)
 
-  -- byte column in the line for a 1-based index into `content`
   local function col_of(idx)
     return content_col + idx - 1
   end
@@ -88,7 +99,6 @@ local function render_line(bufnr, row0, line)
     local b_indent = content:match '^(%s*)[%-%*]%s+'
     if b_indent then
       local marker = col_of(#b_indent + 1) -- the `-` / `*`
-      -- show the marker as a bullet, colored like a tokyonight list marker
       pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, marker, {
         end_col = marker + 1,
         conceal = '•',
@@ -129,16 +139,18 @@ local function refresh(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, n, false)
   local i = 1
   while i <= n do
-    if lines[i]:match '^%s*//' then
+    if lines[i]:match '^%s*///' then
       local j = i
-      while j <= n and lines[j]:match '^%s*//' do
+      while j <= n and lines[j]:match '^%s*///' do
         j = j + 1
       end
-      if j - i >= 2 then -- a block of >= 2 consecutive full-line comments
-        for k = i, j - 1 do
-          if k - 1 ~= cur then
-            render_line(bufnr, k - 1, lines[k])
-          end
+      for k = i, j - 1 do
+        local row0 = k - 1
+        -- block background on every line of the run (cursor line included, so the
+        -- block stays continuous while its text is revealed raw).
+        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, 0, { line_hl_group = 'DansDocBlock' })
+        if row0 ~= cur then
+          render_line(bufnr, row0, lines[k])
         end
       end
       i = j
@@ -187,7 +199,7 @@ function M.setup()
     enabled[b] = not is_on(b) -- explicit true/false (nil default is on)
     refresh(b)
     vim.notify('doc markdown ' .. (enabled[b] and 'on' or 'off'), vim.log.levels.INFO)
-  end, { desc = 'Toggle markdown rendering of // doc blocks (.hpp)' })
+  end, { desc = 'Toggle markdown rendering of /// doc blocks (.hpp)' })
 end
 
 return M
