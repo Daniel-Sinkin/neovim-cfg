@@ -239,6 +239,9 @@ local function type_hl(t)
   if t:match '^SDL_' or t:match '^GLFW' then
     return 'DansSDL'
   end
+  if t:match '^stb' or t:match '^STB' then
+    return 'DansSTB'
+  end
   if t:match '^LLDB_' or t:match '^SB%u' or t == 'StateType' then
     return 'DansLLDB'
   end
@@ -801,6 +804,10 @@ end
 -- the user command and re-renders open buffers.
 function M.toggle_lambda()
   lambda_render = not lambda_render
+  return lambda_render
+end
+
+function M.lambda_enabled()
   return lambda_render
 end
 

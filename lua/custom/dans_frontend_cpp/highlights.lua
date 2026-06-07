@@ -24,8 +24,11 @@ function M.apply()
   -- Other all-caps macros / preprocessor constants -- purple. The hue alone
   -- carries the category (no bold), since these are dense in API-heavy code.
   hi('DansMacro', { fg = '#bb9af7' })
-  -- SDL identifiers (SDL_*) -- teal/cyan, its own category.
-  hi('DansSDL', { fg = '#2ac3de' })
+  -- GLFW / SDL identifiers (GLFW*, SDL_*) -- a darker teal, so the brighter STB
+  -- cyan below reads as a distinct, louder library.
+  hi('DansSDL', { fg = '#1f93a8' })
+  -- stb single-header libs (stb_*, stbi_*, stbtt_*, STB* macros) -- bright cyan.
+  hi('DansSTB', { fg = '#6ad7ff' })
   -- LLDB identifiers (LLDB_*, SB* API classes, the bare StateType enum) -- orange,
   -- clear of the purples/teal/greens so an LLDB-heavy file reads distinctly.
   hi('DansLLDB', { fg = '#ff9e64' })

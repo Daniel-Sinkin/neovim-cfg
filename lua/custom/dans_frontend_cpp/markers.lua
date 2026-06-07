@@ -18,6 +18,7 @@ local MATCH_GROUPS = {
   DansMacro = true,
   DansVulkan = true,
   DansSDL = true,
+  DansSTB = true,
   DansLLDB = true,
   DansString = true,
   DansAssert = true,
@@ -129,6 +130,10 @@ local function apply(ev)
   -- macros + GLFWwindow/GLFWmonitor types, and glfw* functions.
   vim.fn.matchadd('DansSDL', code_only [[\<GLFW[A-Za-z0-9_]*\>]], 25)
   vim.fn.matchadd('DansSDL', code_only [[\<glfw[A-Z][A-Za-z0-9_]*\>]], 25)
+  -- stb single-header libs -> bright cyan: stb_/stbi_/stbtt_/stbsp_/... functions
+  -- and types (lowercase stb...+_), plus the STB*/STBI_/STBIDEF macros.
+  vim.fn.matchadd('DansSTB', code_only [[\<stb[a-z0-9]*_[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansSTB', code_only [[\<STB[A-Za-z0-9_]*\>]], 25)
   -- LLDB identifiers -> orange: the LLDB_ macros, the SB* API classes
   -- (SBDebugger/SBTarget/...), and the bare StateType enum. Priority 25 so the
   -- all-caps LLDB_* wins over the generic macro purple (like VK_*/SDL_*).
