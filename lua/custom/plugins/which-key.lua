@@ -2,7 +2,16 @@ return {
   'folke/which-key.nvim',
   event = 'VimEnter',
   opts = {
-    delay = 0,
+    -- keyboard prefixes pop instantly (as before); mouse keys never auto-pop, so a
+    -- double-click / click-drag no longer flashes the root menu (the transient
+    -- pending state clears long before this delay).
+    delay = function(ctx)
+      local k = (ctx and ctx.keys) or ''
+      if k:find 'Mouse' or k:find 'Drag' or k:find 'Release' or k:find 'Scroll' then
+        return 1e9
+      end
+      return 0
+    end,
     icons = {
       mappings = vim.g.have_nerd_font,
       keys = vim.g.have_nerd_font and {} or {
