@@ -84,10 +84,13 @@ local function refresh(bufnr)
     local pair = node:parent()
     if sr == ser and not skip.skip(sr) and pair and pair:type() == 'initializer_pair' then
       local psr, _, per, pec = pair:range()
-      if psr == sr and per == sr then -- single-line pair only
+      if psr == sr then -- the `.field` is on the pair's first line (value may span more)
+        local single = per == sr
         local line = vim.api.nvim_buf_get_lines(bufnr, sr, sr + 1, false)[1] or ''
         local field = line:sub(sc + 2, fec) -- drop the leading '.'
-        local rest = line:sub(fec + 1, pec) -- " = value"
+        -- multi-line value: render only the first line's `= value-start`; the
+        -- continuation lines carry no field designator, so they stay untouched.
+        local rest = line:sub(fec + 1, single and pec or #line)
         local eqs, eqe = rest:find('=%s*')
         if field ~= '' and eqs then
           local value = vim.trim(rest:sub(eqe + 1))
@@ -95,7 +98,7 @@ local function refresh(bufnr)
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc, { end_col = sc + 1, conceal = '' })
           -- muted hint color on the field name
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc + 1, { end_col = fec, hl_group = 'DansHint' })
-          if P.access_tail(value) == field then
+          if single and P.access_tail(value) == field then
             -- pun: `.center = center` or `.center = cfg.center` -> `center` (the
             -- value's last access already names the field, so hide ` = value`).
             pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, fec, { end_col = pec, conceal = '' })
@@ -116,6 +119,25 @@ local function refresh(bufnr)
             elseif valstart > eqcol + 1 then
               -- single-line: tighten the space after `=` too -> `field=value`.
               pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, eqcol + 1, { end_col = valstart, conceal = '' })
+            end
+            -- multi-line value: re-indent its continuation lines to the (now
+            -- constant) value column, so an operator-aligned-under-value layout
+            -- (`a\n | b`) stays aligned after the dot / prefix / `=` shifts.
+            if not single and meta.multiline then
+              local valcol = sc + meta.maxw + 3 -- indent + padded field + ` = `
+              for cl = sr + 1, per do
+                if not skip.skip(cl) then
+                  local cline = vim.api.nvim_buf_get_lines(bufnr, cl, cl + 1, false)[1] or ''
+                  local lead = #(cline:match '^%s*' or '')
+                  if lead > 0 then
+                    pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, cl, 0, { end_col = lead, conceal = '' })
+                  end
+                  pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, cl, lead, {
+                    virt_text = { { string.rep(' ', valcol), 'Normal' } },
+                    virt_text_pos = 'inline',
+                  })
+                end
+              end
             end
           end
         end

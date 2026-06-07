@@ -18,9 +18,11 @@ function M.apply()
   -- `lambda` pseudo-keyword in the lambda rendering: green to read as a
   -- declaration keyword, distinct from the mut/cpy markers.
   hi('DansLambda', { fg = '#9ece6a', bold = true })
-  -- Vulkan identifiers (Vk*, VK_*) -- purple. Dense in this codebase, so they
-  -- get their own category, overriding the generic macro color for VK_*.
-  hi('DansVulkan', { fg = '#bb9af7' })
+  -- Vulkan identifiers (Vk*, VK_*, vk*) -- the copy()/cpy yellow but not bold
+  -- (bold was too heavy for how dense these are), distinct from the generic macro
+  -- purple. The Vk/VK_ prefixes are concealed in markers.lua, so only the
+  -- meaningful tail shows in this color.
+  hi('DansVulkan', { fg = '#e0af68' })
   -- Other all-caps macros / preprocessor constants -- purple. The hue alone
   -- carries the category (no bold), since these are dense in API-heavy code.
   hi('DansMacro', { fg = '#bb9af7' })

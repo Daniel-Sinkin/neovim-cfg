@@ -161,9 +161,13 @@ local function colorize(text)
         if alias then
           out[#out + 1] = { alias[1], alias[2] }
         elseif word:match '^Vk' or word:match '^VK_' or word:match '^vk%u' then
-          out[#out + 1] = { word, 'DansVulkan' } -- Vk*/VK_*/vk*, matches markers
+          -- prefix hidden in the value too (VK_DEBUG_UTILS_X -> X), matching the
+          -- raw-line conceal; strip_glfw leaves lowercase vk functions verbatim.
+          out[#out + 1] = { P.strip_glfw(word), 'DansVulkan' }
+        elseif word:match '^stb' or word:match '^STB' then
+          out[#out + 1] = { word, 'DansSTB' } -- stb*/STB*, matches markers (not stripped)
         elseif word:match '^SDL_' or word:match '^GLFW' or word:match '^glfw%u' then
-          out[#out + 1] = { word, 'DansSDL' } -- SDL_*/GLFW*/glfw*, matches markers
+          out[#out + 1] = { P.strip_glfw(word), 'DansSDL' } -- GLFW prefix hidden, SDL_ kept
         elseif word:match '^LLDB_' or word:match '^SB%u' or word == 'StateType' then
           out[#out + 1] = { word, 'DansLLDB' } -- LLDB_*/SB*/StateType, matches markers
         elseif word:match '^[A-Z][A-Z0-9_]+$' and not MACRO_DENY[word] then
@@ -365,74 +369,51 @@ end
 -- isn't a recognized declaration form. `align` (optional) is { nw, tw } column
 -- widths to pad the name/type to. `was_const` + (bufnr,row0) drive the inferred
 -- `mut` on non-const locals.
--- A C function-pointer typedef or C++ alias, rendered in trailing-return shape:
---   typedef void (*GLFWglproc)(void);          ->  glproc: () -> void
---   typedef int  (*Cmp)(const T*, const T*);   ->  Cmp: (T^, T^) -> int
---   using Handler = R (*)(int);                ->  Handler: (int) -> R
--- Returns the overlay chunks, or nil if `core` is not a function-pointer alias.
--- The two inner ([^()]*) groups mean nested parens (a param that is itself a
--- function pointer) aren't matched -- those fall through and render raw.
-local function funcptr_chunks(core, had_semi)
-  local name, ret, params
-  local r, pdecl, pr = core:match '^typedef%s+(.-)%s*%(([^()]*)%)%s*%(([^()]*)%)$'
-  if r and pdecl:find '%*' then
-    name, ret, params = pdecl:match '([%w_]+)%s*$', r, pr
-  else
-    local nm, r2, pr2 = core:match '^using%s+([%w_]+)%s*=%s*(.-)%s*%(%s*%*%s*%)%s*%(([^()]*)%)$'
-    name, ret, params = nm, r2, pr2
-  end
-  if not name or name == '' or not ret then
-    return nil
-  end
-
-  local chunks = {}
-  local function add(text, hl)
-    if text ~= '' then
-      chunks[#chunks + 1] = { text, hl or 'Normal' }
-    end
-  end
-  local function add_type(t)
-    t = vim.trim((t:gsub('%f[%w]const%f[%W]', ''))) -- const is the hidden default
-    if t ~= '' then
-      for _, c in ipairs(M.type_chunks(t)) do
-        add(c[1], c[2])
+-- DANS_DEFER([cap] { body });  ->  Odin-style `defer`. The macro takes a lambda
+-- (it uses __LINE__ internally, so there's no throwaway name to render). A single
+-- statement renders inline (`defer body;`); a multi-statement body keeps braces. A
+-- multi-line invocation is handled per line so the line count is preserved: the
+-- `DANS_DEFER([cap] {` opener -> `defer {`, and its matching `});` closer -> `}`
+-- (treesitter-confirmed it closes a DANS_DEFER call). `defer` is green, like the
+-- lambda keyword. Returns chunks, or nil if `core` is not a DANS_DEFER line.
+local function defer_chunks(core, had_semi, bufnr, row0)
+  local brace = core:match '^DANS_DEFER%s*%(%s*%b[]%s*(%b{})%s*%)%s*$'
+  if brace and had_semi then
+    local inner = vim.trim(brace:sub(2, -2))
+    local chunks = { { 'defer ', 'DansLambda' } }
+    local function addv(text)
+      for _, c in ipairs(colorize(text)) do
+        chunks[#chunks + 1] = c
       end
     end
-  end
-
-  -- name keeps the type color it carries elsewhere (GLFW* -> DansSDL teal) and is
-  -- shown with the GLFW/glfw prefix stripped, like every other type in the view.
-  add(P.strip_glfw(name), type_hl(name))
-  add ': ('
-  local first = true
-  for part in (params .. ','):gmatch '([^,]*),' do
-    part = vim.trim(part)
-    if part ~= '' and part ~= 'void' then
-      if not first then
-        add ', '
-      end
-      add_type(part)
-      first = false
+    if inner:gsub(';%s*$', ''):find ';' then
+      chunks[#chunks + 1] = { '{ ', 'Normal' }
+      addv(inner)
+      chunks[#chunks + 1] = { ' }', 'Normal' }
+    else
+      addv(inner)
     end
+    return chunks
   end
-  add ') -> '
-  add_type(ret)
-  if had_semi then
-    add ';'
+  if core:match '^DANS_DEFER%s*%(%s*%b[]%s*{%s*$' then
+    return { { 'defer ', 'DansLambda' }, { '{', 'Normal' } }
   end
-  return chunks
+  if had_semi and core:match '^}%s*%)%s*$' and P.defer_close(bufnr, row0) then
+    return { { '}', 'Normal' } }
+  end
+  return nil
 end
 
 local function build_chunks(prefix, core, had_semi, type_hint, align, was_const, is_constexpr, bufnr, row0)
-  -- Classic (non-trailing) function declarations are reordered to trailing form
-  -- by the pointer module's decoration pass, not overlaid -- bail so they aren't
-  -- mangled as a `name: T(args)` paren-init variable.
+  local dc = defer_chunks(core, had_semi, bufnr, row0)
+  if dc then
+    return dc
+  end
+  -- Function-declaration-shaped lines (`bool f(args)`, and the most-vexing-parse
+  -- `vector<T> v(n)` the grammar reads the same way) render raw -- bail so they
+  -- aren't mangled into a `name: T(args)` paren-init variable.
   if P.classic_function(bufnr, row0) then
     return nil
-  end
-  local fp = funcptr_chunks(core, had_semi)
-  if fp then
-    return fp
   end
   local semi = had_semi and ';' or ''
   -- Lazy (treesitter): only the branches that infer mut pay for it, and only on
@@ -466,20 +447,27 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     -- Without it this is a continuation / constructor temporary in an argument
     -- list (e.g. `local_ray, Aabb{.min = a}`), where `local_ray,` is not a type.
     if not (nm and had_semi and P.looks_like_type(typ)) then
-      -- paren-init `T name(args)` (ctor call), kept as `name: T(args)` since paren
-      -- and brace init differ in meaning. The most-vexing-parse (function decl vs
-      -- variable) is semantic, so only accept args that look like a value.
-      local ptyp, pnm, pargs = core:match '^(.-)%s+([%w_]+)%s*%((.+)%)$'
-      if ptyp and pnm and had_semi and P.looks_like_type(ptyp) and (pargs:find('[%.%d(]') or pargs:find('::')) then
-        typ, nm, init, paren = ptyp, pnm, nil, pargs
+      -- copy-list-init `T name = {init}` (incl. CTAD `std::array x = {a, b}`):
+      -- the braces are kept, rendering `name: T = {init}`.
+      local btyp, bnm, binit = core:match '^(.-)%s+([%w_]+)%s*=%s*({.*})$'
+      if btyp and bnm and had_semi and P.looks_like_type(btyp) then
+        typ, nm, init = btyp, bnm, binit
       else
-        -- No-brace reference/pointer member: `T& name` / `T* name` (a struct
-        -- reference can't be brace-defaulted). The sigil must touch the type, so
-        -- bitwise/multiply statements like `a & b;` aren't grabbed.
-        typ, nm = core:match '^(.-[%w_>][&*]+)%s*([%w_]+)$'
-        init = ''
-        if not (typ and nm and had_semi and P.looks_like_type(typ)) then
-          return nil
+        -- paren-init `T name(args)` (ctor call), kept as `name: T(args)` since paren
+        -- and brace init differ in meaning. The most-vexing-parse (function decl vs
+        -- variable) is semantic, so only accept args that look like a value.
+        local ptyp, pnm, pargs = core:match '^(.-)%s+([%w_]+)%s*%((.+)%)$'
+        if ptyp and pnm and had_semi and P.looks_like_type(ptyp) and (pargs:find('[%.%d(]') or pargs:find('::')) then
+          typ, nm, init, paren = ptyp, pnm, nil, pargs
+        else
+          -- No-brace reference/pointer member: `T& name` / `T* name` (a struct
+          -- reference can't be brace-defaulted). The sigil must touch the type, so
+          -- bitwise/multiply statements like `a & b;` aren't grabbed.
+          typ, nm = core:match '^(.-[%w_>][&*]+)%s*([%w_]+)$'
+          init = ''
+          if not (typ and nm and had_semi and P.looks_like_type(typ)) then
+            return nil
+          end
         end
       end
     end
@@ -521,30 +509,6 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
       add_segment(shown:sub(i, c - 1), hl)
       add('^', 'Normal')
       i = c + 1
-    end
-  end
-
-  -- dev::Defer _{[cap] { body }}  ->  Odin-style `defer body`: a scope-exit guard
-  -- where the Defer type, throwaway name, capture, and wrapping braces are all
-  -- ceremony. One statement renders inline (`defer f();`); several keep a block
-  -- (`defer { a(); b(); }`). Matched before the generic explicit-type branch.
-  do
-    local dtyp, dinit = core:match '^([%w_:]+)%s+[%w_]+%s*(%b{})$'
-    if dtyp and had_semi and (dtyp == 'Defer' or dtyp:match '::Defer$') then
-      local inner = dinit:sub(2, -2)
-      local body = inner:match '^%s*%b[]%s*{(.*)}%s*$' or inner:match '^%s*%b[]%s*%b()%s*{(.*)}%s*$'
-      if body then
-        body = vim.trim(body)
-        add('defer ', 'DansLambda')
-        if body:gsub(';%s*$', ''):find ';' then
-          add '{ '
-          add_value(body)
-          add ' }'
-        else
-          add_value(body)
-        end
-        return chunks
-      end
     end
   end
 
@@ -687,11 +651,14 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     -- `CString` token, dropping the const, the `^` caret, and any mut marker.
     -- split_markers already peeled the leading const (was_const) so the type
     -- arrives here as `char^` (strip_type mapped `*`->`^`).
-    local is_cstring = was_const and shown_typ == 'char^'
+    -- `const char*` -> CString; `const char**` -> CString^ (inner level becomes
+    -- CString, outer pointer level(s) stay as caret(s)).
+    local cstring_carets = was_const and shown_typ:match '^char(%^+)$' or nil
+    local is_cstring = cstring_carets ~= nil
     local sp_inner, sp_kind, sp_del = P.smart_ptr(shown_typ)
     local disp_typ
     if is_cstring then
-      disp_typ = 'CString'
+      disp_typ = 'CString' .. cstring_carets:sub(2)
     elseif sp_inner then
       disp_typ = sp_del and (sp_inner .. '^, ' .. sp_del .. '~') or (sp_inner .. '^')
     else
@@ -709,6 +676,9 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     -- as const. Placed after the colon like `-> mut T&` so names stay aligned.
     if is_cstring then
       add('CString', 'DansString')
+      if #cstring_carets > 1 then
+        add(cstring_carets:sub(2), 'Normal') -- outer pointer level(s)
+      end
     elseif sp_inner then
       -- smart pointer: `T^`, caret colored by ownership (unique = mut red, shared
       -- = cpy yellow). A custom deleter renders as `T^, Del~` -- the caret stays on

@@ -1,12 +1,12 @@
 namespace lldb { struct SBEvent {}; }
 class Foo
 {
-    static EventIsTargetEvent(const lldb::SBEvent &event) -> bool;
-    GetValue(int idx) const -> SBValue^;
-    run() mut $ne -> void;
+    static bool EventIsTargetEvent(const lldb::SBEvent &event);
+    SBValue ^GetValue(int idx) const;
+    void run() mut $ne;
     auto trailing() const -> int;
 };
-freeFunc(int x) -> bool;
+bool freeFunc(int x);
 
 class Bar
 {

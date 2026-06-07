@@ -6,7 +6,7 @@ void use(int x)
     cr& := a;
     mut p^ := &x;
     cp^ := get_ptr();
-    version^ := glfwGetVersionString();
+    version^ := GetVersionString();
     auto&& fwd = make();
     throw $re("oops");
 }

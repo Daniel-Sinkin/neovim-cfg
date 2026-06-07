@@ -1,7 +1,0 @@
-#pragma once
-
-glproc: () -> void;
-Comparator: (int^ a, int^ b) -> int;
-mousebuttonfun: (window^ window, int button, int action) -> void;
-Handler: (int code) -> void;
-using PlainAlias = uint32_t;

@@ -20,7 +20,6 @@ local M = {}
 local ns = vim.api.nvim_create_namespace 'ds_cpp_pointer'
 local vu = require 'custom.dans_frontend_cpp.util'
 local P = require 'custom.dans_frontend_cpp.parse'
-local R = require 'custom.dans_frontend_cpp.render'
 
 local PTR_QUERY = [[
   (pointer_declarator "*" @star)
@@ -110,25 +109,10 @@ local function refresh(bufnr)
   local skip = vu.make_skipper(bufnr)
   local s0, e0 = vu.visible_range(bufnr)
 
-  -- 0. classic (non-trailing) function decl -> trailing return: conceal the
-  -- leading return type and append ` -> RET`, so `bool foo(args)` reads
-  -- `foo(args) -> bool`. Runs first and records the concealed return-type spans
-  -- so the `*`/optional passes below don't orphan a `^`/`?` into them (e.g.
-  -- `SBValue *GetValue` -- the `*` belongs to the moved return type).
-  local hide = {} -- row -> { {s, e}, ... } concealed return-type ranges
-  for row0 = s0, e0 - 1 do
-    local cf = P.classic_function(bufnr, row0)
-    if cf and not skip.skip(row0) then
-      pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, cf.conceal_s, { end_col = cf.conceal_e, conceal = '' })
-      local vt = { { ' -> ', 'Normal' } }
-      for _, c in ipairs(R.type_chunks(cf.ret_text)) do
-        vt[#vt + 1] = c
-      end
-      pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, cf.append_col, { virt_text = vt, virt_text_pos = 'inline' })
-      hide[row0] = hide[row0] or {}
-      hide[row0][#hide[row0] + 1] = { cf.conceal_s, cf.conceal_e }
-    end
-  end
+  -- `hide` once held concealed return-type ranges from the classic-function ->
+  -- trailing-return reorder pass; that pass was removed (it only ever fired on
+  -- most-vexing-parse false positives, e.g. `vector<T> v(n)`), so it stays empty.
+  local hide = {} -- row -> { {s, e}, ... }
   local function in_reorder(row, col)
     for _, r in ipairs(hide[row] or {}) do
       if col >= r[1] and col < r[2] then
@@ -141,10 +125,10 @@ local function refresh(bufnr)
   -- 0.5 raw-line `const char*` -> a single `CString` token (the obfuscated-string
   -- type, in DansString). Text-scanned (not treesitter) so it lands on function
   -- signatures, parameters, return types and other raw decls the view overlay
-  -- doesn't touch. `const char**` (double pointer) is left alone -- collapsing
-  -- only the inner level would orphan a stray `^`. The concealed `const char...*`
-  -- span is recorded in `hide` so the `*`->`^` pass below skips the `*` we just
-  -- swallowed (its `in_reorder` check then covers it).
+  -- doesn't touch. `const char**` collapses the inner level too -> `CString` + the
+  -- outer `*` (which the `*`->`^` pass below turns into a `^`, giving `CString^`).
+  -- The concealed `const char*` span is recorded in `hide` so that pass skips the
+  -- `*` we just swallowed (its `in_reorder` check then covers it).
   local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
   for idx, line in ipairs(lines) do
     local row0 = s0 + idx - 1
@@ -156,8 +140,7 @@ local function refresh(bufnr)
           break
         end
         -- me is the byte index of the `*`. The 0-based column of the `*` is me-1.
-        local after_star = line:sub(me + 1, me + 1)
-        if after_star ~= '*' and not in_string_or_comment(line, me - 1) and not in_reorder(row0, me - 1) then
+        if not in_string_or_comment(line, me - 1) and not in_reorder(row0, me - 1) then
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, ms - 1, {
             end_col = me,
             conceal = '',

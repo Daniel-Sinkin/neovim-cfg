@@ -16,7 +16,7 @@ using linalg::Vec4;
 
 struct Color
 {
-    channels: array<f32, 4> = 1.0f, 1.0f, 1.0f, 1.0f;
+    channels: [4]f32 = 1.0f, 1.0f, 1.0f, 1.0f;
 
     constexpr Color() $ne = default;
     constexpr Color(f32 r, f32 g, f32 b, f32 a = 1.0f) $ne : channels{r, g, b, a}
@@ -65,7 +65,7 @@ constexpr Color Color::gray   {0.5f, 0.5f, 0.5f, 1.0f};
 
 struct ColorU8
 {
-    channels: array<u8, 4> = 255u, 255u, 255u, 255u;
+    channels: [4]u8 = 255u, 255u, 255u, 255u;
 
     constexpr ColorU8() $ne = default;
     constexpr ColorU8(u8 r, u8 g, u8 b, u8 a = 255u) $ne : channels{r, g, b, a}

@@ -253,18 +253,40 @@ function M.strip_type(typ)
   -- std::optional<T> -> T?, keeping any trailing ref/ptr after the `?`:
   -- optional<T>& -> T?&, optional<T>* -> T?^ (once M.ptr rewrites the star).
   t = t:gsub('^optional<(.+)>%s*([&*]*)$', '%1?%2')
+  -- std::array<T, N> -> [N]T (Odin array syntax). Split at the top-level comma so
+  -- a templated element (array<pair<int, int>, 3>) isn't broken.
+  local inner = t:match '^array<(.+)>$'
+  if inner then
+    local depth = 0
+    for i = 1, #inner do
+      local c = inner:sub(i, i)
+      if c == '<' or c == '(' or c == '[' then
+        depth = depth + 1
+      elseif c == '>' or c == ')' or c == ']' then
+        depth = depth - 1
+      elseif c == ',' and depth == 0 then
+        t = '[' .. vim.trim(inner:sub(i + 1)) .. ']' .. vim.trim(inner:sub(1, i - 1))
+        break
+      end
+    end
+  end
   return M.ptr(t)
 end
 
--- Drop the GLFW/glfw prefix from a type token for the overlay, matching the
--- raw-line conceal in markers.lua: GLFWwindow -> window, glfwFoo -> Foo,
--- GLFW_X -> X. Only the prefix; the caller computes the DansSDL color BEFORE
--- calling this so the teal survives. `%f[%w]` anchors to a token start so an
--- embedded GLFW isn't touched.
+-- Drop a library prefix from a type token for the overlay, matching the raw-line
+-- conceals in markers.lua: GLFWwindow -> window, glfwFoo -> Foo, GLFW_X -> X, and
+-- VkResult -> Result, VK_X -> X. Only the prefix; the caller computes the library
+-- color BEFORE calling this so it survives. `%f[%w]` anchors to a token start so an
+-- embedded prefix isn't touched.
 function M.strip_glfw(t)
   t = t:gsub('%f[%w]GLFW_([A-Z0-9])', '%1')
   t = t:gsub('%f[%w]GLFW([a-z])', '%1')
   t = t:gsub('%f[%w]glfw([A-Z])', '%1')
+  -- longer DebugUtils sub-prefix first, then the generic Vk/VK_
+  t = t:gsub('%f[%w]VK_DEBUG_UTILS_([A-Z0-9])', '%1')
+  t = t:gsub('%f[%w]VkDebugUtils([A-Z])', '%1')
+  t = t:gsub('%f[%w]VK_([A-Z0-9])', '%1')
+  t = t:gsub('%f[%w]Vk([A-Z])', '%1')
   return t
 end
 
@@ -313,14 +335,12 @@ function M.designated_pairs(body)
   return #out > 0 and out or nil
 end
 
--- For a classic (non-trailing) function declaration on `row0` -- `RET name(params)`
--- with the return type BEFORE the name -- return the spans to reorder it into
--- trailing form `name(params) -> RET`: { conceal_s, conceal_e } over the leading
--- return type (incl a pointer/ref sigil), `append_col` after the params/trailing
--- qualifiers, and `ret_text` (the return type + sigil). nil for trailing-return
--- functions (`auto f() -> R`), constructors/destructors (no return type),
--- non-functions, or multi-line decls. A cheap text pre-check gates the treesitter
--- walk so non-function lines pay almost nothing.
+-- Whether `row0` is a single-line function declaration (return type BEFORE the
+-- name, e.g. `bool f(args)` -- including the most-vexing-parse `vector<T> v(n)`
+-- that the C++ grammar reads as a function). Used only to BAIL: such lines render
+-- raw instead of being mangled into a `name: T(args)` paren-init variable. nil for
+-- trailing-return functions, constructors/destructors, non-functions, and
+-- multi-line decls. A cheap text pre-check gates the treesitter walk.
 function M.classic_function(bufnr, row0)
   if not bufnr then
     return nil
@@ -345,31 +365,46 @@ function M.classic_function(bufnr, row0)
   if not tfield or not dtor or tfield:type() == 'placeholder_type_specifier' then
     return nil -- no return type, or `auto` (deduced / trailing-return)
   end
-  local sigil, fnode = '', dtor
+  local fnode = dtor
   if dtor:type() == 'pointer_declarator' then
-    sigil, fnode = '*', dtor:field('declarator')[1]
+    fnode = dtor:field('declarator')[1]
   elseif dtor:type() == 'reference_declarator' then
-    sigil, fnode = '&', dtor:field('declarator')[1]
+    fnode = dtor:field('declarator')[1]
   end
   if not fnode or fnode:type() ~= 'function_declarator' then
     return nil
   end
-  for child in fnode:iter_children() do
-    if child:type() == 'trailing_return_type' then
-      return nil -- already trailing
-    end
-  end
-  local ts_row, ts_col = tfield:range()
-  local fs_row, fs_col, fe_row, fe_col = fnode:range()
-  if ts_row ~= row0 or fs_row ~= row0 or fe_row ~= row0 then
+  local _, _, fe_row = fnode:range()
+  if fe_row ~= row0 then
     return nil -- single-line declarations only
   end
-  return {
-    conceal_s = ts_col,
-    conceal_e = fs_col,
-    append_col = fe_col,
-    ret_text = vim.treesitter.get_node_text(tfield, bufnr) .. sigil,
-  }
+  return true
+end
+
+-- Whether line `row0` is the `});` that closes a `DANS_DEFER(...)` call -- the
+-- nearest call_expression enclosing the line's closing `}` is named DANS_DEFER.
+-- Lets the view render that closer as a bare `}` (its opener became `defer {`).
+function M.defer_close(bufnr, row0)
+  if not bufnr then
+    return false
+  end
+  local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
+  local bcol = line and line:find('}', 1, true)
+  if not bcol then
+    return false
+  end
+  local ok, node = pcall(vim.treesitter.get_node, { bufnr = bufnr, pos = { row0, bcol - 1 } })
+  if not ok or not node then
+    return false
+  end
+  while node do
+    if node:type() == 'call_expression' then
+      local fn = node:field('function')[1]
+      return fn ~= nil and vim.treesitter.get_node_text(fn, bufnr) == 'DANS_DEFER'
+    end
+    node = node:parent()
+  end
+  return false
 end
 
 -- Split `s` at the first top-level comma (templates/parens/brackets balanced):
@@ -436,10 +471,10 @@ function M.field_dims(line)
   local inner, _, deleter = M.smart_ptr(disp)
   if inner then
     disp = deleter and (inner .. '^, ' .. deleter .. '~') or (inner .. '^')
-  elseif was_const and disp == 'char^' then
-    -- `const char*` renders as a single `CString` token (see build_chunks); the
-    -- alignment width must match what's shown, not the stripped `char^`.
-    disp = 'CString'
+  elseif was_const and disp:match '^char%^+$' then
+    -- `const char*`(*) renders as `CString`(^); the alignment width must match
+    -- what's shown, not the stripped `char^`.
+    disp = 'CString' .. (disp:gsub('^char%^', ''))
   end
   return nm, disp
 end

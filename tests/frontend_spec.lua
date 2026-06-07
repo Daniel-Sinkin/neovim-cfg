@@ -75,7 +75,7 @@ run('auto& ref', 'fn', { 'auto& r = x;' }, { 'mut r& := x;' })
 run('const auto& ref', 'fn', { 'const auto& r = x;' }, { 'r& := x;' })
 run('auto* ptr', 'fn', { 'auto* p = &x;' }, { 'mut p^ := &x;' })
 run('const auto* ptr', 'fn', { 'const auto* s = get();' }, { 's^ := get();' })
-run('const auto* glfw', 'fn', { 'const auto* p = glfwGetVersionString();' }, { 'p^ := glfwGetVersionString();' })
+run('const auto* glfw', 'fn', { 'const auto* p = glfwGetVersionString();' }, { 'p^ := GetVersionString();' })
 run('auto&& fwd (raw)', 'fn', { 'auto&& z = f();' }, { false })
 
 -- ===================== pointers / references =====================
@@ -104,8 +104,9 @@ run('for const value', 'fn', { 'for (const auto x : xs)' }, { 'for (x : xs)' })
 run('for c-style (raw)', 'fn', { 'for (int i = 0; i < n; ++i)' }, { false })
 
 -- ===================== defer =====================
-run('defer single', 'fn', { 'dev::Defer _{[&]{ cleanup(); }};' }, { 'defer cleanup();' })
-run('defer block', 'fn', { 'dev::Defer _{[&]{ a(); b(); }};' }, { 'defer { a(); b(); }' })
+run('defer single', 'fn', { 'DANS_DEFER([] { cleanup(); });' }, { 'defer cleanup();' })
+run('defer block', 'fn', { 'DANS_DEFER([] { a(); b(); });' }, { 'defer { a(); b(); }' })
+run('defer multiline', 'fn', { 'DANS_DEFER([] {', '    a();', '});' }, { 'defer {', false, '}' })
 
 -- ===================== non-declarations (raw) =====================
 run('return stmt', 'fn', { 'return x;' }, { false })
@@ -120,7 +121,7 @@ run('member empty', 'struct', { 'Vec2 pos{};' }, { 'pos: Vec2;' })
 run('member pointer', 'struct', { 'Foo* ptr{};' }, { 'ptr: mut Foo^;' })
 run('member glfw pointer', 'struct', { 'GLFWwindow* window_{};' }, { 'window_: mut window^;' })
 run('member const pointer', 'struct', { 'const Foo* cptr{};' }, { 'cptr: const Foo^;' })
-run('member array', 'struct', { 'std::array<f32, 3> arr{};' }, { 'arr: array<f32, 3>;' })
+run('member array', 'struct', { 'std::array<f32, 3> arr{};' }, { 'arr: [3]f32;' })
 run('member nested template', 'struct', { 'std::vector<std::pair<int, int>> v{};' }, { 'v: vector<pair<int, int>>;' })
 run('member ref-in-template', 'struct', { 'std::pair<int&, int> pr{};' }, { 'pr: pair<int&, int>;' })
 run('member unique_ptr', 'struct', { 'std::unique_ptr<Foo> up{};' }, { 'up: Foo^;' })
@@ -130,7 +131,7 @@ run('member unique_ptr nested deleter', 'struct', { 'std::unique_ptr<std::pair<i
 run('member glfw type (overlay strips prefix)', 'struct', { 'GLFWwindow win{};' }, { 'win: window;' })
 run('member glfw unique_ptr deleter', 'struct', { 'std::unique_ptr<GLFWwindow, WindowDeleter> w{};' }, { 'w: window^, WindowDeleter~;' })
 run('member optional', 'struct', { 'std::optional<int> o{};' }, { 'o: int?;' })
-run('member vulkan null', 'struct', { 'VkBuffer buf{VK_NULL_HANDLE};' }, { 'buf: VkBuffer = {};' })
+run('member vulkan null', 'struct', { 'VkBuffer buf{VK_NULL_HANDLE};' }, { 'buf: Buffer = {};' })
 run('member static constexpr', 'struct', { 'static constexpr usize cap{16};' }, { 'static cap: usize : 16;' })
 
 -- ===================== alignment block =====================

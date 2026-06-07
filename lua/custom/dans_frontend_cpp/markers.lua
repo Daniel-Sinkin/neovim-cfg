@@ -65,6 +65,17 @@ local function apply(ev)
     { code_only [==[\<glfw\ze[A-Z]]==], 30 },
     { code_only [==[\<GLFW\ze[a-z]]==], 30 },
     { code_only [==[\<GLFW_\ze[A-Z0-9]]==], 30 },
+    -- Vulkan prefix: same idea, the yellow coloring carries the library identity.
+    -- `Vk` before an uppercase is a type (VkResult -> Result), `VK_` before
+    -- [A-Z0-9] a macro (VK_SUCCESS -> SUCCESS). The lowercase `vk` functions stay
+    -- verbatim (colored, not hidden), like glfw. The long DebugUtils sub-prefix
+    -- collapses too (VkDebugUtilsMessengerEXT -> MessengerEXT,
+    -- VK_DEBUG_UTILS_MESSAGE_... -> MESSAGE_...) at a higher priority so it wins
+    -- over the generic Vk/VK_ conceal on the overlapping start.
+    { code_only [==[\<VkDebugUtils\ze[A-Z]]==], 31 },
+    { code_only [==[\<VK_DEBUG_UTILS_\ze[A-Z0-9]]==], 31 },
+    { code_only [==[\<Vk\ze[A-Z]]==], 30 },
+    { code_only [==[\<VK_\ze[A-Z0-9]]==], 30 },
   }
   if ev and (ev.match == 'cpp' or ev.match == 'cuda') then
     -- ranges/views are unusable at `ranges::transform` / `views::filter` length;
@@ -112,11 +123,10 @@ local function apply(ev)
   -- Gray every `ident::` scope qualifier. std:: is concealed off the cursor
   -- line by a higher-priority match; the rest stay gray-but-visible.
   vim.fn.matchadd('DansNamespace', code_only [[\<\w\+::]], 20)
-  -- All-caps macros / preprocessor constants -> purple. >=2 chars so single
-  -- T/R template params are spared; mixed-case names (Vec3, GLuint) and k_snake
-  -- constants don't match. A negative-lookahead skips stdlib all-caps that aren't
-  -- user macros worth coloring (FILE, SEEK_*, EOF, NULL).
-  vim.fn.matchadd('DansMacro', code_only [[\<\%(\%(FILE\|SEEK_SET\|SEEK_CUR\|SEEK_END\|EOF\|NULL\)\>\)\@![A-Z][A-Z0-9_]\+\>]], 20)
+  -- Generic macro coloring lives in custom.dans_macros now: it colors the
+  -- project's actual #define names (scanned with rg), falling back to the all-caps
+  -- heuristic only when no scan is available. The library-prefixed macros
+  -- (VK_/SDL_/GLFW/stb/LLDB_) are still colored by the matchadds below.
   -- Vulkan identifiers -> purple, at a higher priority so VK_* overrides the
   -- generic macro color above. Vk* (types) and vk* (functions) are mixed-case so
   -- they never hit the macro match anyway.
