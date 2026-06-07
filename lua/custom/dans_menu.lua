@@ -111,6 +111,17 @@ local function build_sections(tbuf, twin)
     M.close() -- so the real work / report split isn't the menu itself
     perf.profile_toggle()
   end)
+  local asm = {
+    label = 'asm (fn under cursor)',
+    full = true,
+    activate = function()
+      M.close() -- the asm split must open in the real window, not the menu float
+      if twin and vim.api.nvim_win_is_valid(twin) then
+        vim.api.nvim_set_current_win(twin)
+      end
+      require('custom.dans_asm').show()
+    end,
+  }
 
   local font = {
     label = 'font size',
@@ -132,7 +143,7 @@ local function build_sections(tbuf, twin)
   return {
     { title = 'Frontend modules', items = vim.list_extend({ all }, mods) },
     { title = 'View', items = { hints, lambda } },
-    { title = 'Tools', items = { mon, prof } },
+    { title = 'Tools', items = { mon, prof, asm } },
     { title = 'Settings', items = { font } },
   }
 end
