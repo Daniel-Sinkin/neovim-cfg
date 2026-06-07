@@ -116,6 +116,55 @@ local function split_args(s)
   return args
 end
 
+-- `static_assert<A, B>` -> `A === B` (a compile-time type-equality assertion):
+-- conceal `static_assert<`, turn the top-level `,` into ` === `, and conceal the
+-- closing `>`. A `std::`/`dans::` qualifier is concealed separately by markers, so
+-- it isn't handled here. Only the exact 2-argument form is rewritten.
+local function static_assert_eq(bufnr, row0, line)
+  local from = 1
+  while true do
+    local ms, me = line:find('static_assert%s*<', from)
+    if not ms then
+      return
+    end
+    from = me + 1
+    local before = ms > 1 and line:sub(ms - 1, ms - 1) or nil
+    if not is_word_char(before) and not in_string_or_comment(line, ms - 1) then
+      local open = me -- the `<`
+      local depth, close = 0, nil
+      for i = open, #line do
+        local c = line:sub(i, i)
+        if c == '<' then
+          depth = depth + 1
+        elseif c == '>' then
+          depth = depth - 1
+          if depth == 0 then
+            close = i
+            break
+          end
+        end
+      end
+      if close then
+        local args = split_args(line:sub(open + 1, close - 1))
+        if #args == 2 then
+          local a_start = open + args[1].from + #(args[1].text:match '^%s*' or '')
+          local a_end = a_start + #vim.trim(args[1].text) - 1
+          local b_start = open + args[2].from + #(args[2].text:match '^%s*' or '')
+          local b_end = b_start + #vim.trim(args[2].text) - 1
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, ms - 1, { end_col = a_start - 1, conceal = '' })
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, a_end, {
+            end_col = b_start - 1,
+            conceal = '',
+            virt_text = { { ' === ', 'Comment' } },
+            virt_text_pos = 'inline',
+          })
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, b_end, { end_col = close, conceal = '' })
+        end
+      end
+    end
+  end
+end
+
 -- 0-based byte columns where a `mut ` should be injected before a function arg:
 -- a non-const *reference* parameter. mut marks a mutable reference; whether a
 -- by-value arg is a copy is the user's call via cpy, independent of mut -- so a
@@ -227,6 +276,9 @@ local function refresh(bufnr)
   for idx, line in ipairs(lines) do
     local row0 = s0 + idx - 1
     if not skip.skip(row0, line) then
+      -- static_assert<A, B> -> A === B (before the generic loop, which would
+      -- otherwise turn the `static_assert` into `$sa`).
+      static_assert_eq(bufnr, row0, line)
       for _, alias in ipairs(ALIASES) do
         local keyword, replacement, hl = alias[1], alias[2], alias[3] or 'Comment'
         local start_pos = 1
@@ -237,7 +289,9 @@ local function refresh(bufnr)
           end
           local before = s > 1 and line:sub(s - 1, s - 1) or nil
           local after = e < #line and line:sub(e + 1, e + 1) or nil
-          if not is_word_char(before) and not is_word_char(after) and not in_string_or_comment(line, s - 1) then
+          -- the templated static_assert<...> is handled above, not as `$sa`.
+          local templated_sa = keyword == 'static_assert' and after == '<'
+          if not is_word_char(before) and not is_word_char(after) and not in_string_or_comment(line, s - 1) and not templated_sa then
             pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, s - 1, {
               end_col = e,
               conceal = '',
