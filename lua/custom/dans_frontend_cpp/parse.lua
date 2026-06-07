@@ -270,6 +270,16 @@ function M.strip_type(typ)
       end
     end
   end
+  -- const char* (an immutable C string) -> CString, wherever it appears -- incl
+  -- nested in a template (vector<const char*> -> vector<CString>). A top-level
+  -- const-char* member is handled in build_chunks (the const is peeled there, so
+  -- it never reaches here with the const attached); this catches the nested ones
+  -- the overlay would otherwise leave as `const char^`. Extra pointer levels are
+  -- kept (const char** -> CString*, then M.ptr -> CString^). Runs before M.ptr so
+  -- it can match the `*` while it is still a star.
+  t = t:gsub('const%s+char%s*(%*+)', function(stars)
+    return 'CString' .. stars:sub(2)
+  end)
   return M.ptr(t)
 end
 

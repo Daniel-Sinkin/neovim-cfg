@@ -252,39 +252,54 @@ local function type_hl(t)
   return 'DansInlayType'
 end
 
--- Split a (caret-free) type segment so each whole-word `string` is green
--- (DansString) and the rest keeps `base_hl`: a nested `std::string` inside a
--- template (`vector<string>`) reads as a string just like a standalone one,
--- mirroring the raw-line `\<std::string\>` matchadd. Whole-word means the char
--- on either side of `string` isn't `[%w_]`, so `string_view` / `u32string` /
--- `MyString` stay `base_hl`. When `base_hl` is already DansString (the whole
--- type IS string, e.g. `string&`) the segment is returned whole -- splitting
--- would needlessly fracture a chunk that's already the right color.
+-- Split a (caret-free) type segment so each whole-word `string` or `CString` is
+-- green (DansString) and the rest keeps `base_hl`: a nested `std::string` /
+-- `const char*` inside a template (`vector<string>`, `vector<CString>`) reads as
+-- a string just like a standalone one, mirroring the raw-line matchadds. Whole-
+-- word means the char on either side isn't `[%w_]`, so `string_view` /
+-- `u32string` / `MyString` / `MyCString` stay `base_hl`. When `base_hl` is
+-- already DansString (the whole type IS the string, e.g. `string&`) the segment
+-- is returned whole -- splitting would fracture a chunk that's already right.
 local function string_token_chunks(text, base_hl)
   if base_hl == 'DansString' then
     return { { text, base_hl } }
   end
+  -- earliest whole-word `string` (lowercase, std::string) or `CString` (capital
+  -- S, so the lowercase `string` scan would miss it) at/after `from`.
+  local function next_tok(from)
+    local bs, be
+    for _, w in ipairs { 'string', 'CString' } do
+      local j = from
+      while true do
+        local s, e = text:find(w, j, true)
+        if not s then
+          break
+        end
+        local before = s > 1 and text:sub(s - 1, s - 1) or ''
+        local after = text:sub(e + 1, e + 1)
+        if not before:match '[%w_]' and not after:match '[%w_]' then
+          if not bs or s < bs then
+            bs, be = s, e
+          end
+          break
+        end
+        j = e + 1 -- part of a longer identifier; keep scanning this word
+      end
+    end
+    return bs, be
+  end
   local out, i, n = {}, 1, #text
   while i <= n do
-    local s, e = text:find('string', i, true)
+    local s, e = next_tok(i)
     if not s then
       out[#out + 1] = { text:sub(i), base_hl }
       break
     end
-    local before = s > 1 and text:sub(s - 1, s - 1) or ''
-    local after = text:sub(e + 1, e + 1)
-    if not before:match '[%w_]' and not after:match '[%w_]' then
-      if s > i then
-        out[#out + 1] = { text:sub(i, s - 1), base_hl }
-      end
-      out[#out + 1] = { 'string', 'DansString' }
-      i = e + 1
-    else
-      -- `string` here is part of a longer identifier: keep scanning past it so we
-      -- don't re-match the same spot, but color it with the rest of the segment.
-      out[#out + 1] = { text:sub(i, e), base_hl }
-      i = e + 1
+    if s > i then
+      out[#out + 1] = { text:sub(i, s - 1), base_hl }
     end
+    out[#out + 1] = { text:sub(s, e), 'DansString' }
+    i = e + 1
   end
   return out
 end

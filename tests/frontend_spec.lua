@@ -124,6 +124,8 @@ run('member const pointer', 'struct', { 'const Foo* cptr{};' }, { 'cptr: const F
 run('member array', 'struct', { 'std::array<f32, 3> arr{};' }, { 'arr: [3]f32;' })
 run('member array no-init', 'struct', { 'std::array<f32, 3> arr;' }, { 'arr: [3]f32;' })
 run('member nested template', 'struct', { 'std::vector<std::pair<int, int>> v{};' }, { 'v: vector<pair<int, int>>;' })
+run('member vector cstring', 'struct', { 'std::vector<const char*> v{};' }, { 'v: vector<CString>;' })
+run('member const-ref vector cstring', 'struct', { 'const std::vector<const char*>& e{};' }, { 'e: const vector<CString>&;' })
 run('member ref-in-template', 'struct', { 'std::pair<int&, int> pr{};' }, { 'pr: pair<int&, int>;' })
 run('member unique_ptr', 'struct', { 'std::unique_ptr<Foo> up{};' }, { 'up: Foo^;' })
 run('member shared_ptr', 'struct', { 'std::shared_ptr<Foo> sp{};' }, { 'sp: Foo^;' })
