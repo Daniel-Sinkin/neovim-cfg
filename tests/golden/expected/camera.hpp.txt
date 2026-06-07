@@ -17,7 +17,7 @@ using linalg::Vec3;
 
 enum class ProjectionMode : u8
 {
-    perspective = 0,
+    perspective  = 0,
     orthographic = 1,
 };
 
