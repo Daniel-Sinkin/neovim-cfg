@@ -244,12 +244,13 @@ local function apply(ev)
   -- source is left moved-from). `\zs` colors only the move/forward word; a member
   -- `.move()` (e.g. a widget) isn't std::-qualified so it's untouched.
   vim.fn.matchadd('DansMarkerMut', code_only [[\<std::\zs\%(move\|forward\)\>]], 25)
-  -- runtime assert(...) -> gray the whole statement (priority 26 beats the
-  -- macro/Vk/SDL coloring in the condition). static_assert is deliberately NOT
-  -- grayed: it's left fully verbatim (util.static_assert_lines skips every
-  -- conceal/sugar there) so its tokens keep their real color and full spelling --
-  -- graying it was what made a `VkResult` inside read as an unidentifiable `Result`.
-  vim.fn.matchadd('DansAssert', code_only [[\<assert\>.\{-};]], 26)
+  -- assert / static_assert -> gray the whole `...assert(...);` statement (priority
+  -- 26 beats the macro/Vk/SDL coloring in the condition), marking it as skim-past
+  -- checking code. static_assert is also left fully verbatim
+  -- (util.static_assert_lines skips every conceal/sugar), so the gray now sits on
+  -- top of the real, un-cut text -- a `VkResult` inside reads as a gray `VkResult`,
+  -- not a misleading `Result`.
+  vim.fn.matchadd('DansAssert', code_only [[\<\%(static_\)\?assert\>.\{-};]], 26)
   -- String literals -> green, priority 35 (above the other color matches) so a
   -- Vk*/macro token inside a string is not recolored. Concealing inside strings is
   -- separately prevented: the prefix conceals are treesitter-gated extmarks, not

@@ -17,14 +17,16 @@ local function is_hpp(buf)
   return vim.api.nvim_buf_get_name(buf):sub(-4) == '.hpp'
 end
 
--- Contract scopes: each `{ // Expects` / `{ // Ensures` brace-matched to its `}`,
--- returned as inclusive 1-based {start, end} line ranges. Brace matching is naive
--- (counts `{`/`}` literally), fine for these assert-only blocks.
+-- Contract / grouping scopes: each `{ // Expects` / `{ // Ensures` / `{ // Asserts`
+-- brace-matched to its `}`, returned as inclusive 1-based {start, end} line ranges.
+-- Brace matching is naive (counts `{`/`}` literally), fine for these assert-only
+-- blocks. `{ // Asserts }` lets you group assertions the same way Expects groups
+-- preconditions.
 local function contract_ranges(lines)
   local out = {}
   local i = 1
   while i <= #lines do
-    if lines[i]:match '^%s*{%s*//%s*[Ee]xpects' or lines[i]:match '^%s*{%s*//%s*[Ee]nsures' then
+    if lines[i]:match '^%s*{%s*//%s*[Ee]xpects' or lines[i]:match '^%s*{%s*//%s*[Ee]nsures' or lines[i]:match '^%s*{%s*//%s*[Aa]sserts' then
       local depth, j = 0, i
       while j <= #lines do
         for ch in lines[j]:gmatch '[{}]' do
@@ -56,6 +58,29 @@ local function doc_ranges(lines)
     if lines[i]:match '^%s*///' then
       local j = i
       while j <= #lines and lines[j]:match '^%s*///' do
+        j = j + 1
+      end
+      if j - i >= 2 then
+        out[#out + 1] = { i, j - 1 }
+      end
+      i = j
+    else
+      i = i + 1
+    end
+  end
+  return out
+end
+
+-- Runs of 2+ contiguous `static_assert(...)` lines, as inclusive 1-based ranges --
+-- a block of compile-time checks folds to one line like a `///` doc run. Single
+-- static_asserts (and runtime assert(...), which never matches) are left alone.
+local function static_assert_ranges(lines)
+  local out = {}
+  local i = 1
+  while i <= #lines do
+    if lines[i]:match '^%s*static_assert%s*%(' then
+      local j = i
+      while j <= #lines and lines[j]:match '^%s*static_assert%s*%(' do
         j = j + 1
       end
       if j - i >= 2 then
@@ -161,6 +186,9 @@ function M.compute_fold_levels(lines)
   for _, r in ipairs(doc_ranges(lines)) do
     ranges[#ranges + 1] = r
   end
+  for _, r in ipairs(static_assert_ranges(lines)) do
+    ranges[#ranges + 1] = r
+  end
   return ranges_to_levels(ranges, #lines)
 end
 
@@ -178,6 +206,9 @@ function _G.dans_cpp_foldexpr()
     local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
     local ranges = contract_ranges(lines)
     for _, r in ipairs(doc_ranges(lines)) do
+      ranges[#ranges + 1] = r
+    end
+    for _, r in ipairs(static_assert_ranges(lines)) do
       ranges[#ranges + 1] = r
     end
     if is_hpp(buf) then

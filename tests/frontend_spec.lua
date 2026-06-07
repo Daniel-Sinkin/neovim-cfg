@@ -405,6 +405,31 @@ do
   end
 end
 
+-- static_assert runs (2+ contiguous) fold; a lone one doesn't; `{ // Asserts }`
+-- folds like a contract block.
+do
+  local fl = require('custom.dans_frontend_cpp.fold').compute_fold_levels
+  local levels = fl({
+    'static_assert(a);', 'static_assert(b);',
+    'do_work();',
+    'static_assert(lonely);',
+    '{  // Asserts', '    assert(x);', '}',
+  })
+  local exp = { '>1', '<1', '0', '0', '>1', '1', '<1' }
+  local ok = true
+  for i = 1, #exp do
+    if levels[i] ~= exp[i] then
+      ok = false
+    end
+  end
+  if ok then
+    pass = pass + 1
+  else
+    fail = fail + 1
+    fails[#fails + 1] = 'FAIL  static_assert fold: ' .. table.concat(levels, ',')
+  end
+end
+
 -- ===================== golden regression (real dans-vk fixtures) =====================
 -- Render frozen first-party files end to end and diff against committed snapshots.
 -- Regenerate intentionally with tests/golden/update.lua, then review the diff.
