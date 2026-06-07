@@ -80,7 +80,7 @@ run('auto&& fwd (raw)', 'fn', { 'auto&& z = f();' }, { false })
 
 -- ===================== pointers / references =====================
 run('local pointer', 'fn', { 'int* p{};' }, { 'p: mut int^;' })
-run('local const pointer', 'fn', { 'const char* s{};' }, { 's: const char^;' })
+run('local const pointer', 'fn', { 'const char* s{};' }, { 's: CString;' })
 
 -- ===================== casts inside values =====================
 run('static_cast value', 'fn', { 'auto v = static_cast<int>(y);' }, { 'mut v := $scast<int>(y);' })
@@ -99,6 +99,7 @@ run('structured mut ref binding', 'fn', { 'auto& [xpos, ypos] = *res;' }, { 'mut
 run('for const ref', 'fn', { 'for (const auto& v : items)' }, { 'for (v& : items)' })
 run('for mut ref', 'fn', { 'for (auto& m : items)' }, { 'for (mut m& : items)' })
 run('for mut value', 'fn', { 'for (auto x : xs)' }, { 'for (mut x : xs)' })
+run('for fwd ref', 'fn', { 'for (auto&& elem : range)' }, { 'for (mut elem&& : range)' })
 run('for const value', 'fn', { 'for (const auto x : xs)' }, { 'for (x : xs)' })
 run('for c-style (raw)', 'fn', { 'for (int i = 0; i < n; ++i)' }, { false })
 

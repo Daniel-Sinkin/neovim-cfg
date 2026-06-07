@@ -130,4 +130,54 @@ function M.set_module(bufnr, name, on)
   module_off[bufnr] = off
 end
 
+-- Decoration repaint coalescing. The view / decoration refreshes used to run on
+-- every WinScrolled, so a mouse-scroll burst reran the whole stack per notch.
+-- Instead the umbrella fires this user event once, DECORATE_DEBOUNCE_MS after
+-- scrolling stops; decoration modules listen to it (via on_decorate) rather than
+-- WinScrolled. Edits and cursor moves stay immediate.
+M.VIEWPORT_SETTLED = 'DansViewportSettled'
+local DECORATE_DEBOUNCE_MS = 100
+
+-- Register decoration autocmds for `cb` (called with a bufnr): `events` fire it
+-- immediately; the debounced VIEWPORT_SETTLED event drives the scroll repaint.
+-- Do NOT pass WinScrolled in `events` -- scrolling goes through the settled event.
+function M.on_decorate(group, events, cb)
+  vim.api.nvim_create_autocmd(events, {
+    group = group,
+    callback = function(ev)
+      cb(ev.buf)
+    end,
+  })
+  vim.api.nvim_create_autocmd('User', {
+    group = group,
+    pattern = M.VIEWPORT_SETTLED,
+    callback = function(ev)
+      cb(ev.buf)
+    end,
+  })
+end
+
+-- Install the single WinScrolled debouncer that fires VIEWPORT_SETTLED once
+-- scrolling has been quiet for DECORATE_DEBOUNCE_MS. Called once by the umbrella.
+local scroll_timer
+function M.setup_viewport_debounce()
+  local group = vim.api.nvim_create_augroup('ds_viewport_debounce', { clear = true })
+  vim.api.nvim_create_autocmd('WinScrolled', {
+    group = group,
+    callback = function()
+      if not scroll_timer then
+        scroll_timer = (vim.uv or vim.loop).new_timer()
+      end
+      scroll_timer:stop()
+      scroll_timer:start(
+        DECORATE_DEBOUNCE_MS,
+        0,
+        vim.schedule_wrap(function()
+          vim.api.nvim_exec_autocmds('User', { pattern = M.VIEWPORT_SETTLED })
+        end)
+      )
+    end,
+  })
+end
+
 return M

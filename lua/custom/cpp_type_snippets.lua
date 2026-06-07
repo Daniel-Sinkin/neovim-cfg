@@ -1,27 +1,39 @@
 -- Space-triggered, composable C++ type shorthand for c/cpp/cuda. Type a
 -- `$`-token and press <Space>: the token before the cursor is expanded to a
 -- std:: type. Unlike a LuaSnip autosnippet it does NOT fire mid-token, so the
--- pieces compose -- `$str$?` waits for the space, then becomes
+-- pieces compose -- `$?$str` waits for the space, then becomes
 -- std::optional<std::string>.
+--
+-- Nesting is OUTER-TO-INNER (prefix): the wrapper / container comes first and
+-- the contained type follows, the same order the expansion brackets in. So
+-- `$<$?$int` reads vector-of-optional-of-int -> std::vector<std::optional<int>>.
+-- A segment whose name isn't a known atom is taken literally, so any type can be
+-- the inner one (`$?$int`, `$?$Foo`, `$?$sdfgfd`). The only thing rejected is a
+-- bare unknown `$token` on its own: it isn't a type, so it's removed.
 --
 --   $str            -> std::string
 --   $sv             -> std::string_view
 --   $rv             -> std::ranges::views
 --   $ra             -> std::ranges
---   $?              -> std::nullopt               (bare; $T? gives the type)
---   $int?  / $Foo$? -> std::optional<int>          (glued or split sigil)
---   $Foo^           -> std::unique_ptr<Foo>
---   $Foo<           -> std::vector<Foo>
---   $str$?          -> std::optional<std::string>  (wrappers compose)
---   $K$V$um         -> std::unordered_map<K, V>
---   $K$V$map        -> std::map<K, V>
---   $T$N$arr        -> std::array<T, N>
---   $copy / $copya / $move / $movea / $constr / $destr
+--   $?              -> std::nullopt                 (bare; $?$T gives the optional)
+--   $?$int          -> std::optional<int>
+--   $?$str          -> std::optional<std::string>
+--   $?$sdfgfd       -> std::optional<sdfgfd>        (unknown inner -> literal)
+--   $^$Foo / $up$Foo -> std::unique_ptr<Foo>   (`^` / `up` alias)
+--   $sp$Foo          -> std::shared_ptr<Foo>
+--   $^ / $up / $sp   -> bare smart-ptr template name
+--   $<$Foo           -> std::vector<Foo>       (vector is `<`)
+--   $<$?$int        -> std::vector<std::optional<int>>
+--   $um$K$V         -> std::unordered_map<K, V>
+--   $map$K$V        -> std::map<K, V>
+--   $arr$T$N        -> std::array<T, N>
+--   $copy / $copya / $move / $movea
 --                   -> the matching special member of the enclosing class, e.g.
 --                      $copy -> X(const X&), $copya -> def operator=(const X&) -> X&
---                      (inverse of the special_members view collapse)
---   $invalid<Space> -> (deleted)                   ($ isn't valid C++; unresolved
---                                                   $-blocks are removed)
+--                      (inverse of the special_members view collapse; the default
+--                      ctor/dtor are no longer collapsed, so they have no $form)
+--   $sdfgfd<Space>  -> (deleted)                    (bare unknown $token isn't a
+--                                                    type; unresolved $-blocks go)
 -- `$` inside a string is left alone. A block must end at the cursor, so `$sa(`
 -- (trailing non-snippet char) does nothing.
 --
@@ -35,6 +47,17 @@ local M = {}
 -- keys off this one constant.
 local SIGIL = '$'
 local SIGIL_PAT = vim.pesc(SIGIL)
+
+-- Smart-pointer wrappers, the single source of truth spread into WRAP (the
+-- wrapping form) and BARE (the no-operand form) below. Each works prefix
+-- (`$^$int` -> unique_ptr<int>) and bare as the plain template (`$^` / `$up` ->
+-- unique_ptr). `^` and `up` are aliases for unique_ptr; `sp` is shared_ptr (no
+-- sigil). Kept out of ATOM so the bare atom doesn't shadow the wrapper.
+local SMART_PTR = {
+  ['^'] = 'std::unique_ptr',
+  up = 'std::unique_ptr',
+  sp = 'std::shared_ptr',
+}
 
 -- 0-arg atoms: $word -> expansion. Two sources, one mechanism:
 --   * the type shorthands below (expansion-only conveniences), and
@@ -63,30 +86,40 @@ do
       -- keep only the `$word` aliases (skip e.g. VK_NULL_HANDLE -> `{}`); the
       -- type shorthands above win on any name clash.
       local key = type(a[2]) == 'string' and a[2]:match '^%$([%w_]+)$'
-      if key and ATOM[key] == nil then
+      -- skip the smart-pointer keys (up/sp): they're wrappers, not 0-arg atoms.
+      if key and ATOM[key] == nil and not SMART_PTR[key] then
         ATOM[key] = a[1]
       end
     end
   end
 end
 
--- Unary postfix wrappers (sigil -> inner -> type).
+-- Unary prefix wrappers: the sigil (or word) applies to the operand that follows
+-- it. The smart pointers (^/up/sp) are folded in from SMART_PTR so the wrapping
+-- and bare forms stay in sync.
 local WRAP = {
   ['?'] = function(x)
     return 'std::optional<' .. x .. '>'
-  end,
-  ['^'] = function(x)
-    return 'std::unique_ptr<' .. x .. '>'
   end,
   ['<'] = function(x)
     return 'std::vector<' .. x .. '>'
   end,
 }
--- A wrapper sigil with no operand: bare `$?` is the empty-optional value
--- std::nullopt (there's no use for a bare `std::optional`; `$T?` gives the type).
+for key, ty in pairs(SMART_PTR) do
+  WRAP[key] = function(x)
+    return ty .. '<' .. x .. '>'
+  end
+end
+-- A wrapper with no operand: bare `$?` is the empty-optional value std::nullopt;
+-- a bare smart pointer (`$^` / `$up` / `$sp`) is its plain template name. (There
+-- is no bare `std::optional` / `std::vector`; `$?$T` / `$<$T` give those.)
 local BARE = { ['?'] = 'std::nullopt' }
+for key, ty in pairs(SMART_PTR) do
+  BARE[key] = ty
+end
 
--- Binary combinators: $word -> (a, b) -> type.
+-- Binary combinators, also prefix: $word consumes the next two operands.
+-- `$um$K$V` -> std::unordered_map<K, V> (first operand is the left bracket slot).
 local COMBINE = {
   um = function(a, b)
     return 'std::unordered_map<' .. a .. ', ' .. b .. '>'
@@ -100,9 +133,13 @@ local COMBINE = {
 }
 
 -- Evaluate a `$`-token to its C++ expansion, or nil if it isn't a valid DSL
--- token. Split on the sigil into segments, peel a trailing wrap sigil off each,
--- and fold a value stack left to right. `transformed` guards against a lone
--- `$Ident` (no atom/op) silently collapsing to a bare `Ident`.
+-- token. Split on the sigil into segments; each is a unary wrapper (?/^/<), a
+-- binary combinator (um/map/arr), a 0-arg atom (str/sv/...), or a bare
+-- identifier taken literally (int, Foo, sdfgfd). Fold the value stack RIGHT TO
+-- LEFT so every operator wraps the operand(s) to its right -- prefix / Polish
+-- order, i.e. the outer-to-inner nesting (`$<$?$int` -> vector(optional(int))).
+-- `transformed` guards a lone `$Ident` (no atom/op): a bare unknown $token isn't
+-- a type, so it collapses to nil and is removed rather than left as `Ident`.
 function M.expand(token)
   if token:sub(1, #SIGIL) ~= SIGIL then
     return nil
@@ -117,42 +154,41 @@ function M.expand(token)
   end
 
   local stack, transformed = {}, false
-  for _, seg in ipairs(segs) do
-    if COMBINE[seg] then
-      local b, a = table.remove(stack), table.remove(stack)
-      if not a then
+  for i = #segs, 1, -1 do
+    local seg = segs[i]
+    if WRAP[seg] then
+      -- wrap the operand to the right; with nothing to wrap, fall back to the
+      -- bare value (`$?` -> std::nullopt) or reject. Pop into a local first: a
+      -- `stack[#stack+1] = f(table.remove(stack))` would read `#stack` before the
+      -- pop and land the result in the wrong slot.
+      if #stack > 0 then
+        local inner = table.remove(stack)
+        stack[#stack + 1] = WRAP[seg](inner)
+      elseif BARE[seg] then
+        stack[#stack + 1] = BARE[seg]
+      else
         return nil
+      end
+      transformed = true
+    elseif COMBINE[seg] then
+      local a = table.remove(stack)
+      local b = table.remove(stack)
+      if not b then
+        return nil -- needs two operands to its right
       end
       stack[#stack + 1] = COMBINE[seg](a, b)
       transformed = true
-    else
-      local core, sig = seg, nil
-      local last = seg:sub(-1)
-      if WRAP[last] then
-        core, sig = seg:sub(1, -2), last
-      end
-      if core ~= '' then
-        if not core:match '^[%w_:]+$' then
-          return nil
-        end
-        if ATOM[core] then
-          stack[#stack + 1] = ATOM[core]
-          transformed = true
-        else
-          stack[#stack + 1] = core
-        end
-      end
-      if sig then
-        if #stack > 0 then
-          local v = table.remove(stack)
-          stack[#stack + 1] = WRAP[sig](v)
-        elseif BARE[sig] then
-          stack[#stack + 1] = BARE[sig]
-        else
-          return nil
-        end
+    elseif seg:match '^[%w_:]+$' then
+      -- a known atom expands; any other identifier is the literal inner type.
+      -- A literal on its own is not a transform (see `transformed`).
+      if ATOM[seg] then
+        stack[#stack + 1] = ATOM[seg]
         transformed = true
+      else
+        stack[#stack + 1] = seg
       end
+    else
+      return nil -- not a sigil, a combinator, or an identifier
     end
   end
 
@@ -185,12 +221,6 @@ end
 -- to $copy). X is supplied by the caller (treesitter), so these are handled in
 -- resolve rather than the pure M.expand.
 local SPECIAL = {
-  constr = function(x)
-    return x .. '()'
-  end,
-  destr = function(x)
-    return '~' .. x .. '()'
-  end,
   copy = function(x)
     return x .. '(const ' .. x .. '&)'
   end,
@@ -297,7 +327,13 @@ function M.setup()
     group = vim.api.nvim_create_augroup('ds_cpp_type_dsl', { clear = true }),
     pattern = { 'c', 'cpp', 'cuda' },
     callback = function(ev)
-      vim.keymap.set('i', '<Space>', on_space, { buffer = ev.buf, desc = 'Expand $type shorthand or insert space' })
+      -- Map <Space> AND <S-Space>: in a GUI (Neovide) Shift+Space is a distinct
+      -- key, so a bare <Space> map misses it and a held shift swallows the
+      -- expansion. Both route to the same handler (expand a $-block, else insert
+      -- a plain space).
+      for _, lhs in ipairs { '<Space>', '<S-Space>' } do
+        vim.keymap.set('i', lhs, on_space, { buffer = ev.buf, desc = 'Expand $type shorthand or insert space' })
+      end
     end,
   })
 end

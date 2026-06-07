@@ -1,7 +1,9 @@
--- View-only: collapse a class's special-member declarations to a short generic
--- name, so you read intent instead of boilerplate. X is the enclosing class.
---   X()                                          -> $constr
---   ~X()                                         -> $destr
+-- View-only: collapse a class's copy/move special-member declarations to a short
+-- generic name, so you read intent instead of boilerplate. X is the enclosing
+-- class. The default constructor `X()` and destructor `~X()` are deliberately
+-- left as written -- they often carry real init/teardown, and the class name
+-- reads clearer than a generic token (the copy/move members are the real
+-- ceremony worth hiding).
 --   X(const X&)                                  -> $copy
 --   X(X&&)                                       -> $move
 --   X& operator=(const X&) / def ... -> X&       -> $copya
@@ -19,15 +21,14 @@ local vu = require 'custom.dans_frontend_cpp.util'
 local BODY_QUERY = [[(field_declaration_list) @body]]
 
 -- Signature forms for class `x` (patterns over the post-indent code) -> role.
--- Order matters: ~X and X(...) before X(); both operator= spellings (leading
--- return `X& operator=` and trailing `def/auto operator= ... -> X&`).
+-- The default ctor `X()` / dtor `~X()` are intentionally absent (left raw). Both
+-- operator= spellings are matched (leading return `X& operator=` and trailing
+-- `def/auto operator= ... -> X&`).
 local function forms_for(x)
   local q = vim.pesc(x)
   return {
-    { 'destr', '^~' .. q .. '%s*%(%s*%)' },
     { 'copy', '^' .. q .. '%s*%(%s*const%s+' .. q .. '%s*&%s*%)' },
     { 'move', '^' .. q .. '%s*%(%s*' .. q .. '%s*&&%s*%)' },
-    { 'constr', '^' .. q .. '%s*%(%s*%)' },
     { 'copya', '^' .. q .. '%s*&%s*operator%s*=%s*%(%s*const%s+' .. q .. '%s*&%s*%)' },
     { 'copya', '^%a[%w_]*%s+operator%s*=%s*%(%s*const%s+' .. q .. '%s*&%s*%)%s*%->%s*' .. q .. '%s*&' },
     { 'movea', '^' .. q .. '%s*&%s*operator%s*=%s*%(%s*' .. q .. '%s*&&%s*%)' },
@@ -131,15 +132,7 @@ function M.setup()
       refresh(ev.buf)
     end,
   })
-  vim.api.nvim_create_autocmd(
-    { 'TextChanged', 'TextChangedI', 'BufEnter', 'CursorMoved', 'CursorMovedI', 'WinScrolled', 'DiagnosticChanged' },
-    {
-      group = group,
-      callback = function(ev)
-        refresh(ev.buf)
-      end,
-    }
-  )
+  vu.on_decorate(group, { 'TextChanged', 'TextChangedI', 'BufEnter', 'CursorMoved', 'CursorMovedI', 'DiagnosticChanged' }, refresh)
 end
 
 return M

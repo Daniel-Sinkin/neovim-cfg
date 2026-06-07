@@ -21,9 +21,14 @@
 
 local M = {}
 
+local vu = require 'custom.dans_frontend_cpp.util'
+
 local ns = vim.api.nvim_create_namespace 'ds_cpp_doc_md'
 local enabled = {} -- bufnr -> bool; nil means "default", which is ON for .hpp
 local last_row = {} -- bufnr -> cursor row, to skip refresh on horizontal moves
+
+local BLOCK_WIDTH = 100 -- doc / code blocks render as a fixed-width band, not full-window
+local dw = vim.fn.strdisplaywidth
 
 local function is_hpp(bufnr)
   return vim.api.nvim_buf_get_name(bufnr):sub(-4) == '.hpp'
@@ -39,10 +44,41 @@ local function is_on(bufnr)
   return v
 end
 
--- Follow tokyonight's markdown for the foreground, plus a distinct block
--- background (the float bg, which adapts day/night). The text groups carry that
--- same bg so it shows BEHIND the prose -- a fg-only group would let Normal's bg
--- through and the block would only tint the margins. Re-asserted on ColorScheme.
+-- Multiply an 0xRRGGBB color toward black; used to derive the fenced-code
+-- background as a darker shade of the doc-block background.
+local function darken(rgb, f)
+  if type(rgb) ~= 'number' then
+    return rgb
+  end
+  local r = math.floor((math.floor(rgb / 65536) % 256) * f + 0.5)
+  local g = math.floor((math.floor(rgb / 256) % 256) * f + 0.5)
+  local b = math.floor((rgb % 256) * f + 0.5)
+  return r * 65536 + g * 256 + b
+end
+
+-- Mix 0xRRGGBB `a` toward `b` by weight t (0 = a, 1 = b); used to mute the inline
+-- code green by pulling it toward the comment gray.
+local function blend(a, b, t)
+  if type(a) ~= 'number' or type(b) ~= 'number' then
+    return a
+  end
+  local ch = function(x, sh)
+    return math.floor(x / sh) % 256
+  end
+  local mix = function(x, y)
+    return math.floor(x * (1 - t) + y * t + 0.5)
+  end
+  local r = mix(ch(a, 65536), ch(b, 65536))
+  local g = mix(ch(a, 256), ch(b, 256))
+  local bl = mix(ch(a, 1), ch(b, 1))
+  return r * 65536 + g * 256 + bl
+end
+
+-- Prose reads as comment text (gray, italic) so the doc block separates cleanly
+-- from real code rather than competing with it; a distinct block background (the
+-- float bg, which adapts day/night) sits behind it. The text groups carry that bg
+-- so it shows BEHIND the prose -- a fg-only group would let Normal's bg through
+-- and the block would only tint the margins. Re-asserted on ColorScheme.
 local function set_hl()
   local get = function(name)
     return vim.api.nvim_get_hl(0, { name = name, link = false })
@@ -50,22 +86,21 @@ local function set_hl()
   local normal = get 'Normal'
   local block_bg = (get 'NormalFloat').bg or normal.bg
   vim.api.nvim_set_hl(0, 'DansDocBlock', { bg = block_bg })
-  local on_block = function(g, src, extra)
-    local h = { fg = get(src).fg or normal.fg, bg = block_bg }
-    for k, v in pairs(extra or {}) do
-      h[k] = v
-    end
-    vim.api.nvim_set_hl(0, g, h)
-  end
-  on_block('DansDocText', 'Normal')
-  on_block('DansDocHeading', '@markup.heading', { bold = true })
-  on_block('DansDocCode', '@markup.raw')
-  on_block('DansDocBullet', '@markup.list')
-  -- fenced ``` code: a separate code-block background (tokyonight's, falling back
-  -- to the inline-code bg, then the doc-block bg) so the fence reads apart from
-  -- the prose; its fg/bg also paint the code text (no markdown parsing inside).
-  local code_bg = (get '@markup.raw.block').bg or (get '@markup.raw').bg or block_bg
-  vim.api.nvim_set_hl(0, 'DansDocCodeBlock', { fg = (get '@markup.raw').fg or normal.fg, bg = code_bg })
+  local comment = get 'Comment'
+  local comment_fg = comment.fg or normal.fg
+  vim.api.nvim_set_hl(0, 'DansDocText', { fg = comment_fg, bg = block_bg, italic = comment.italic })
+  vim.api.nvim_set_hl(0, 'DansDocHeading', { fg = comment_fg, bg = block_bg, bold = true })
+  vim.api.nvim_set_hl(0, 'DansDocBullet', { fg = comment_fg, bg = block_bg, italic = comment.italic })
+  -- inline `code`: a muted green -- the config's green (0x9ece6a, hardcoded the
+  -- same way throughout treesitter.lua; the treesitter @string/@markup.raw groups
+  -- are flattened away in cpp buffers, so they can't be read here) pulled toward
+  -- the comment gray so it reads as code without the loud full-saturation green.
+  vim.api.nvim_set_hl(0, 'DansDocCode', { fg = blend(0x9ece6a, comment_fg, 0.4), bg = block_bg })
+  -- fenced ``` code: an even darker background (the doc-block bg darkened) so the
+  -- code reads as a nested block. cpp fences get real treesitter highlighting on
+  -- top, so this fg is only the neutral fallback for chars no capture colors.
+  local code_bg = darken(block_bg, 0.65) or (get '@markup.raw').bg or block_bg
+  vim.api.nvim_set_hl(0, 'DansDocCodeBlock', { fg = normal.fg, bg = code_bg })
 end
 
 local function conceal(bufnr, row0, s, e, cchar)
@@ -197,6 +232,82 @@ local function render_line(bufnr, row0, line)
   end
 end
 
+-- Paint a fixed-width (BLOCK_WIDTH) background band on one line: bg over the real
+-- text, then an eol virt_text of spaces extending it to the target column. `vis`
+-- is the line's already-rendered display width (conceals / indent accounted for).
+local function band(bufnr, row0, line, group, vis)
+  if #line > 0 then
+    hl(bufnr, row0, 0, #line, group, 90)
+  end
+  local pad = BLOCK_WIDTH - vis
+  if pad > 0 then
+    pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, #line, {
+      virt_text = { { string.rep(' ', pad), group } },
+      virt_text_pos = 'eol',
+    })
+  end
+end
+
+-- Rendered display width of a prose `///` line: leader gone, heading `#`s gone,
+-- inline-code backticks gone (the bullet `-`->`•` keeps width).
+local function prose_vis(indent, content)
+  local body = content
+  local _, htext = content:match '^(#+)%s+(.*)$'
+  if htext then
+    body = htext
+  end
+  body = body:gsub('`', '')
+  return dw(indent .. body)
+end
+
+local function is_cpp_lang(lang)
+  lang = (lang or ''):lower()
+  return lang == '' or lang == 'cpp' or lang == 'c' or lang == 'c++' or lang == 'cc' or lang == 'cxx' or lang == 'h' or lang == 'hpp' or lang == 'hxx'
+end
+
+-- Real cpp treesitter highlighting for a fenced block. The code text (leaders
+-- stripped) is parsed as a standalone cpp string; each capture is mapped back to
+-- its buffer row/col and emitted as an hl_group extmark. The cursor row is left
+-- raw (skipped) but still fed to the parser so multi-line captures stay aligned.
+local function highlight_cpp(bufnr, code_lines, cur)
+  if #code_lines == 0 then
+    return
+  end
+  local parts = {}
+  for _, cl in ipairs(code_lines) do
+    parts[#parts + 1] = cl.content
+  end
+  local src = table.concat(parts, '\n')
+  local ok, parser = pcall(vim.treesitter.get_string_parser, src, 'cpp')
+  if not ok or not parser then
+    return
+  end
+  local ok2, trees = pcall(function()
+    return parser:parse()
+  end)
+  if not ok2 or not trees or not trees[1] then
+    return
+  end
+  local query = vim.treesitter.query.get('cpp', 'highlights')
+  if not query then
+    return
+  end
+  for id, node in query:iter_captures(trees[1]:root(), src, 0, -1) do
+    local name = query.captures[id]
+    if name:sub(1, 1) ~= '_' then
+      local sr, sc, er, ec = node:range()
+      for r = sr, er do
+        local cl = code_lines[r + 1]
+        if cl and cl.row0 ~= cur then
+          local s = (r == sr) and sc or 0
+          local e = (r == er) and ec or #cl.content
+          hl(bufnr, cl.row0, cl.content_col + s, cl.content_col + e, '@' .. name, 160)
+        end
+      end
+    end
+  end
+end
+
 local function refresh(bufnr)
   if not (vim.api.nvim_buf_is_valid(bufnr) and is_hpp(bufnr)) then
     return
@@ -208,48 +319,85 @@ local function refresh(bufnr)
   local cur = bufnr == vim.api.nvim_get_current_buf() and (vim.api.nvim_win_get_cursor(0)[1] - 1) or -1
   local n = vim.api.nvim_buf_line_count(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, n, false)
-  local i = 1
-  while i <= n do
+  -- Scan only the on-screen window (plus a margin), not the whole buffer, so a
+  -- large header isn't reprocessed and its fences reparsed on every repaint. `///`
+  -- runs are short, so each run intersecting the window is expanded to its true
+  -- bounds and processed whole, keeping fence (``` ... ```) state correct.
+  local vs, ve = 1, n
+  if bufnr == vim.api.nvim_get_current_buf() then
+    vs = math.max(1, vim.fn.line 'w0' - vu.VISIBLE_MARGIN)
+    ve = math.min(n, vim.fn.line 'w$' + vu.VISIBLE_MARGIN)
+  end
+  local i = vs
+  while i <= ve do
     if lines[i]:match '^%s*///' then
+      local s = i
+      while s > 1 and lines[s - 1]:match '^%s*///' do
+        s = s - 1
+      end
       local j = i
       while j <= n and lines[j]:match '^%s*///' do
         j = j + 1
       end
       local in_fence = false -- inside a ``` ... ``` fenced code region
-      for k = i, j - 1 do
+      local fence_lang = nil
+      local code_lines = {}
+      local function flush_code()
+        if is_cpp_lang(fence_lang) then
+          highlight_cpp(bufnr, code_lines, cur)
+        end
+        code_lines = {}
+      end
+      for k = s, j - 1 do
         local row0 = k - 1
         local indent, content = lines[k]:match '^(%s*)///%s?(.*)$'
         content = content or ''
+        local full = lines[k]
         local is_fence = content:match '^```' ~= nil
-        local code = in_fence or is_fence
-        -- block background on every line of the run (cursor line included, so the
-        -- block stays continuous while its text is revealed raw); fenced lines get
-        -- the code-block background instead.
-        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, 0, {
-          line_hl_group = code and 'DansDocCodeBlock' or 'DansDocBlock',
-        })
-        if row0 ~= cur then
-          if is_fence then
-            -- hide the whole fence line (leader + ``` + language); the code bg
-            -- left behind delimits the block.
-            conceal(bufnr, row0, #indent, #lines[k])
-          elseif in_fence then
-            -- code line: conceal the leader; the code shows verbatim, colored by
-            -- the DansDocCodeBlock line highlight. With the inline-frontend
-            -- setting on, also apply the dans text transforms to the code.
-            local content_col = #lines[k] - #content
+        local is_cursor = row0 == cur
+
+        if is_fence and not in_fence then
+          -- opening fence: hidden; code-block bg forms the block's top edge.
+          fence_lang = content:match '^```%s*([%w+]+)'
+          band(bufnr, row0, full, 'DansDocCodeBlock', is_cursor and dw(full) or #indent)
+          if not is_cursor then
+            conceal(bufnr, row0, #indent, #full)
+          end
+          in_fence = true
+        elseif is_fence and in_fence then
+          -- closing fence: NO background. It renders empty, so leaving it on the
+          -- Normal bg ends the block at the last code line and eases back to code.
+          flush_code()
+          if not is_cursor then
+            conceal(bufnr, row0, #indent, #full)
+          end
+          in_fence = false
+          fence_lang = nil
+        elseif in_fence then
+          -- code line: code-block bg, leader hidden. cpp gets treesitter
+          -- highlighting via flush_code; the cursor row stays raw.
+          local content_col = #full - #content
+          if is_cursor then
+            band(bufnr, row0, full, 'DansDocCodeBlock', dw(full))
+          else
+            band(bufnr, row0, full, 'DansDocCodeBlock', #indent + dw(content))
             conceal(bufnr, row0, #indent, content_col)
             if inline_frontend_on() then
               apply_inline_frontend(bufnr, row0, content, content_col)
             end
+          end
+          code_lines[#code_lines + 1] = { row0 = row0, content_col = content_col, content = content }
+        else
+          -- prose line: doc-block bg + markdown rendering (cursor row stays raw).
+          if is_cursor then
+            band(bufnr, row0, full, 'DansDocBlock', dw(full))
           else
-            render_line(bufnr, row0, lines[k])
+            band(bufnr, row0, full, 'DansDocBlock', prose_vis(indent, content))
+            render_line(bufnr, row0, full)
           end
         end
-        if is_fence then
-          in_fence = not in_fence
-        end
       end
+      flush_code()
       i = j
     else
       i = i + 1
@@ -268,13 +416,27 @@ function M.setup()
   set_hl()
   local group = vim.api.nvim_create_augroup('ds_cpp_doc_md', { clear = true })
 
-  vim.api.nvim_create_autocmd({ 'BufReadPost', 'BufEnter', 'TextChanged', 'TextChangedI', 'WinScrolled' }, {
+  vim.api.nvim_create_autocmd({ 'BufReadPost', 'BufEnter', 'TextChanged', 'TextChangedI' }, {
     group = group,
     pattern = '*.hpp',
     callback = function(ev)
       vim.opt_local.conceallevel = 2
       vim.opt_local.concealcursor = ''
+      -- re-pick the comment color on buffer enter: treesitter's cpp FileType
+      -- handler resets Comment, which runs after this module's setup().
+      if ev.event == 'BufReadPost' or ev.event == 'BufEnter' then
+        set_hl()
+      end
       refresh(ev.buf)
+    end,
+  })
+  -- scroll repaint via the debounced settled event (current buffer; refresh bails
+  -- on non-.hpp), so a scroll burst doesn't rescan the visible window per notch.
+  vim.api.nvim_create_autocmd('User', {
+    group = group,
+    pattern = vu.VIEWPORT_SETTLED,
+    callback = function()
+      refresh(vim.api.nvim_get_current_buf())
     end,
   })
   vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {

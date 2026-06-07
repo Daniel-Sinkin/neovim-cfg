@@ -218,12 +218,13 @@ return {
         end
       end
 
-      vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'TextChanged', 'TextChangedI', 'BufEnter', 'WinScrolled' }, {
-        group = vim.api.nvim_create_augroup('ds-enclosing-brace', { clear = true }),
-        callback = function(ev)
-          update_enclosing_braces(ev.buf)
-        end,
-      })
+      -- Scrolling goes through the frontend's debounced VIEWPORT_SETTLED event
+      -- (not WinScrolled), so a scroll burst recomputes the enclosing braces once.
+      require('custom.dans_frontend_cpp.util').on_decorate(
+        vim.api.nvim_create_augroup('ds-enclosing-brace', { clear = true }),
+        { 'CursorMoved', 'CursorMovedI', 'TextChanged', 'TextChangedI', 'BufEnter' },
+        update_enclosing_braces
+      )
 
       -- C/C++/CUDA monochrome theme. Re-enables classic syntax, then flattens
       -- nearly every group to Normal so only strings (+ comments in gray)

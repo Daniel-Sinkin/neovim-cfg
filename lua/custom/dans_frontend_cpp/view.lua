@@ -206,17 +206,14 @@ function M.setup()
       enable(ev.buf)
     end,
   })
-  -- One visible-range refresh for everything: edits, scrolling (WinScrolled),
-  -- and the cursor/selection reveal (CursorMoved / ModeChanged recompute
-  -- reveal_set). Cheap because it only touches on-screen lines.
-  vim.api.nvim_create_autocmd(
-    { 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI', 'ModeChanged', 'WinScrolled', 'DiagnosticChanged' },
-    {
-      group = group,
-      callback = function(ev)
-        refresh(ev.buf)
-      end,
-    }
+  -- One visible-range refresh for everything: edits and the cursor/selection
+  -- reveal (CursorMoved / ModeChanged recompute reveal_set). Scrolling is driven
+  -- by the debounced VIEWPORT_SETTLED event, not WinScrolled, so a scroll burst
+  -- repaints once instead of per notch. Cheap: it only touches on-screen lines.
+  vu.on_decorate(
+    group,
+    { 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI', 'ModeChanged', 'DiagnosticChanged' },
+    refresh
   )
   -- Refresh deduced types: BufEnter/InsertLeave plus CursorHold (a natural
   -- debounce for the async clangd response after edits).

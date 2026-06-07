@@ -293,12 +293,7 @@ M.refresh = refresh
 
 function M.setup()
   local group = vim.api.nvim_create_augroup('ds_cpp_aliases', { clear = true })
-  vim.api.nvim_create_autocmd({ 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI', 'WinScrolled', 'DiagnosticChanged' }, {
-    group = group,
-    callback = function(ev)
-      refresh(ev.buf)
-    end,
-  })
+  vu.on_decorate(group, { 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI', 'DiagnosticChanged' }, refresh)
 end
 
 return M

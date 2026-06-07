@@ -135,12 +135,7 @@ function M.setup()
       refresh(ev.buf)
     end,
   })
-  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'BufEnter', 'CursorMoved', 'CursorMovedI', 'WinScrolled', 'DiagnosticChanged' }, {
-    group = group,
-    callback = function(ev)
-      refresh(ev.buf)
-    end,
-  })
+  vu.on_decorate(group, { 'TextChanged', 'TextChangedI', 'BufEnter', 'CursorMoved', 'CursorMovedI', 'DiagnosticChanged' }, refresh)
 end
 
 return M

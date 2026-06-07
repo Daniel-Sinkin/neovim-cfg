@@ -189,8 +189,9 @@ local function for_colon(s)
   end
 end
 
--- Parse `for (BINDING : ITER) TAIL` where BINDING is `[const] auto[&*] name`.
--- Returns a table or nil. const is hidden; a missing const surfaces as `mut`.
+-- Parse `for (BINDING : ITER) TAIL` where BINDING is `[const] auto[&*]* name`
+-- (the sigil run is `&`, `&&` for a forwarding ref, or `*`). Returns a table or
+-- nil. const is hidden; a missing const surfaces as `mut`.
 -- C-style fors (no `:`) and explicit-type bindings (no `auto`) return nil.
 function M.parse_for(core)
   local inside, tail = core:match '^for%s*%((.+)%)%s*(.*)$'
@@ -204,7 +205,7 @@ function M.parse_for(core)
   local binding = vim.trim(inside:sub(1, c - 1))
   local iter = vim.trim(inside:sub(c + 1))
   local is_const = binding:match '^const%f[%A]' ~= nil
-  local sigil, name = binding:gsub('^const%s+', ''):match '^auto%s*([&*]?)%s*(.+)$'
+  local sigil, name = binding:gsub('^const%s+', ''):match '^auto%s*([&*]*)%s*(.+)$'
   if not name then
     return nil
   end
@@ -422,7 +423,7 @@ function M.field_dims(line)
   end
   local code = body:match '^(.-)%s*//.*$' or body
   local had_semi = code:match ';%s*$' ~= nil
-  local _, core = M.split_markers((code:gsub(';%s*$', '')))
+  local _, core, was_const = M.split_markers((code:gsub(';%s*$', '')))
   local typ, nm = core:match '^(.-)%s+([%w_]+)%s*{.*}$'
   if not (nm and had_semi and M.looks_like_type(typ)) then
     -- no-brace reference/pointer member: `T& name` / `T* name`
@@ -435,6 +436,10 @@ function M.field_dims(line)
   local inner, _, deleter = M.smart_ptr(disp)
   if inner then
     disp = deleter and (inner .. '^, ' .. deleter .. '~') or (inner .. '^')
+  elseif was_const and disp == 'char^' then
+    -- `const char*` renders as a single `CString` token (see build_chunks); the
+    -- alignment width must match what's shown, not the stripped `char^`.
+    disp = 'CString'
   end
   return nm, disp
 end

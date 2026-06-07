@@ -37,6 +37,32 @@ local OPT_QUERY = [[
   (template_type) @tt
 ]]
 
+-- Whether byte column col0 (0-based) sits inside a "..." string or after a //
+-- comment, so the CString rewrite stays out of non-code text. Naive (ignores
+-- raw strings, escaped quotes, char literals), but enough for a raw-line scan;
+-- mirrors aliases.lua's helper of the same name.
+local function in_string_or_comment(line, col0)
+  local cstart = line:find('//', 1, true)
+  if cstart and col0 >= cstart - 1 then
+    return true
+  end
+  local i = 1
+  while true do
+    local s = line:find('"', i)
+    if not s then
+      return false
+    end
+    local e = line:find('"', s + 1)
+    if not e then
+      return false
+    end
+    if col0 >= s - 1 and col0 < e then
+      return true
+    end
+    i = e + 1
+  end
+end
+
 -- Whether a declaration declares a pointer or reference (so a leading const
 -- qualifies a pointee/referent and should stay visible).
 local function declares_ptr_ref(decl)
@@ -112,6 +138,40 @@ local function refresh(bufnr)
     return false
   end
 
+  -- 0.5 raw-line `const char*` -> a single `CString` token (the obfuscated-string
+  -- type, in DansString). Text-scanned (not treesitter) so it lands on function
+  -- signatures, parameters, return types and other raw decls the view overlay
+  -- doesn't touch. `const char**` (double pointer) is left alone -- collapsing
+  -- only the inner level would orphan a stray `^`. The concealed `const char...*`
+  -- span is recorded in `hide` so the `*`->`^` pass below skips the `*` we just
+  -- swallowed (its `in_reorder` check then covers it).
+  local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
+  for idx, line in ipairs(lines) do
+    local row0 = s0 + idx - 1
+    if not skip.skip(row0) then
+      local from = 1
+      while true do
+        local ms, me = line:find('const%s+char%s*%*', from)
+        if not ms then
+          break
+        end
+        -- me is the byte index of the `*`. The 0-based column of the `*` is me-1.
+        local after_star = line:sub(me + 1, me + 1)
+        if after_star ~= '*' and not in_string_or_comment(line, me - 1) and not in_reorder(row0, me - 1) then
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, ms - 1, {
+            end_col = me,
+            conceal = '',
+            virt_text = { { 'CString', 'DansString' } },
+            virt_text_pos = 'inline',
+          })
+          hide[row0] = hide[row0] or {}
+          hide[row0][#hide[row0] + 1] = { ms - 1, me }
+        end
+        from = me + 1
+      end
+    end
+  end
+
   -- 1. pointer `*` -> `^` (virt_text, skip the cursor line so the real `*` shows)
   local okp, pq = pcall(vim.treesitter.query.parse, lang, PTR_QUERY)
   if okp and pq then
@@ -182,12 +242,7 @@ function M.setup()
       refresh(ev.buf)
     end,
   })
-  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI', 'BufEnter', 'CursorMoved', 'CursorMovedI', 'WinScrolled', 'DiagnosticChanged' }, {
-    group = group,
-    callback = function(ev)
-      refresh(ev.buf)
-    end,
-  })
+  vu.on_decorate(group, { 'TextChanged', 'TextChangedI', 'BufEnter', 'CursorMoved', 'CursorMovedI', 'DiagnosticChanged' }, refresh)
 end
 
 return M

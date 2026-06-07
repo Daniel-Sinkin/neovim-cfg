@@ -1,8 +1,8 @@
 class Platform
 {
   public:
-    $constr = default;
-    $destr = default;
+    Platform() = default;
+    ~Platform() = default;
     $copy = delete;
     $copya = delete;
     $move = delete;
@@ -14,5 +14,5 @@ struct Widget
     $copy = default;
     $copya = default;
     $move $ne = default;
-    $destr = default;
+    ~Widget() = default;
 };

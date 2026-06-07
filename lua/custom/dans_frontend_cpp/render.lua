@@ -245,10 +245,49 @@ local function type_hl(t)
   return 'DansInlayType'
 end
 
+-- Split a (caret-free) type segment so each whole-word `string` is green
+-- (DansString) and the rest keeps `base_hl`: a nested `std::string` inside a
+-- template (`vector<string>`) reads as a string just like a standalone one,
+-- mirroring the raw-line `\<std::string\>` matchadd. Whole-word means the char
+-- on either side of `string` isn't `[%w_]`, so `string_view` / `u32string` /
+-- `MyString` stay `base_hl`. When `base_hl` is already DansString (the whole
+-- type IS string, e.g. `string&`) the segment is returned whole -- splitting
+-- would needlessly fracture a chunk that's already the right color.
+local function string_token_chunks(text, base_hl)
+  if base_hl == 'DansString' then
+    return { { text, base_hl } }
+  end
+  local out, i, n = {}, 1, #text
+  while i <= n do
+    local s, e = text:find('string', i, true)
+    if not s then
+      out[#out + 1] = { text:sub(i), base_hl }
+      break
+    end
+    local before = s > 1 and text:sub(s - 1, s - 1) or ''
+    local after = text:sub(e + 1, e + 1)
+    if not before:match '[%w_]' and not after:match '[%w_]' then
+      if s > i then
+        out[#out + 1] = { text:sub(i, s - 1), base_hl }
+      end
+      out[#out + 1] = { 'string', 'DansString' }
+      i = e + 1
+    else
+      -- `string` here is part of a longer identifier: keep scanning past it so we
+      -- don't re-match the same spot, but color it with the rest of the segment.
+      out[#out + 1] = { text:sub(i, e), base_hl }
+      i = e + 1
+    end
+  end
+  return out
+end
+
 -- Render a type string into { text, hl } chunks for virt_text *outside* the
 -- overlay (the trailing-return reorder): strip_type cleans it (std::/dans::,
 -- optional->?, *->^), the caret stays Normal/gray like add_type, and type_hl
--- colors the rest. Exposed for the pointer module.
+-- colors the rest. A nested whole-word `string` is greened via
+-- string_token_chunks (same as the overlay's add_type). Exposed for the pointer
+-- module.
 function M.type_chunks(t)
   local stripped = P.strip_type(t)
   local hl = type_hl(stripped) -- color from the std-stripped (GLFW* -> DansSDL)
@@ -258,12 +297,12 @@ function M.type_chunks(t)
     local c = shown:find('%^', i)
     if not c then
       if i <= #shown then
-        out[#out + 1] = { shown:sub(i), hl }
+        vim.list_extend(out, string_token_chunks(shown:sub(i), hl))
       end
       break
     end
     if c > i then
-      out[#out + 1] = { shown:sub(i, c - 1), hl }
+      vim.list_extend(out, string_token_chunks(shown:sub(i, c - 1), hl))
     end
     out[#out + 1] = { '^', 'Normal' }
     i = c + 1
@@ -323,12 +362,74 @@ end
 -- isn't a recognized declaration form. `align` (optional) is { nw, tw } column
 -- widths to pad the name/type to. `was_const` + (bufnr,row0) drive the inferred
 -- `mut` on non-const locals.
+-- A C function-pointer typedef or C++ alias, rendered in trailing-return shape:
+--   typedef void (*GLFWglproc)(void);          ->  glproc: () -> void
+--   typedef int  (*Cmp)(const T*, const T*);   ->  Cmp: (T^, T^) -> int
+--   using Handler = R (*)(int);                ->  Handler: (int) -> R
+-- Returns the overlay chunks, or nil if `core` is not a function-pointer alias.
+-- The two inner ([^()]*) groups mean nested parens (a param that is itself a
+-- function pointer) aren't matched -- those fall through and render raw.
+local function funcptr_chunks(core, had_semi)
+  local name, ret, params
+  local r, pdecl, pr = core:match '^typedef%s+(.-)%s*%(([^()]*)%)%s*%(([^()]*)%)$'
+  if r and pdecl:find '%*' then
+    name, ret, params = pdecl:match '([%w_]+)%s*$', r, pr
+  else
+    local nm, r2, pr2 = core:match '^using%s+([%w_]+)%s*=%s*(.-)%s*%(%s*%*%s*%)%s*%(([^()]*)%)$'
+    name, ret, params = nm, r2, pr2
+  end
+  if not name or name == '' or not ret then
+    return nil
+  end
+
+  local chunks = {}
+  local function add(text, hl)
+    if text ~= '' then
+      chunks[#chunks + 1] = { text, hl or 'Normal' }
+    end
+  end
+  local function add_type(t)
+    t = vim.trim((t:gsub('%f[%w]const%f[%W]', ''))) -- const is the hidden default
+    if t ~= '' then
+      for _, c in ipairs(M.type_chunks(t)) do
+        add(c[1], c[2])
+      end
+    end
+  end
+
+  -- name keeps the type color it carries elsewhere (GLFW* -> DansSDL teal) and is
+  -- shown with the GLFW/glfw prefix stripped, like every other type in the view.
+  add(P.strip_glfw(name), type_hl(name))
+  add ': ('
+  local first = true
+  for part in (params .. ','):gmatch '([^,]*),' do
+    part = vim.trim(part)
+    if part ~= '' and part ~= 'void' then
+      if not first then
+        add ', '
+      end
+      add_type(part)
+      first = false
+    end
+  end
+  add ') -> '
+  add_type(ret)
+  if had_semi then
+    add ';'
+  end
+  return chunks
+end
+
 local function build_chunks(prefix, core, had_semi, type_hint, align, was_const, is_constexpr, bufnr, row0)
   -- Classic (non-trailing) function declarations are reordered to trailing form
   -- by the pointer module's decoration pass, not overlaid -- bail so they aren't
   -- mangled as a `name: T(args)` paren-init variable.
   if P.classic_function(bufnr, row0) then
     return nil
+  end
+  local fp = funcptr_chunks(core, had_semi)
+  if fp then
+    return fp
   end
   local semi = had_semi and ';' or ''
   -- Lazy (treesitter): only the branches that infer mut pay for it, and only on
@@ -396,6 +497,14 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
   -- Append a type, graying each `^` pointer marker (DansPointer) while the rest
   -- keeps its type color. type_hl keys off the leading token (Vk*/SDL_*/...), so
   -- compute it once on the whole string and reuse it for the non-`^` segments.
+  -- Each segment goes through string_token_chunks so a whole-word `string` buried
+  -- in a template (`vector<string>`) gets the green even though the outer type is
+  -- blue.
+  local function add_segment(seg, hl)
+    for _, c in ipairs(string_token_chunks(seg, hl)) do
+      add(c[1], c[2])
+    end
+  end
   local function add_type(t)
     local hl = type_hl(t) -- color from the original (GLFW*/glfw* stay DansSDL)
     local shown = P.strip_glfw(t) -- drop the GLFW/glfw prefix for display
@@ -403,10 +512,10 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     while true do
       local c = shown:find('%^', i)
       if not c then
-        add(shown:sub(i), hl)
+        add_segment(shown:sub(i), hl)
         break
       end
-      add(shown:sub(i, c - 1), hl)
+      add_segment(shown:sub(i, c - 1), hl)
       add('^', 'Normal')
       i = c + 1
     end
@@ -571,9 +680,16 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     -- becomes Odin's constant binding -- `name: T : value` (a `:` in place of the
     -- `=`), since `::` / `: T :` is how frontend spells a compile-time constant.
     local shown_typ = P.strip_type(typ)
+    -- `const char*` is an immutable C string: render it as a single green
+    -- `CString` token, dropping the const, the `^` caret, and any mut marker.
+    -- split_markers already peeled the leading const (was_const) so the type
+    -- arrives here as `char^` (strip_type mapped `*`->`^`).
+    local is_cstring = was_const and shown_typ == 'char^'
     local sp_inner, sp_kind, sp_del = P.smart_ptr(shown_typ)
     local disp_typ
-    if sp_inner then
+    if is_cstring then
+      disp_typ = 'CString'
+    elseif sp_inner then
       disp_typ = sp_del and (sp_inner .. '^, ' .. sp_del .. '~') or (sp_inner .. '^')
     else
       disp_typ = shown_typ
@@ -588,7 +704,9 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     -- keep the const-hidden default and only get `mut` on a non-const local
     -- (value members/globals aren't marked -- would be noise). constexpr counts
     -- as const. Placed after the colon like `-> mut T&` so names stay aligned.
-    if sp_inner then
+    if is_cstring then
+      add('CString', 'DansString')
+    elseif sp_inner then
       -- smart pointer: `T^`, caret colored by ownership (unique = mut red, shared
       -- = cpy yellow). A custom deleter renders as `T^, Del~` -- the caret stays on
       -- the pointee, and a matching-colored `~` ties the deleter to the pointer
