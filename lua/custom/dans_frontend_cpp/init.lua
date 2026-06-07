@@ -17,12 +17,12 @@ local M = {}
 
 -- setup() order preserved from the original flat layout (aliases before the
 -- view, decorations after) so nothing ordering-dependent shifts.
-local SETUP_ORDER = { 'aliases', 'markers', 'view', 'arrow_align', 'pointer', 'designated', 'fold', 'lint' }
+local SETUP_ORDER = { 'aliases', 'markers', 'view', 'arrow_align', 'enum_align', 'pointer', 'designated', 'fold', 'lint' }
 
 -- Modules :DansFrontend can toggle per buffer. 'view' is the declaration overlay
 -- (its own enable/disable); the rest are decoration / lint modules gated by
 -- util.module_enabled and re-rendered through their M.refresh.
-local TOGGLEABLE = { 'view', 'aliases', 'markers', 'pointer', 'designated', 'fold', 'arrow_align', 'lint' }
+local TOGGLEABLE = { 'view', 'aliases', 'markers', 'pointer', 'designated', 'fold', 'arrow_align', 'enum_align', 'lint' }
 
 local function mod(name)
   return require('custom.dans_frontend_cpp.' .. name)
