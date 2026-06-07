@@ -372,17 +372,45 @@ end
 -- raw instead of being mangled into a `name: T(args)` paren-init variable. nil for
 -- trailing-return functions, constructors/destructors, non-functions, and
 -- multi-line decls. A cheap text pre-check gates the treesitter walk.
-function M.classic_function(bufnr, row0)
+-- Cached treesitter node at the first non-blank column of `row0`, with that line's
+-- text and column. Per buffer/changedtick, so the several per-line facts derived
+-- in build_chunks (classic_function / decl_kind / is_iife) share ONE tree descent
+-- and one line fetch instead of repeating get_node for each. Each caller walks its
+-- own local copy of the node, so sharing is safe. Returns node, line, col.
+local node_cache = {}
+function M.node_at(bufnr, row0)
   if not bufnr then
     return nil
   end
-  local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
+  local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+  local c = node_cache[bufnr]
+  if not c or c.tick ~= tick then
+    c = { tick = tick }
+    node_cache[bufnr] = c
+  end
+  local e = c[row0]
+  if e == nil then
+    local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
+    if not line then
+      c[row0] = false
+      return nil
+    end
+    local col = #(line:match '^%s*' or '')
+    local ok, node = pcall(vim.treesitter.get_node, { bufnr = bufnr, pos = { row0, col } })
+    e = { node = (ok and node) or nil, line = line, col = col }
+    c[row0] = e
+  elseif e == false then
+    return nil
+  end
+  return e.node, e.line, e.col
+end
+
+function M.classic_function(bufnr, row0)
+  local node, line = M.node_at(bufnr, row0)
   if not line or not line:match '[%w_]+%s*%b()' then
     return nil -- no `ident(...)` at all -> can't be a function decl
   end
-  local col = #(line:match '^%s*' or '')
-  local ok, node = pcall(vim.treesitter.get_node, { bufnr = bufnr, pos = { row0, col } })
-  if not ok or not node then
+  if not node then
     return nil
   end
   while node and node:type() ~= 'declaration' and node:type() ~= 'field_declaration' do
@@ -550,16 +578,8 @@ end
 -- enclosing scope (not just `declaration`, which also covers namespace globals).
 -- Cheap (node lookup + ancestor walk); guarded since the tree may be mid-parse.
 function M.decl_kind(bufnr, row0)
-  if not bufnr then
-    return nil
-  end
-  local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
-  if not line then
-    return nil
-  end
-  local col = #(line:match '^%s*' or '')
-  local ok, node = pcall(vim.treesitter.get_node, { bufnr = bufnr, pos = { row0, col } })
-  if not ok or not node then
+  local node = M.node_at(bufnr, row0)
+  if not node then
     return nil
   end
   while node do
@@ -583,16 +603,8 @@ end
 -- call_expression (vs a plain lambda_expression for a binding). The caller has
 -- already confirmed the line's RHS is a lambda, so call_expression => IIFE.
 function M.is_iife(bufnr, row0)
-  if not bufnr then
-    return false
-  end
-  local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
-  if not line then
-    return false
-  end
-  local col = #(line:match '^%s*' or '')
-  local ok, node = pcall(vim.treesitter.get_node, { bufnr = bufnr, pos = { row0, col } })
-  if not ok or not node then
+  local node = M.node_at(bufnr, row0)
+  if not node then
     return false
   end
   while node and node:type() ~= 'declaration' do
