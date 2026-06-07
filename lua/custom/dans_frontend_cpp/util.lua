@@ -76,6 +76,33 @@ function M.clang_format_off(bufnr)
   return set
 end
 
+-- Whether (row, col) (0-based) sits inside a string / char literal / comment /
+-- include path, via treesitter -- so syntax-blind coloring / conceals never fire
+-- inside one. Robust where a text scan isn't: block comments, char literals, raw
+-- and multi-line strings.
+local SKIP_NODES = {
+  string_literal = true,
+  raw_string_literal = true,
+  char_literal = true,
+  comment = true,
+  system_lib_string = true,
+  string_content = true,
+  escape_sequence = true,
+}
+function M.in_literal(bufnr, row, col)
+  local ok, node = pcall(vim.treesitter.get_node, { bufnr = bufnr, pos = { row, col } })
+  if not ok or not node then
+    return false
+  end
+  while node do
+    if SKIP_NODES[node:type()] then
+      return true
+    end
+    node = node:parent()
+  end
+  return false
+end
+
 -- 0-based rows covered by a `static_assert(...)` declaration. Those are dedicated
 -- compile-time checks -- code you skim rarely and want to read with full fidelity
 -- when you do -- so the whole frontend leaves them verbatim (no conceals, sugar,

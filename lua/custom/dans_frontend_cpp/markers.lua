@@ -39,28 +39,7 @@ end
 -- coloring inside a literal shifts nothing, only concealing hides text.
 local ns = vim.api.nvim_create_namespace 'ds_cpp_markers_conceal'
 
-local SKIP_NODES = {
-  string_literal = true,
-  raw_string_literal = true,
-  char_literal = true,
-  comment = true,
-  system_lib_string = true,
-  string_content = true,
-  escape_sequence = true,
-}
-local function in_literal(bufnr, row, col)
-  local ok, node = pcall(vim.treesitter.get_node, { bufnr = bufnr, pos = { row, col } })
-  if not ok or not node then
-    return false
-  end
-  while node do
-    if SKIP_NODES[node:type()] then
-      return true
-    end
-    node = node:parent()
-  end
-  return false
-end
+local in_literal = vu.in_literal -- treesitter string/char/comment/include guard
 
 -- Prefix conceals (vim regex). `\ze` ends the match before the kept char so only
 -- the prefix is hidden; `\<` keeps `_` a word char (PFN_vkCreateX keeps its vk).
@@ -265,11 +244,12 @@ local function apply(ev)
   vim.fn.matchadd('DansString', code_only [[\<std::string\>]], 24)
   vim.fn.matchadd('DansString', code_only [[\<const\s\+char\s*\*]], 24)
   -- Masks (priority 28): the color matches are syntax-blind, so they'd color
-  -- all-caps tokens inside /* block comments */ and #include <...> paths. Recolor
-  -- those back to neutral. There is no // mask: code_only already keeps every
-  -- match out of // line comments, so // prose falls to the plain Comment group
-  -- (which cpp_doc_markdown repaints as tokyonight markdown).
-  vim.fn.matchadd('DansCommentMask', [[/\*.\{-}\*/]], 28)
+  -- tokens inside /* block comments */ and #include <...> paths. Recolor those
+  -- back to neutral. `\_.` so the mask spans a MULTI-LINE block comment (the big
+  -- /** ... */ doxygen blocks in headers), not just single-line ones -- otherwise
+  -- `copy`, a #define, etc. inside one keep their code color. There is no // mask:
+  -- code_only keeps every match out of // line comments already.
+  vim.fn.matchadd('DansCommentMask', [[/\*\_.\{-}\*/]], 28)
   -- Quoted (not [[...]]): the trailing [>"] char class would close a long string.
   vim.fn.matchadd('DansIncludeMask', '^\\s*#\\s*include\\s*\\zs[<"].\\{-}[>"]', 28)
 end

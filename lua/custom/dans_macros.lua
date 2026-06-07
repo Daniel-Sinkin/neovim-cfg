@@ -83,7 +83,10 @@ local function color_line(bufnr, row0, line)
         i = i + 1
       end
       local tok = line:sub(s, i - 1)
-      if is_macro(tok) then
+      -- in_literal (treesitter) catches block comments / doc comments the cheap
+      -- text scan above misses, so a `#define`d word like `types` in a `/* */`
+      -- doc block isn't colored as a macro.
+      if is_macro(tok) and not vu.in_literal(bufnr, row0, s - 1) then
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, s - 1, { end_col = i - 1, hl_group = 'DansMacro', priority = 120 })
       end
     else
