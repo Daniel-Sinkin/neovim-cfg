@@ -122,6 +122,14 @@ local function build_sections(tbuf, twin)
       require('custom.dans_asm').show()
     end,
   }
+  local keylog = {
+    label = 'key log (recent input)',
+    full = true,
+    activate = function()
+      M.close()
+      require('custom.dans_keylog').show()
+    end,
+  }
 
   local font = {
     label = 'font size',
@@ -143,7 +151,7 @@ local function build_sections(tbuf, twin)
   return {
     { title = 'Frontend modules', items = vim.list_extend({ all }, mods) },
     { title = 'View', items = { hints, lambda } },
-    { title = 'Tools', items = { mon, prof, asm } },
+    { title = 'Tools', items = { mon, prof, asm, keylog } },
     { title = 'Settings', items = { font } },
   }
 end
