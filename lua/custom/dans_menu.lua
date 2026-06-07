@@ -154,7 +154,10 @@ local function cell_text(it)
   if it.value then
     return string.format('  %-11s %s', it.label, it.value())
   end
-  return string.format('  [%s] %s', it.checked() and 'x' or ' ', it.label)
+  if it.checked then
+    return string.format('  [%s] %s', it.checked() and 'x' or ' ', it.label)
+  end
+  return '  ' .. it.label -- plain action item (no checkbox, no value)
 end
 
 -- (Re)compute lines + the navigation grid from the live item states.
