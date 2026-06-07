@@ -25,12 +25,9 @@ pcall(function()
   })
 
   ls.add_snippets('cpp', {
-    -- Marker shorthands: type the $-alias, get real C++ (cpp_aliases shows it
-    -- back as the alias).
-    s({ trig = '$nd', wordTrig = false, snippetType = 'autosnippet' }, { t '[[nodiscard]]' }),
-    s({ trig = '$sc', wordTrig = false, snippetType = 'autosnippet' }, { t 'static_cast' }),
-    s({ trig = '$ne', wordTrig = false, snippetType = 'autosnippet' }, { t 'noexcept' }),
-    s({ trig = '$as', wordTrig = false, snippetType = 'autosnippet' }, { t 'static_assert' }),
+    -- $-alias expansion ($sc -> static_cast, $rc -> reinterpret_cast, ...) now
+    -- comes from the space expander (custom/cpp_type_snippets.lua), which reads
+    -- the same aliases.ALIASES table that drives the view-layer collapse.
 
     -- Class skeleton (rule of zero).
     s('dsk_class0', {

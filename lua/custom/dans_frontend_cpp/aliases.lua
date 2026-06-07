@@ -17,13 +17,20 @@ local vu = require 'custom.dans_frontend_cpp.util'
 
 -- { keyword, replacement, highlight? }  -- highlight defaults to 'Comment'.
 local ALIASES = {
-  { 'static_cast', '$sc' },
+  -- casts collapse to the long $Xcast form (the obfuscated view); both $sc and
+  -- $scast expand back to static_cast (the short forms are expand-only atoms in
+  -- cpp_type_snippets). dynamic_cast keeps $dc (no $dcast requested).
+  { 'static_cast', '$scast' },
   { 'dynamic_cast', '$dc' },
-  { 'reinterpret_cast', '$rc' },
-  { 'const_cast', '$cc' },
+  { 'reinterpret_cast', '$rcast' },
+  { 'const_cast', '$ccast' },
   { 'noexcept', '$ne' },
   { '[[nodiscard]]', '$nd' },
+  { '[[maybe_unused]]', '$mu' },
   { 'static_assert', '$sa' },
+  { 'std::runtime_error', '$re' },
+  { 'std::unique_ptr', '$up' },
+  { 'std::shared_ptr', '$sp' },
   { 'VK_NULL_HANDLE', '{}', 'DansVulkan' },
 }
 
