@@ -10,8 +10,10 @@
 --   /// `code`       ->  code           (code-colored, backticks hidden)
 -- and the `/// ` leader is concealed so the prose reads as prose.
 --
--- Scope: heading / bullet / inline-code / leader / block background. Not yet:
--- **bold** / *italic* inline, fenced ``` blocks, numbered lists. On by default
+-- Fenced code: a ``` line opens a region rendered verbatim (no markdown) on a
+-- separate code-block background until the closing ```; the fence lines are
+-- hidden. Scope: heading / bullet / inline-code / fenced code / leader / block
+-- background. Not yet: **bold** / *italic* inline, numbered lists. On by default
 -- for .hpp; toggle per buffer with :DansDocMarkdown.
 
 local M = {}
@@ -56,6 +58,11 @@ local function set_hl()
   on_block('DansDocHeading', '@markup.heading', { bold = true })
   on_block('DansDocCode', '@markup.raw')
   on_block('DansDocBullet', '@markup.list')
+  -- fenced ``` code: a separate code-block background (tokyonight's, falling back
+  -- to the inline-code bg, then the doc-block bg) so the fence reads apart from
+  -- the prose; its fg/bg also paint the code text (no markdown parsing inside).
+  local code_bg = (get '@markup.raw.block').bg or (get '@markup.raw').bg or block_bg
+  vim.api.nvim_set_hl(0, 'DansDocCodeBlock', { fg = (get '@markup.raw').fg or normal.fg, bg = code_bg })
 end
 
 local function conceal(bufnr, row0, s, e, cchar)
@@ -74,13 +81,17 @@ end
 -- where the doc text starts (after `///` and one optional space).
 local function render_line(bufnr, row0, line)
   local indent, content = line:match '^(%s*)///%s?(.*)$'
-  if not content or content == '' then
+  if not content then
     return
   end
   local content_col = #line - #content -- byte col of the first content char
 
-  -- hide the `/// ` leader
+  -- hide the `/// ` leader (also for an empty `///` line, so it reads as a blank
+  -- line inside the block rather than a stray `///`).
   conceal(bufnr, row0, #indent, content_col)
+  if content == '' then
+    return
+  end
   -- repaint the whole body as doc text (block bg + tokyonight fg); element spans
   -- below paint over this at a higher priority.
   hl(bufnr, row0, content_col, #line, 'DansDocText', 150)
@@ -144,13 +155,34 @@ local function refresh(bufnr)
       while j <= n and lines[j]:match '^%s*///' do
         j = j + 1
       end
+      local in_fence = false -- inside a ``` ... ``` fenced code region
       for k = i, j - 1 do
         local row0 = k - 1
+        local indent, content = lines[k]:match '^(%s*)///%s?(.*)$'
+        content = content or ''
+        local is_fence = content:match '^```' ~= nil
+        local code = in_fence or is_fence
         -- block background on every line of the run (cursor line included, so the
-        -- block stays continuous while its text is revealed raw).
-        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, 0, { line_hl_group = 'DansDocBlock' })
+        -- block stays continuous while its text is revealed raw); fenced lines get
+        -- the code-block background instead.
+        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, 0, {
+          line_hl_group = code and 'DansDocCodeBlock' or 'DansDocBlock',
+        })
         if row0 ~= cur then
-          render_line(bufnr, row0, lines[k])
+          if is_fence then
+            -- hide the whole fence line (leader + ``` + language); the code bg
+            -- left behind delimits the block.
+            conceal(bufnr, row0, #indent, #lines[k])
+          elseif in_fence then
+            -- code line: conceal only the leader; the code shows verbatim, colored
+            -- by the DansDocCodeBlock line highlight (no markdown parsing).
+            conceal(bufnr, row0, #indent, #lines[k] - #content)
+          else
+            render_line(bufnr, row0, lines[k])
+          end
+        end
+        if is_fence then
+          in_fence = not in_fence
         end
       end
       i = j
