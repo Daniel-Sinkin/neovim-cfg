@@ -16,6 +16,10 @@
 --   $K$V$um         -> std::unordered_map<K, V>
 --   $K$V$map        -> std::map<K, V>
 --   $T$N$arr        -> std::array<T, N>
+--   $copy / $copya / $move / $movea / $constr / $destr
+--                   -> the matching special member of the enclosing class, e.g.
+--                      $copy -> X(const X&), $copya -> def operator=(const X&) -> X&
+--                      (inverse of the special_members view collapse)
 --   $invalid<Space> -> (deleted)                   ($ isn't valid C++; unresolved
 --                                                   $-blocks are removed)
 -- `$` inside a string is left alone. A block must end at the cursor, so `$sa(`
@@ -176,6 +180,58 @@ local function in_string(line, col0)
   return n % 2 == 1
 end
 
+-- Special-member shorthands: $copy etc. -> the signature for the enclosing class
+-- X (the inverse of dans_frontend_cpp.special_members, which collapses these back
+-- to $copy). X is supplied by the caller (treesitter), so these are handled in
+-- resolve rather than the pure M.expand.
+local SPECIAL = {
+  constr = function(x)
+    return x .. '()'
+  end,
+  destr = function(x)
+    return '~' .. x .. '()'
+  end,
+  copy = function(x)
+    return x .. '(const ' .. x .. '&)'
+  end,
+  copya = function(x)
+    return 'def operator=(const ' .. x .. '&) -> ' .. x .. '&'
+  end,
+  move = function(x)
+    return x .. '(' .. x .. '&&)'
+  end,
+  movea = function(x)
+    return 'def operator=(' .. x .. '&&) -> ' .. x .. '&'
+  end,
+}
+
+-- Name of the class/struct whose member area the cursor is in, or nil (nil inside
+-- a method body, so $copy only fires where special members are declared).
+local function enclosing_class_name()
+  local okp, parser = pcall(vim.treesitter.get_parser, 0)
+  if okp and parser then
+    pcall(function()
+      parser:parse()
+    end)
+  end
+  local ok, node = pcall(vim.treesitter.get_node)
+  if not ok then
+    return nil
+  end
+  while node do
+    local nt = node:type()
+    if nt == 'compound_statement' or nt == 'function_definition' then
+      return nil
+    end
+    if nt == 'class_specifier' or nt == 'struct_specifier' then
+      local nm = node:field('name')[1]
+      return nm and vim.treesitter.get_node_text(nm, 0) or nil
+    end
+    node = node:parent()
+  end
+  return nil
+end
+
 -- Decide what pressing <Space> should do at 0-based cursor `col` on `line`. The
 -- token is the trailing run of snippet chars ENDING at the cursor (identifiers,
 -- the `$` separator, and the sigils `?`/`^`/`<`), taken from its first `$`. `$`
@@ -185,7 +241,7 @@ end
 --   nil                    -> no `$`-block ends here -> just insert a space
 -- A trailing non-snippet char (e.g. `$sa(`) means no block ends at the cursor,
 -- so nothing fires. Exposed for headless tests.
-function M.resolve(line, col)
+function M.resolve(line, col, class_fn)
   local before = line:sub(1, col)
   local run = before:match '([%w_$?<^]*)$' -- snippet chars ending at the cursor
   if run == '' then
@@ -199,7 +255,18 @@ function M.resolve(line, col)
   if in_string(line, bs) then
     return nil
   end
-  local text = M.expand(run:sub(p))
+  local block = run:sub(p)
+  -- class-name-dependent special members ($copy etc.); class_fn (treesitter) is
+  -- only called when one matches, so a normal space pays nothing for it.
+  local sm = SPECIAL[block:sub(#SIGIL + 1)]
+  if sm then
+    local x = class_fn and class_fn()
+    if x then
+      return { action = 'expand', bs = bs, text = sm(x) }
+    end
+    return { action = 'remove', bs = bs } -- $copy outside a class is garbage
+  end
+  local text = M.expand(block)
   if text then
     return { action = 'expand', bs = bs, text = text }
   end
@@ -210,7 +277,7 @@ local function on_space()
   local pos = vim.api.nvim_win_get_cursor(0)
   local row, col = pos[1] - 1, pos[2]
   local line = vim.api.nvim_get_current_line()
-  local r = M.resolve(line, col)
+  local r = M.resolve(line, col, enclosing_class_name)
   if not r then
     vim.api.nvim_buf_set_text(0, row, col, row, col, { ' ' })
     vim.api.nvim_win_set_cursor(0, { row + 1, col + 1 })
