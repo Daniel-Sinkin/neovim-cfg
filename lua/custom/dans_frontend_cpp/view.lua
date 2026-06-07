@@ -48,6 +48,9 @@ local function refresh(bufnr)
     return
   end
   clear(bufnr)
+  if vu.is_recording() then
+    return -- macro recording: show raw text so recorded motions use real columns
+  end
   -- reveal_set (cursor + visual selection) and clang-format-off both stay raw.
   local set = vu.reveal_set(bufnr)
   local cfoff = vu.clang_format_off(bufnr)
@@ -187,7 +190,7 @@ end
 
 -- Whether the overlay is currently active for this buffer.
 function M.is_enabled(bufnr)
-  return enabled[bufnr] == true
+  return enabled[bufnr] == true and not vu.is_recording()
 end
 
 -- State getters for the config menu.

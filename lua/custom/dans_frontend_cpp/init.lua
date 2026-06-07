@@ -58,6 +58,23 @@ function M.module_set(name, buf, on)
   set_on(name, buf, on)
 end
 
+-- Repaint every decoration source for `buf`: refresh the toggleable modules
+-- directly (covers markers / arrow_align / lint, which aren't on the settled
+-- event) and fire VIEWPORT_SETTLED for the overlay (view) and doc markdown, both
+-- of which listen to it. `view` has no public refresh and `fold` is intentionally
+-- left untouched, so both are skipped in the loop. Used by the record-suspend
+-- hooks to clear / restore in one shot.
+local function repaint_all(buf)
+  for _, name in ipairs(TOGGLEABLE) do
+    if name ~= 'fold' and name ~= 'view' then
+      pcall(function()
+        mod(name).refresh(buf)
+      end)
+    end
+  end
+  pcall(vim.api.nvim_exec_autocmds, 'User', { pattern = util().VIEWPORT_SETTLED })
+end
+
 local function dispatch(cmd)
   local buf = vim.api.nvim_get_current_buf()
   local sub = vim.trim(cmd.args or '')
@@ -103,6 +120,20 @@ function M.setup()
     nargs = '?',
     complete = complete,
     desc = 'Toggle the dans-cpp-frontend view, a single module, or hints / lambda',
+  })
+  -- Suspend the column-shifting view transforms while a macro records, so recorded
+  -- motions operate on real buffer columns instead of concealed / virt_text ones,
+  -- then restore on stop. Opt out with `vim.g.dans_suspend_on_record = false`.
+  local rec_group = vim.api.nvim_create_augroup('ds_frontend_record', { clear = true })
+  vim.api.nvim_create_autocmd({ 'RecordingEnter', 'RecordingLeave' }, {
+    group = rec_group,
+    callback = function(ev)
+      if vim.g.dans_suspend_on_record == false then
+        return
+      end
+      util().set_recording(ev.event == 'RecordingEnter')
+      repaint_all(vim.api.nvim_get_current_buf())
+    end,
   })
 end
 

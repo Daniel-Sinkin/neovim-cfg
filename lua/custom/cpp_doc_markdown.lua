@@ -37,6 +37,9 @@ end
 -- On by default (like the other view modules); :DansDocMarkdown sets an explicit
 -- false to turn it off for a buffer.
 local function is_on(bufnr)
+  if vu.is_recording() then
+    return false -- suspended while a macro records (raw columns for motions)
+  end
   local v = enabled[bufnr]
   if v == nil then
     return true

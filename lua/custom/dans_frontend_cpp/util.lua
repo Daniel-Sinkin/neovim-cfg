@@ -116,11 +116,27 @@ function M.make_skipper(bufnr)
   return { skip = any, skip_conceal = any }
 end
 
+-- While a macro is recording, every column-shifting view transform is suspended
+-- so recorded motions land on real buffer columns, not concealed / virt_text
+-- ones. `fold` is exempt -- it hides lines, not columns, so recording in the
+-- normal folded view is fine. The umbrella's RecordingEnter/Leave hooks flip this
+-- and repaint; the gates below only have to report "off" while it is set.
+local recording = false
+function M.is_recording()
+  return recording
+end
+function M.set_recording(on)
+  recording = on and true or false
+end
+
 -- Per-buffer module enable/disable (default enabled). The umbrella's
 -- :DansFrontend command flips these; each module's refresh consults
 -- M.module_enabled and clears its own decorations when off.
 local module_off = {}
 function M.module_enabled(bufnr, name)
+  if recording and name ~= 'fold' then
+    return false
+  end
   local off = module_off[bufnr]
   return not (off and off[name])
 end
