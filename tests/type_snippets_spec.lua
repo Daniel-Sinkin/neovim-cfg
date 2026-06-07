@@ -53,6 +53,20 @@ eq('$map$K$V', 'std::map<K, V>')
 eq('$arr$T$N', 'std::array<T, N>')
 eq('$um$str$<$int', 'std::unordered_map<std::string, std::vector<int>>')
 
+-- casts: short + long spellings wrap the type; bare form is the keyword
+eq('$sc$u32', 'static_cast<u32>')
+eq('$rc$int', 'reinterpret_cast<int>')
+eq('$cc$Bar', 'const_cast<Bar>')
+eq('$dc$Foo', 'dynamic_cast<Foo>')
+eq('$scast$u32', 'static_cast<u32>')
+eq('$rcast$u8', 'reinterpret_cast<u8>')
+eq('$ccast$T', 'const_cast<T>')
+eq('$sc', 'static_cast')
+eq('$rc', 'reinterpret_cast')
+eq('$cc', 'const_cast')
+eq('$dc', 'dynamic_cast')
+eq('$sc$?$int', 'static_cast<std::optional<int>>')
+
 -- rejected: bare unknown identifier (nonsense) and incomplete operators
 eq('$sdfgfd', nil)
 eq('$Foo', nil)

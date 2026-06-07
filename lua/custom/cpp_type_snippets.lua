@@ -27,6 +27,10 @@
 --   $um$K$V         -> std::unordered_map<K, V>
 --   $map$K$V        -> std::map<K, V>
 --   $arr$T$N        -> std::array<T, N>
+--   $sc$u32         -> static_cast<u32>        (cast wraps the type; add `(x)`)
+--   $rc$T / $cc$T / $dc$T
+--                   -> reinterpret_cast<T> / const_cast<T> / dynamic_cast<T>
+--   $sc / $rc / $cc / $dc -> the bare cast keyword
 --   $copy / $copya / $move / $movea
 --                   -> the matching special member of the enclosing class, e.g.
 --                      $copy -> X(const X&), $copya -> def operator=(const X&) -> X&
@@ -59,6 +63,16 @@ local SMART_PTR = {
   sp = 'std::shared_ptr',
 }
 
+-- Casts wrap a type in <...>: `$sc$u32` -> static_cast<u32>; bare `$sc` ->
+-- static_cast. Short forms here; the long $scast/$rcast/$ccast and $dc come from
+-- aliases.ALIASES (any expansion ending in `_cast`) and fold in the same way.
+-- Kept out of ATOM so the bare atom doesn't shadow the wrapper.
+local CAST = {
+  sc = 'static_cast',
+  rc = 'reinterpret_cast',
+  cc = 'const_cast',
+}
+
 -- 0-arg atoms: $word -> expansion. Two sources, one mechanism:
 --   * the type shorthands below (expansion-only conveniences), and
 --   * the view-layer alias table (aliases.ALIASES) -- the SAME EXPR<->$A pairs
@@ -71,11 +85,6 @@ local ATOM = {
   sv = 'std::string_view',
   rv = 'std::ranges::views',
   ra = 'std::ranges',
-  -- short cast forms. The long $scast/$rcast/$ccast come from aliases.ALIASES
-  -- (which is also what the view collapses static_cast etc. to); both expand.
-  sc = 'static_cast',
-  rc = 'reinterpret_cast',
-  cc = 'const_cast',
 }
 do
   local ok, aliases = pcall(function()
@@ -86,9 +95,13 @@ do
       -- keep only the `$word` aliases (skip e.g. VK_NULL_HANDLE -> `{}`); the
       -- type shorthands above win on any name clash.
       local key = type(a[2]) == 'string' and a[2]:match '^%$([%w_]+)$'
-      -- skip the smart-pointer keys (up/sp): they're wrappers, not 0-arg atoms.
-      if key and ATOM[key] == nil and not SMART_PTR[key] then
-        ATOM[key] = a[1]
+      -- skip the smart-pointer / cast keys: they're wrappers, not 0-arg atoms.
+      if key and ATOM[key] == nil and not SMART_PTR[key] and not CAST[key] then
+        if type(a[1]) == 'string' and a[1]:match '_cast$' then
+          CAST[key] = a[1] -- $scast/$rcast/$ccast/$dc -> a wrapping cast
+        else
+          ATOM[key] = a[1]
+        end
       end
     end
   end
@@ -116,6 +129,15 @@ end
 local BARE = { ['?'] = 'std::nullopt' }
 for key, ty in pairs(SMART_PTR) do
   BARE[key] = ty
+end
+-- Casts wrap their operand (`$sc$u32` -> static_cast<u32>) and bare to the plain
+-- keyword (`$sc` -> static_cast). CAST is fully populated by now (literal short
+-- forms + the `_cast` aliases imported above).
+for key, name in pairs(CAST) do
+  WRAP[key] = function(x)
+    return name .. '<' .. x .. '>'
+  end
+  BARE[key] = name
 end
 
 -- Binary combinators, also prefix: $word consumes the next two operands.
