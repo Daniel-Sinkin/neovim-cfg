@@ -120,39 +120,47 @@ end
 -- One mechanism renders a template `Keyword<...>` in a compact `~`-notation. `~`
 -- reads as "the concept sigil" (otherwise only destructors / bitwise-not, so it's
 -- free) and everything injected here is colored DansConcept. Each row of CONCEPTS
--- is string-matched exactly -- a hardcoded whitelist, no inference from a concept's
--- definition. Three emit shapes:
+-- is string-matched exactly -- a hardcoded whitelist, no inference. Emit shapes:
 --
---   infix   Keyword<A, B>      -> A<sym>B     convertible_to<V,T> -> V~>T
---                                             same_as<A,B>        -> A~=B
---   suffix  Keyword<A>         -> A<sym>      RefOf<T>            -> T~&
---                                             ValueOf<T>          -> T~value
---                                             CharLike<T>         -> T~>char   (sym
---                                             bakes in the fixed RHS)
---   call    Keyword<F, R...>   -> F~(R...)    invocable<S,T>      -> S~(T)
+--   infix  Keyword<A, B>   -> A ~> B / A ~= B   convertible_to, same_as
+--   fixed  Keyword<A>      -> A ~> <rhs>        CharLike -> A ~> char (rhs baked)
+--   suffix Keyword<A>      -> A<sym>            ValueOf -> A~value, RefOf -> A~&
+--   uname  Keyword<A>      -> A~Keyword         input_range<R> -> R~input_range
+--   call   Keyword<F, R..> -> F(R..)            invocable / invoke_result_t
 --
--- No spaces around the symbols. Nesting falls out for free: each occurrence is
--- concealed/injected independently, so CharLike<RefOf<R>> renders RefOf<R> -> R~&
--- and then CharLike<...> -> R~&~>char. static_assert lines are skipped wholesale
--- by the caller, so this never fires inside one. CharLike/BoolLike/IntLike/
--- StringLike are the only fixed-RHS aliases recognized (per the whitelist).
+-- The relation operators ` ~> ` / ` ~= ` are spaced; the postfix ~value / ~& /
+-- ~name are tight. A relation is BRACKETED when an operand is itself compound (a
+-- nested concept / template, i.e. contains `<`): convertible_to<ValueOf<R>, X> ->
+-- (R~value ~> X). Nesting falls out because each occurrence is concealed/injected
+-- independently. static_assert lines are skipped wholesale by the caller.
 local CONCEPT_HL = 'DansConcept'
+-- the std concepts that render as a tight postfix `A~name`.
+local UNARY_CONCEPTS = {
+  'input_range', 'output_range', 'forward_range', 'bidirectional_range',
+  'random_access_range', 'contiguous_range', 'sized_range', 'common_range',
+  'viewable_range', 'range', 'view', 'integral', 'signed_integral',
+  'unsigned_integral', 'floating_point', 'regular', 'semiregular', 'movable',
+  'copyable', 'default_initializable', 'equality_comparable', 'totally_ordered',
+}
 local CONCEPTS = {
-  { kw = 'convertible_to', kind = 'infix', sym = '~>' },
-  { kw = 'same_as', kind = 'infix', sym = '~=' },
+  { kw = 'convertible_to', kind = 'infix', op = '~>' },
+  { kw = 'same_as', kind = 'infix', op = '~=' },
   { kw = 'invocable', kind = 'call' },
-  { kw = 'CharLike', kind = 'suffix', sym = '~>char' },
-  { kw = 'BoolLike', kind = 'suffix', sym = '~>bool' },
-  { kw = 'IntLike', kind = 'suffix', sym = '~>int' },
-  { kw = 'StringLike', kind = 'suffix', sym = '~>string_view' },
+  { kw = 'invoke_result_t', kind = 'call' },
+  { kw = 'CharLike', kind = 'fixed', op = '~>', rhs = 'char' },
+  { kw = 'BoolLike', kind = 'fixed', op = '~>', rhs = 'bool' },
+  { kw = 'IntLike', kind = 'fixed', op = '~>', rhs = 'int' },
+  { kw = 'StringLike', kind = 'fixed', op = '~>', rhs = 'string_view' },
   { kw = 'ValueOf', kind = 'suffix', sym = '~value' },
   { kw = 'RefOf', kind = 'suffix', sym = '~&' },
-  -- raw std value/reference traits, same notation as the ValueOf/RefOf aliases.
   { kw = 'iter_value_t', kind = 'suffix', sym = '~value' },
   { kw = 'range_value_t', kind = 'suffix', sym = '~value' },
   { kw = 'iter_reference_t', kind = 'suffix', sym = '~&' },
   { kw = 'range_reference_t', kind = 'suffix', sym = '~&' },
 }
+for _, kw in ipairs(UNARY_CONCEPTS) do
+  CONCEPTS[#CONCEPTS + 1] = { kw = kw, kind = 'uname', sym = '~' .. kw }
+end
 
 local function hide(bufnr, row0, s0, e0)
   if e0 > s0 then
@@ -207,7 +215,24 @@ local function find_concept(line, kw, from)
   end
 end
 
-local function render_concept(bufnr, row0, line, spec)
+-- A relation is bracketed only when it is NOT at the highest scope: either nested
+-- inside another concept's `<...>` (an unbalanced `<` precedes it) or it's one
+-- conjunct of an `and`/`or` constraint on the line. A relation that is the whole
+-- expression stays unbracketed (`T ~= int`, `T~& ~> char`).
+local function depth_before(line, pos)
+  local d = 0
+  for i = 1, pos - 1 do
+    local c = line:sub(i, i)
+    if c == '<' then
+      d = d + 1
+    elseif c == '>' then
+      d = d - 1
+    end
+  end
+  return d
+end
+
+local function render_concept(bufnr, row0, line, spec, has_conj)
   local from = 1
   while true do
     local ms, open, close, args, nxt = find_concept(line, spec.kw, from)
@@ -215,35 +240,59 @@ local function render_concept(bufnr, row0, line, spec)
       return
     end
     from = nxt
-    if spec.kind == 'infix' and #args == 2 then
+    local kind = spec.kind
+    local nested = has_conj or depth_before(line, ms) > 0
+    if kind == 'infix' and #args == 2 then
       local a_s, a_e = arg_span(open, args[1])
       local b_s, b_e = arg_span(open, args[2])
-      hide(bufnr, row0, ms - 1, a_s - 1)
-      hide_inject(bufnr, row0, a_e, b_s - 1, spec.sym)
-      hide(bufnr, row0, b_e, close)
-    elseif spec.kind == 'suffix' and #args == 1 then
+      local br = nested
+      if br then
+        hide_inject(bufnr, row0, ms - 1, a_s - 1, '(')
+      else
+        hide(bufnr, row0, ms - 1, a_s - 1)
+      end
+      hide_inject(bufnr, row0, a_e, b_s - 1, ' ' .. spec.op .. ' ')
+      if br then
+        hide_inject(bufnr, row0, b_e, close, ')')
+      else
+        hide(bufnr, row0, b_e, close)
+      end
+    elseif kind == 'fixed' and #args == 1 then
+      local a_s, a_e = arg_span(open, args[1])
+      local br = nested
+      if br then
+        hide_inject(bufnr, row0, ms - 1, a_s - 1, '(')
+      else
+        hide(bufnr, row0, ms - 1, a_s - 1)
+      end
+      hide_inject(bufnr, row0, a_e, close, ' ' .. spec.op .. ' ' .. spec.rhs .. (br and ')' or ''))
+    elseif (kind == 'suffix' or kind == 'uname') and #args == 1 then
       local a_s, a_e = arg_span(open, args[1])
       hide(bufnr, row0, ms - 1, a_s - 1)
       hide_inject(bufnr, row0, a_e, close, spec.sym)
-    elseif spec.kind == 'call' and #args >= 1 then
+    elseif kind == 'call' and #args >= 1 then
+      -- F(args): F kept, parens concept-colored, args keep their own colors.
       local f_s, f_e = arg_span(open, args[1])
       hide(bufnr, row0, ms - 1, f_s - 1)
       if #args == 1 then
-        hide_inject(bufnr, row0, f_e, close, '~()')
+        hide_inject(bufnr, row0, f_e, close, '()')
       else
         local b_s = arg_span(open, args[2])
         local _, last_e = arg_span(open, args[#args])
-        hide_inject(bufnr, row0, f_e, b_s - 1, '~(')
+        hide_inject(bufnr, row0, f_e, b_s - 1, '(')
         hide_inject(bufnr, row0, last_e, close, ')')
       end
     end
-    -- arity mismatch: leave the call verbatim (no extmarks)
+    -- arity mismatch: leave verbatim (no extmarks)
   end
 end
 
 local function concepts(bufnr, row0, line)
+  -- a line with a top-level `and`/`or` is a constraint conjunction, so every
+  -- relation on it is a sub-term and gets bracketed.
+  local has_conj = line:match '%f[%a]and%f[%A]' ~= nil or line:match '%f[%a]or%f[%A]' ~= nil
   for _, spec in ipairs(CONCEPTS) do
-    render_concept(bufnr, row0, line, spec)
+    render_concept(bufnr, row0, line, spec, has_conj)
   end
 end
 
