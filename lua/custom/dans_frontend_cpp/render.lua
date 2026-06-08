@@ -279,15 +279,17 @@ function type_hl(t)
 end
 
 -- A type token that reads as a string: std::string / string_view, the C-string
--- CString, and the gsl `*zstring` aliases (zstring/czstring/wzstring/cwzstring/
--- u16zstring/.../basic_zstring). Whole-word only, so string_view IS one but
--- u32string / MyString / MyCString are not.
+-- CString, the gsl `*zstring` aliases (zstring/czstring/wzstring/cwzstring/
+-- u16zstring/.../basic_zstring), and the first-party CamelCase z-string types
+-- (ZString / CZString / WZString / ...). Whole-word only, so string_view IS one
+-- but u32string / MyString / MyCString are not.
 local function is_string_type(w)
   return w == 'string'
     or w == 'string_view'
     or w == 'CString'
     or w == 'basic_zstring'
     or w:match '^[cwu0-9]*zstring$' ~= nil
+    or w:match '^%u*ZString$' ~= nil
 end
 
 -- Split a (caret-free) type segment so each whole-word string-type token is green

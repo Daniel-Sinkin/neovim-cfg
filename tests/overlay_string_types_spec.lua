@@ -109,6 +109,19 @@ do
   chk('czstring green', has_hl(b, off, 'DansString'), true)
 end
 
+do
+  -- first-party CamelCase z-string types are greened like the gsl aliases.
+  local b, off = build('struct', { 'ZString name{};' })
+  chk('ZString text', overlay(b, off), 'name: ZString;')
+  chk('ZString green', chunk_hl(b, off, 'ZString'), 'DansString')
+end
+
+do
+  local b, off = build('struct', { 'CZString path{};' })
+  chk('CZString text', overlay(b, off), 'path: CZString;')
+  chk('CZString green', chunk_hl(b, off, 'CZString'), 'DansString')
+end
+
 -- ===================== B: const char* -> CString =====================
 do
   local b, off = build('struct', { 'const char* s{};' })
