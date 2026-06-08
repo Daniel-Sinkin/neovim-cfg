@@ -4,33 +4,27 @@
 -- pieces compose -- `$?$str` waits for the space, then becomes
 -- std::optional<std::string>.
 --
--- Nesting is OUTER-TO-INNER (prefix): the wrapper / container comes first and
--- the contained type follows, the same order the expansion brackets in. So
--- `$<$?$int` reads vector-of-optional-of-int -> std::vector<std::optional<int>>.
--- A segment whose name isn't a known atom is taken literally, so any type can be
--- the inner one (`$?$int`, `$?$Foo`, `$?$sdfgfd`). The only thing rejected is a
--- bare unknown `$token` on its own: it isn't a type, so it's removed.
+-- Two call syntaxes for the same templates: prefix sigils `$um$K$V` (outer to
+-- inner, so `$<$?$int` reads vector-of-optional-of-int) and explicit parens
+-- `$um(K, V)` (whitespace-stripped, clearer arg count). Arity is enforced -- a
+-- one-arg `$um` does nothing, since unordered_map takes two. A segment that isn't
+-- a known atom is the literal inner type (`$?$Foo`); a bare unknown `$token` is
+-- removed.
 --
---   $str            -> std::string
---   $sv             -> std::string_view
---   $rv             -> std::ranges::views
---   $ra             -> std::ranges
---   $?              -> std::nullopt                 (bare; $?$T gives the optional)
---   $?$int          -> std::optional<int>
---   $?$str          -> std::optional<std::string>
---   $?$sdfgfd       -> std::optional<sdfgfd>        (unknown inner -> literal)
---   $^$Foo / $up$Foo -> std::unique_ptr<Foo>   (`^` / `up` alias)
---   $sp$Foo          -> std::shared_ptr<Foo>
---   $^ / $up / $sp   -> bare smart-ptr template name
---   $<$Foo           -> std::vector<Foo>       (vector is `<`)
---   $<$?$int        -> std::vector<std::optional<int>>
---   $um$K$V         -> std::unordered_map<K, V>
---   $map$K$V        -> std::map<K, V>
---   $arr$T$N        -> std::array<T, N>
---   $sc$u32         -> static_cast<u32>        (cast wraps the type; add `(x)`)
---   $rc$T / $cc$T / $dc$T
---                   -> reinterpret_cast<T> / const_cast<T> / dynamic_cast<T>
---   $sc / $rc / $cc / $dc -> the bare cast keyword
+--   $str / $sv / $rv / $ra -> std::string / string_view / ranges::views / ranges
+--   $?              -> std::nullopt   ($?$ / $?(T) give the optional)
+--   $?$int / $?(int) -> std::optional<int>
+--   $< / $> / $arr / $um -> the bare template name (std::vector / array / ...)
+--   $<$Foo / $>(Foo) -> std::vector<Foo>          (vector is `<`, alias `>`)
+--   $^$Foo / $up$Foo / $sp$Foo -> std::unique_ptr<Foo> / shared_ptr<Foo>
+--   $um$K$V / $um(K, V) -> std::unordered_map<K, V>
+--   $map$K$V / $arr$T$N -> std::map<K, V> / std::array<T, N>
+--   $sc$u32 / $sc(u32) -> static_cast<u32>   (also $rc / $cc / $dc casts)
+--   relations (concept ~-notation), prefix or infix:
+--   $~> / $~=       -> std::convertible_to / std::same_as
+--   $~>$T$S / $T$~>$S / $~>(T, S) -> std::convertible_to<T, S>
+--   $~>$T          -> std::convertible_to<T,        (open, fill the 2nd arg)
+--   $T$~>          -> std::convertible_to<T, $>      (literal $ fails the build)
 --   $copy / $copya / $move / $movea
 --                   -> the matching special member of the enclosing class, e.g.
 --                      $copy -> X(const X&), $copya -> def operator=(const X&) -> X&
@@ -52,34 +46,37 @@ local M = {}
 local SIGIL = '$'
 local SIGIL_PAT = vim.pesc(SIGIL)
 
--- Smart-pointer wrappers, the single source of truth spread into WRAP (the
--- wrapping form) and BARE (the no-operand form) below. Each works prefix
--- (`$^$int` -> unique_ptr<int>) and bare as the plain template (`$^` / `$up` ->
--- unique_ptr). `^` and `up` are aliases for unique_ptr; `sp` is shared_ptr (no
--- sigil). Kept out of ATOM so the bare atom doesn't shadow the wrapper.
-local SMART_PTR = {
-  ['^'] = 'std::unique_ptr',
-  up = 'std::unique_ptr',
-  sp = 'std::shared_ptr',
+local unpack = table.unpack or unpack
+
+-- Templates: `$head` with a fixed arity. 0 operands -> the bare form; exactly
+-- `arity` operands -> the `fmt`; any other count is rejected (so `$um$K`, one arg
+-- for a two-arg map, does nothing -- proper usage is forced). Both call syntaxes
+-- expand the same entry: prefix sigils `$um$K$V` and parens `$um(K, V)`.
+--   tbare: the bare form when a `$` follows but no operand is given -- `$?` is the
+--   value std::nullopt, but `$?$` (templated, no arg) is std::optional.
+local TEMPLATES = {
+  ['?'] = { bare = 'std::nullopt', tbare = 'std::optional', arity = 1, fmt = 'std::optional<%s>' },
+  ['<'] = { bare = 'std::vector', arity = 1, fmt = 'std::vector<%s>' },
+  ['>'] = { bare = 'std::vector', arity = 1, fmt = 'std::vector<%s>' }, -- `$>` alias for vector
+  ['^'] = { bare = 'std::unique_ptr', arity = 1, fmt = 'std::unique_ptr<%s>' },
+  up = { bare = 'std::unique_ptr', arity = 1, fmt = 'std::unique_ptr<%s>' },
+  sp = { bare = 'std::shared_ptr', arity = 1, fmt = 'std::shared_ptr<%s>' },
+  um = { bare = 'std::unordered_map', arity = 2, fmt = 'std::unordered_map<%s, %s>' },
+  map = { bare = 'std::map', arity = 2, fmt = 'std::map<%s, %s>' },
+  arr = { bare = 'std::array', arity = 2, fmt = 'std::array<%s, %s>' },
+  sc = { bare = 'static_cast', arity = 1, fmt = 'static_cast<%s>' },
+  rc = { bare = 'reinterpret_cast', arity = 1, fmt = 'reinterpret_cast<%s>' },
+  cc = { bare = 'const_cast', arity = 1, fmt = 'const_cast<%s>' },
 }
 
--- Casts wrap a type in <...>: `$sc$u32` -> static_cast<u32>; bare `$sc` ->
--- static_cast. Short forms here; the long $scast/$rcast/$ccast and $dc come from
--- aliases.ALIASES (any expansion ending in `_cast`) and fold in the same way.
--- Kept out of ATOM so the bare atom doesn't shadow the wrapper.
-local CAST = {
-  sc = 'static_cast',
-  rc = 'reinterpret_cast',
-  cc = 'const_cast',
-}
+-- Binary concept relations, infix-capable: `$~>` -> std::convertible_to. The
+-- operand forms are handled in expand_relation and the paren branch.
+local RELATIONS = { ['~>'] = 'std::convertible_to', ['~='] = 'std::same_as' }
 
--- 0-arg atoms: $word -> expansion. Two sources, one mechanism:
---   * the type shorthands below (expansion-only conveniences), and
---   * the view-layer alias table (aliases.ALIASES) -- the SAME EXPR<->$A pairs
---     that collapse `reinterpret_cast` to `$rc`, `noexcept` to `$ne`, etc.
--- Importing them here makes collapse and expansion one idea: the view renders
--- EXPR as $A, and typing `$A<Space>` writes EXPR back. A new alias added there
--- becomes expandable here automatically -- nothing to keep in sync.
+-- 0-arg atoms: $word -> expansion. Type shorthands below, plus the view-layer
+-- alias table (aliases.ALIASES) -- the SAME EXPR<->$A pairs that collapse
+-- `noexcept` to `$ne`, etc. -- so collapse and expansion stay one idea. A `_cast`
+-- alias becomes a 1-arg template; up/sp/casts already live in TEMPLATES.
 local ATOM = {
   str = 'std::string',
   sv = 'std::string_view',
@@ -92,13 +89,10 @@ do
   end)
   if ok and aliases then
     for _, a in ipairs(aliases) do
-      -- keep only the `$word` aliases (skip e.g. VK_NULL_HANDLE -> `{}`); the
-      -- type shorthands above win on any name clash.
       local key = type(a[2]) == 'string' and a[2]:match '^%$([%w_]+)$'
-      -- skip the smart-pointer / cast keys: they're wrappers, not 0-arg atoms.
-      if key and ATOM[key] == nil and not SMART_PTR[key] and not CAST[key] then
+      if key and ATOM[key] == nil and not TEMPLATES[key] then
         if type(a[1]) == 'string' and a[1]:match '_cast$' then
-          CAST[key] = a[1] -- $scast/$rcast/$ccast/$dc -> a wrapping cast
+          TEMPLATES[key] = { bare = a[1], arity = 1, fmt = a[1] .. '<%s>' }
         else
           ATOM[key] = a[1]
         end
@@ -107,117 +101,177 @@ do
   end
 end
 
--- Unary prefix wrappers: the sigil (or word) applies to the operand that follows
--- it. The smart pointers (^/up/sp) are folded in from SMART_PTR so the wrapping
--- and bare forms stay in sync.
-local WRAP = {
-  ['?'] = function(x)
-    return 'std::optional<' .. x .. '>'
-  end,
-  ['<'] = function(x)
-    return 'std::vector<' .. x .. '>'
-  end,
-}
-for key, ty in pairs(SMART_PTR) do
-  WRAP[key] = function(x)
-    return ty .. '<' .. x .. '>'
+-- Split an arg-list body on top-level commas (depth-aware over <>, (), [], {}).
+local function split_commas(s)
+  local args, depth, start = {}, 0, 1
+  for i = 1, #s do
+    local c = s:sub(i, i)
+    if c == '(' or c == '<' or c == '[' or c == '{' then
+      depth = depth + 1
+    elseif c == ')' or c == '>' or c == ']' or c == '}' then
+      depth = depth - 1
+    elseif c == ',' and depth == 0 then
+      args[#args + 1] = s:sub(start, i - 1)
+      start = i + 1
+    end
   end
-end
--- A wrapper with no operand: bare `$?` is the empty-optional value std::nullopt;
--- a bare smart pointer (`$^` / `$up` / `$sp`) is its plain template name. (There
--- is no bare `std::optional` / `std::vector`; `$?$T` / `$<$T` give those.)
-local BARE = { ['?'] = 'std::nullopt' }
-for key, ty in pairs(SMART_PTR) do
-  BARE[key] = ty
-end
--- Casts wrap their operand (`$sc$u32` -> static_cast<u32>) and bare to the plain
--- keyword (`$sc` -> static_cast). CAST is fully populated by now (literal short
--- forms + the `_cast` aliases imported above).
-for key, name in pairs(CAST) do
-  WRAP[key] = function(x)
-    return name .. '<' .. x .. '>'
-  end
-  BARE[key] = name
+  args[#args + 1] = s:sub(start)
+  return args
 end
 
--- Binary combinators, also prefix: $word consumes the next two operands.
--- `$um$K$V` -> std::unordered_map<K, V> (first operand is the left bracket slot).
-local COMBINE = {
-  um = function(a, b)
-    return 'std::unordered_map<' .. a .. ', ' .. b .. '>'
-  end,
-  map = function(a, b)
-    return 'std::map<' .. a .. ', ' .. b .. '>'
-  end,
-  arr = function(a, b)
-    return 'std::array<' .. a .. ', ' .. b .. '>'
-  end,
-}
+-- A relation operand: a single segment that's a known atom or a bare identifier.
+local function expand_operand(seg)
+  if ATOM[seg] then
+    return ATOM[seg]
+  end
+  if seg:match '^[%w_:]+$' then
+    return seg
+  end
+  return nil
+end
+local function operands(segs, lo, hi)
+  local out = {}
+  for i = lo, hi do
+    local e = expand_operand(segs[i])
+    if not e then
+      return nil
+    end
+    out[#out + 1] = e
+  end
+  return out
+end
 
--- Evaluate a `$`-token to its C++ expansion, or nil if it isn't a valid DSL
--- token. Split on the sigil into segments; each is a unary wrapper (?/^/<), a
--- binary combinator (um/map/arr), a 0-arg atom (str/sv/...), or a bare
--- identifier taken literally (int, Foo, sdfgfd). Fold the value stack RIGHT TO
--- LEFT so every operator wraps the operand(s) to its right -- prefix / Polish
--- order, i.e. the outer-to-inner nesting (`$<$?$int` -> vector(optional(int))).
--- `transformed` guards a lone `$Ident` (no atom/op): a bare unknown $token isn't
--- a type, so it collapses to nil and is removed rather than left as `Ident`.
-function M.expand(token)
-  if token:sub(1, #SIGIL) ~= SIGIL then
+-- A relation `~>` / `~=` at segment `idx`. Left/right operand counts pick a form:
+--   $~>       convertible_to            $~>$T   convertible_to<T,   (open)
+--   $~>$T$S   convertible_to<T, S>      $T$~>$S convertible_to<T, S> (infix)
+--   $T$~>     convertible_to<T, $>  (the literal $ fails the build, flagging the
+--                                    missing operand)
+local function expand_relation(segs, idx)
+  local name = RELATIONS[segs[idx]]
+  local L = operands(segs, 1, idx - 1)
+  local R = operands(segs, idx + 1, #segs)
+  if not L or not R then
     return nil
   end
-  local segs = {}
-  for seg in (token .. SIGIL):gmatch('(.-)' .. SIGIL_PAT) do
-    segs[#segs + 1] = seg
+  local nl, nr = #L, #R
+  if nl == 0 and nr == 0 then
+    return name
+  elseif nl == 0 and nr == 1 then
+    return name .. '<' .. R[1] .. ', '
+  elseif nl == 0 and nr == 2 then
+    return name .. '<' .. R[1] .. ', ' .. R[2] .. '>'
+  elseif nl == 1 and nr == 1 then
+    return name .. '<' .. L[1] .. ', ' .. R[1] .. '>'
+  elseif nl == 1 and nr == 0 then
+    return name .. '<' .. L[1] .. ', $>'
   end
-  table.remove(segs, 1) -- the empty piece before the leading sigil
-  if #segs == 0 then
-    return nil
-  end
+  return nil
+end
 
+-- Prefix / Polish fold of the segments (right to left), so each template wraps
+-- the operand(s) to its right -- the outer-to-inner nesting (`$<$?$int` ->
+-- vector(optional(int))). A template pops exactly its arity; a wrong count
+-- rejects. `templated` (a trailing `$`) turns a bare `$?$` into the template.
+local function expand_fold(segs, templated)
   local stack, transformed = {}, false
   for i = #segs, 1, -1 do
     local seg = segs[i]
-    if WRAP[seg] then
-      -- wrap the operand to the right; with nothing to wrap, fall back to the
-      -- bare value (`$?` -> std::nullopt) or reject. Pop into a local first: a
-      -- `stack[#stack+1] = f(table.remove(stack))` would read `#stack` before the
-      -- pop and land the result in the wrong slot.
-      if #stack > 0 then
-        local inner = table.remove(stack)
-        stack[#stack + 1] = WRAP[seg](inner)
-      elseif BARE[seg] then
-        stack[#stack + 1] = BARE[seg]
+    local t = TEMPLATES[seg]
+    if t then
+      if #stack >= t.arity then
+        local args = {}
+        for _ = 1, t.arity do
+          args[#args + 1] = table.remove(stack)
+        end
+        stack[#stack + 1] = string.format(t.fmt, unpack(args))
+      elseif #stack == 0 then
+        stack[#stack + 1] = (templated and t.tbare) or t.bare
       else
-        return nil
+        return nil -- wrong operand count for this template
       end
       transformed = true
-    elseif COMBINE[seg] then
-      local a = table.remove(stack)
-      local b = table.remove(stack)
-      if not b then
-        return nil -- needs two operands to its right
-      end
-      stack[#stack + 1] = COMBINE[seg](a, b)
+    elseif ATOM[seg] then
+      stack[#stack + 1] = ATOM[seg]
       transformed = true
     elseif seg:match '^[%w_:]+$' then
-      -- a known atom expands; any other identifier is the literal inner type.
-      -- A literal on its own is not a transform (see `transformed`).
-      if ATOM[seg] then
-        stack[#stack + 1] = ATOM[seg]
-        transformed = true
-      else
-        stack[#stack + 1] = seg
-      end
+      stack[#stack + 1] = seg -- literal inner type
     else
-      return nil -- not a sigil, a combinator, or an identifier
+      return nil
     end
   end
-
   if #stack ~= 1 or not transformed then
     return nil
   end
   return stack[1]
+end
+
+-- The paren call form `$head(a, b, ...)`: whitespace-stripped, arity-checked, and
+-- each `$`-arg recursively expanded (so `$>($?(int))` nests).
+local function expand_paren(head, argstr)
+  local t, rel = TEMPLATES[head], RELATIONS[head]
+  if not t and not rel then
+    return nil
+  end
+  local args = {}
+  for _, a in ipairs(split_commas(argstr)) do
+    a = vim.trim(a)
+    if a ~= '' then
+      if a:sub(1, #SIGIL) == SIGIL then
+        local ex = M.expand(a)
+        if not ex then
+          return nil
+        end
+        args[#args + 1] = ex
+      else
+        args[#args + 1] = a
+      end
+    end
+  end
+  if rel then
+    if #args == 0 then
+      return rel
+    elseif #args == 2 then
+      return rel .. '<' .. args[1] .. ', ' .. args[2] .. '>'
+    end
+    return nil
+  end
+  if #args == 0 then
+    return t.bare
+  elseif #args == t.arity then
+    return string.format(t.fmt, unpack(args))
+  end
+  return nil
+end
+
+-- Evaluate a `$`-token to its C++ expansion, or nil if it isn't a valid DSL
+-- token. The paren form `$head(...)` is tried first; otherwise the token is split
+-- on the sigil and dispatched to the relation handler (a `~>`/`~=` segment is
+-- present) or the Polish fold (templates + atoms). A bare unknown `$Ident` folds
+-- to nil and is removed rather than left as `Ident`.
+function M.expand(token)
+  if token:sub(1, #SIGIL) ~= SIGIL then
+    return nil
+  end
+  local head, argstr = token:match('^' .. SIGIL_PAT .. '([%w_?<>%^~=]+)%((.*)%)$')
+  if head then
+    return expand_paren(head, argstr)
+  end
+  local segs = vim.split(token:sub(#SIGIL + 1), SIGIL, { plain = true })
+  -- a trailing empty segment is a dangling `$` (`$?$`) -- "templated, no arg".
+  local templated = false
+  if segs[#segs] == '' then
+    templated = true
+    table.remove(segs)
+  end
+  if #segs == 0 then
+    return nil
+  end
+  for i, seg in ipairs(segs) do
+    if RELATIONS[seg] then
+      return expand_relation(segs, i)
+    end
+  end
+  return expand_fold(segs, templated)
 end
 
 -- Naive "is byte column col0 inside a "..." string on this line": odd count of
@@ -295,7 +349,18 @@ end
 -- so nothing fires. Exposed for headless tests.
 function M.resolve(line, col, class_fn)
   local before = line:sub(1, col)
-  local run = before:match '([%w_$?<^]*)$' -- snippet chars ending at the cursor
+  -- paren form `$head(...)` ending at the cursor: balanced parens, so it may hold
+  -- spaces / commas the run scan below would stop at. Tried first.
+  local paren = before:match('(' .. SIGIL_PAT .. '[%w_?<>%^~=]+%b())$')
+  if paren then
+    local pbs = col - #paren
+    if not in_string(line, pbs) then
+      local ptext = M.expand(paren)
+      return { action = ptext and 'expand' or 'remove', bs = pbs, text = ptext }
+    end
+  end
+  -- sigil form: the trailing run of snippet chars (incl the relation `~>=` and `>`).
+  local run = before:match '([%w_$?<>^~=]*)$'
   if run == '' then
     return nil
   end

@@ -67,13 +67,55 @@ eq('$cc', 'const_cast')
 eq('$dc', 'dynamic_cast')
 eq('$sc$?$int', 'static_cast<std::optional<int>>')
 
--- rejected: bare unknown identifier (nonsense) and incomplete operators
+-- rejected: bare unknown identifier (nonsense)
 eq('$sdfgfd', nil)
 eq('$Foo', nil)
 eq('$int', nil)
-eq('$um$K', nil)
-eq('$<', nil)
 eq('$', nil)
+
+-- bare templates expand to the plain template name (like $arr -> std::array)
+eq('$<', 'std::vector')
+eq('$>', 'std::vector')
+eq('$arr', 'std::array')
+eq('$um', 'std::unordered_map')
+
+-- arity is enforced: a one-arg `$um` / two-arg-needed does nothing
+eq('$um$K', nil)
+eq('$arr$T', nil)
+
+-- $> is a vector alias (prefix + paren)
+eq('$>$Foo', 'std::vector<Foo>')
+
+-- paren call form: whitespace-stripped, arity-checked, $-args recurse
+eq('$arr(T, N)', 'std::array<T, N>')
+eq('$um(K, V)', 'std::unordered_map<K, V>')
+eq('$>(T)', 'std::vector<T>')
+eq('$?(int)', 'std::optional<int>')
+eq('$>($?(int))', 'std::vector<std::optional<int>>')
+eq('$sc(u32)', 'static_cast<u32>')
+eq('$um(K)', nil) -- wrong arity
+eq('$arr(A, B, C)', nil) -- wrong arity
+
+-- $? value vs template: bare is nullopt, templated/with-arg is optional
+eq('$?', 'std::nullopt')
+eq('$?$', 'std::optional')
+eq('$?$T', 'std::optional<T>')
+
+-- relations: bare / prefix / infix / sentinel
+eq('$~>', 'std::convertible_to')
+eq('$~=', 'std::same_as')
+eq('$~>$T$S', 'std::convertible_to<T, S>')
+eq('$T$~>$S', 'std::convertible_to<T, S>')
+eq('$T$~=$S', 'std::same_as<T, S>')
+eq('$~>$T', 'std::convertible_to<T, ')
+eq('$T$~>', 'std::convertible_to<T, $>')
+eq('$~>(A, B)', 'std::convertible_to<A, B>')
+
+-- old postfix forms no longer expand (committed to prefix, no order-guessing)
+eq('$str$?', nil)
+eq('$Foo<', nil)
+eq('$int?', nil)
+eq('$K$V$um', nil)
 
 -- old postfix forms no longer expand (committed to prefix, no order-guessing)
 eq('$str$?', nil)
