@@ -322,6 +322,7 @@ do
     '    std::shared_ptr<Foo> sha{};',
     '    const Foo* cst{};',
     '    std::unique_ptr<Foo, Del> del{};',
+    '    VkBuffer* vp{};',
     '};',
   })
   vim.bo[b].filetype = 'cpp'
@@ -346,10 +347,13 @@ do
       fails[#fails + 1] = 'FAIL  ' .. d .. '  got ' .. tostring(g)
     end
   end
-  chk('raw caret normal', chunk_hl(2, '^'), 'Normal')
+  -- a plain pointer's caret + its const take the pointee's type color (Foo ->
+  -- DansInlayType); smart-ptr carets keep their ownership colors below.
+  chk('raw caret type-colored', chunk_hl(2, '^'), 'DansInlayType')
   chk('unique caret mut', chunk_hl(3, '^'), 'DansMarkerMut')
   chk('shared caret cpy', chunk_hl(4, '^'), 'DansMarkerCpy')
-  chk('const ptr normal', chunk_hl(5, 'const '), 'Normal')
+  chk('const ptr type-colored', chunk_hl(5, 'const '), 'DansInlayType')
+  chk('vulkan caret orange', chunk_hl(7, '^'), 'DansVulkan')
   chk('deleter caret mut', chunk_hl(6, '^'), 'DansMarkerMut')
   chk('deleter tilde mut', chunk_hl(6, '~'), 'DansMarkerMut')
 end

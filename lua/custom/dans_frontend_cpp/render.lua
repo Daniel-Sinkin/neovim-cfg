@@ -568,7 +568,7 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
         break
       end
       add_segment(shown:sub(i, c - 1), hl)
-      add('^', 'Normal')
+      add('^', hl) -- the caret takes the pointee's color (void^ blue, VkX^ orange)
       i = c + 1
     end
   end
@@ -761,7 +761,9 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     else
       if top_level_ptr_ref(shown_typ) then
         if was_const then
-          add('const ', 'Normal')
+          -- on a pointer/ref the const is part of the type (const T^ is its own
+          -- type), so color it like the type -- blue void, orange VkX -- not gray.
+          add('const ', type_hl(shown_typ))
         elseif not is_constexpr then
           add('mut ', 'DansMarkerMut')
         end
