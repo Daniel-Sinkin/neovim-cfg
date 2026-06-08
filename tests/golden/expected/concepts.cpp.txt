@@ -3,7 +3,7 @@ namespace test
 template <typename V>
 concept StringLike = V~>string_view;
 template <typename R>
-concept StringRange = input_range<R> and R~v~>string_view;
+concept StringRange = input_range<R> and R~value~>string_view;
 template <typename T>
 concept IsInt = T~=int;
 template <typename F>

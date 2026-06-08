@@ -126,7 +126,7 @@ end
 --   infix   Keyword<A, B>      -> A<sym>B     convertible_to<V,T> -> V~>T
 --                                             same_as<A,B>        -> A~=B
 --   suffix  Keyword<A>         -> A<sym>      RefOf<T>            -> T~&
---                                             ValueOf<T>          -> T~v
+--                                             ValueOf<T>          -> T~value
 --                                             CharLike<T>         -> T~>char   (sym
 --                                             bakes in the fixed RHS)
 --   call    Keyword<F, R...>   -> F~(R...)    invocable<S,T>      -> S~(T)
@@ -145,7 +145,7 @@ local CONCEPTS = {
   { kw = 'BoolLike', kind = 'suffix', sym = '~>bool' },
   { kw = 'IntLike', kind = 'suffix', sym = '~>int' },
   { kw = 'StringLike', kind = 'suffix', sym = '~>string_view' },
-  { kw = 'ValueOf', kind = 'suffix', sym = '~v' },
+  { kw = 'ValueOf', kind = 'suffix', sym = '~value' },
   { kw = 'RefOf', kind = 'suffix', sym = '~&' },
 }
 
