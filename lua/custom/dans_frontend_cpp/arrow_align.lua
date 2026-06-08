@@ -173,48 +173,49 @@ local function alias_delta(prefix)
   return removed, added
 end
 
--- Rendered display column of the arrow (cells visible before it), and its
--- 1-based source index. nil if the line has no trailing-return arrow.
+-- Net rendered width of a non-param fragment: strwidth minus the conceals plus
+-- the alias deltas. `line_start` controls const_removed -- a leading-const value
+-- local is concealed only at the start of the line, not after a `)`.
+local function piecemeal(s, line_start)
+  local removed = word_ws_removed(s, 'inline')
+    + literal_removed(s, 'std::')
+    + literal_removed(s, 'dans::')
+    + literal_removed(s, 'dans_')
+    + glfw_removed(s)
+  if line_start then
+    removed = removed + const_removed(s)
+  end
+  local arem, aadd = alias_delta(s)
+  return vim.fn.strwidth(s) - removed - arem + aadd
+end
+
+-- Rendered display column of the arrow (cells visible before it), and its 1-based
+-- source index. nil if no trailing-return arrow. The param list (between `(` and
+-- `)`) is measured by the flip itself (M.flip_params.width) so std::/const/mut
+-- inside params are counted once and exactly; the rest is the piecemeal model.
+-- strwidth (not strdisplaywidth): the latter inflates long trailing-space runs on
+-- this build; headers are space-indented so no tab expansion is needed.
 local function rendered_arrow_col(line, bufnr, row0)
   local ap = arrow_pos(code_of(line))
   if not ap then
     return nil
   end
-  local prefix = line:sub(1, ap - 1)
-  local removed = const_removed(prefix)
-    + word_ws_removed(prefix, 'inline')
-    + literal_removed(prefix, 'std::')
-    + literal_removed(prefix, 'dans::')
-    + literal_removed(prefix, 'dans_')
-    + glfw_removed(prefix)
-  local arem, aadd = alias_delta(prefix)
-  -- aliases injects `mut ` (4 cells) before non-const ref/ptr args, and where
-  -- a non-const member function's trailing const would be; both add width before
-  -- the arrow, so account for them or the arrows drift.
-  local mut_added = 0
-  local ok, cols = pcall(function()
-    return require('custom.dans_frontend_cpp.aliases').arg_mut_cols(line)
+  local aliases = require 'custom.dans_frontend_cpp.aliases'
+  local fp = aliases.flip_params(line, bufnr, row0)
+  local member_mut = 0
+  local okm, mcol = pcall(function()
+    return aliases.member_mut_col(line, bufnr, row0)
   end)
-  if ok and cols then
-    for _, col0 in ipairs(cols) do
-      if col0 < ap - 1 then
-        mut_added = mut_added + 4
-      end
-    end
+  if okm and mcol and mcol < ap - 1 then
+    member_mut = 4 -- ` mut` injected after `)` of a non-const member function
   end
-  if bufnr and row0 then
-    local okm, mcol = pcall(function()
-      return require('custom.dans_frontend_cpp.aliases').member_mut_col(line, bufnr, row0)
-    end)
-    if okm and mcol and mcol < ap - 1 then
-      mut_added = mut_added + 4
-    end
+  local w
+  if fp and fp.close <= ap - 1 then
+    w = piecemeal(line:sub(1, fp.open - 1), true) + fp.width + piecemeal(line:sub(fp.close + 1, ap - 1), false)
+  else
+    w = piecemeal(line:sub(1, ap - 1), true)
   end
-  -- strwidth, not strdisplaywidth: the latter inflates tab-free strings with
-  -- long trailing-space runs on this build (alignment padding is exactly that),
-  -- while strwidth is the true cell count. Headers here are space-indented (no
-  -- tabs), so column-aware tab expansion isn't needed.
-  return vim.fn.strwidth(prefix) - removed - arem + aadd + mut_added, ap
+  return w + member_mut, ap
 end
 
 -- Scan the buffer into a row0 -> {col, n} pad map. Blocks are maximal runs of

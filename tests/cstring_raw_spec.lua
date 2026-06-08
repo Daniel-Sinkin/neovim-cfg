@@ -27,26 +27,31 @@ vim.cmd 'doautocmd FileType'
 vim.cmd 'doautocmd BufEnter'
 vim.cmd 'doautocmd CursorMoved'
 
+-- pointer renders return-type / member cstrings; the param flip (aliases) renders
+-- the parameter ones, so reconstruct from both namespaces.
 local pns = vim.api.nvim_get_namespaces()['ds_cpp_pointer']
+local ans = vim.api.nvim_get_namespaces()['ds_cpp_aliases']
 
--- displayed text: apply this namespace's conceals (hide) and inline virt_text
+-- displayed text: apply both namespaces' conceals (hide) and inline virt_text
 -- (insert) to the raw line, then return the visible string.
 local function display(row0)
   local line = vim.api.nvim_buf_get_lines(b, row0, row0 + 1, false)[1] or ''
   local hidden, inserts = {}, {}
-  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(b, pns, { row0, 0 }, { row0, -1 }, { details = true })) do
-    local d = m[4]
-    if d.conceal ~= nil and d.end_col then
-      for c = m[3], d.end_col - 1 do
-        hidden[c] = true
+  for _, nsid in ipairs { pns, ans } do
+    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(b, nsid, { row0, 0 }, { row0, -1 }, { details = true })) do
+      local d = m[4]
+      if d.conceal ~= nil and d.end_col then
+        for c = m[3], d.end_col - 1 do
+          hidden[c] = true
+        end
       end
-    end
-    if d.virt_text and d.virt_text_pos == 'inline' then
-      local t = ''
-      for _, ch in ipairs(d.virt_text) do
-        t = t .. ch[1]
+      if d.virt_text and d.virt_text_pos == 'inline' then
+        local t = ''
+        for _, ch in ipairs(d.virt_text) do
+          t = t .. ch[1]
+        end
+        inserts[m[3]] = (inserts[m[3]] or '') .. t
       end
-      inserts[m[3]] = (inserts[m[3]] or '') .. t
     end
   end
   local s = {}
@@ -80,7 +85,8 @@ local function chk_true(desc, cond)
 end
 
 chk('return type const char*', display(1), 'auto name() -> CString;')
-chk('parameter const char*', display(2), 'auto greet(CString who) -> void;')
+-- the param flip owns parameters now: const char* who -> who: CString
+chk('parameter const char*', display(2), 'auto greet(who: CString) -> void;')
 
 -- double pointer: untouched, and no stray CString
 local d_argv = display(3)

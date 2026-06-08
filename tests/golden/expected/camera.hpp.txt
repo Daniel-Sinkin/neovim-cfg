@@ -105,6 +105,6 @@ class Camera
     projection_mode_     : ProjectionMode = ProjectionMode::perspective;
 };
 
-$nd auto make_camera_ray(const Camera&, Vec2 cursor_logical_px, Vec2 viewport_logical_px) $ne -> Ray;
+$nd auto make_camera_ray(const Camera&, cursor_logical_px: Vec2, viewport_logical_px: Vec2) $ne -> Ray;
 
 }  // namespace dans::camera

@@ -1,26 +1,26 @@
 namespace lldb { struct SBEvent {}; }
 class Foo
 {
-    bool EventIsTargetEvent(const lldb::SBEvent &event);
-    SBValue ^GetValue(int idx) const;
+    bool EventIsTargetEvent(event: const lldb::SBEvent &);
+    SBValue ^GetValue(idx: int) const;
     void run() mut $ne;
     auto trailing() const -> int;
 };
-bool freeFunc(int x);
+bool freeFunc(x: int);
 
 class Bar
 {
-    $nd auto x() const $ne    -> int;
-    $nd auto name() const $ne -> CString;
-    auto reset(int n) mut $ne -> mut Bar&;
+    $nd auto x() const $ne     -> int;
+    $nd auto name() const $ne  -> CString;
+    auto reset(n: int) mut $ne -> mut Bar&;
 };
 
 class Ops
 {
-    auto operator()(window^ window) const $ne -> void;
-    auto operator[](int i) mut $ne            -> mut int&;
-    Ops& operator=(const Ops& other) mut $ne;
-    auto operator==(const Ops& o) const $ne -> bool;
+    auto operator()(window: window^) const $ne -> void;
+    auto operator[](i: int) mut $ne            -> mut int&;
+    Ops& operator=(other: const Ops&) mut $ne;
+    auto operator==(o: const Ops&) const $ne -> bool;
 };
 
 // clang-format off

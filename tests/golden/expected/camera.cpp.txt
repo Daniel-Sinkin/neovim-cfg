@@ -16,7 +16,7 @@ using linalg::k_axis_y;
 using linalg::k_axis_z;
 using linalg::normalize_or;
 
-auto Camera::configure(const CameraConfig& config) $ne -> mut Camera&
+auto Camera::configure(config: const CameraConfig&) $ne -> mut Camera&
 {
     pivot_ = config.pivot;
     distance_ = config.distance;
@@ -53,95 +53,95 @@ auto Camera::min_position_z() const noexcept         -> f32             { return
 auto Camera::projection_mode() const noexcept        -> ProjectionMode  { return projection_mode_; }
 // clang-format on
 
-auto Camera::set_pivot(const Vec3 pivot) $ne -> mut Camera&
+auto Camera::set_pivot(pivot: const Vec3) $ne -> mut Camera&
 {
     pivot_ = pivot;
     apply_constraints();
     return *this;
 }
 
-auto Camera::translate_pivot(const Vec3 offset) $ne -> mut Camera&
+auto Camera::translate_pivot(offset: const Vec3) $ne -> mut Camera&
 {
     return set_pivot(pivot_ + offset);
 }
 
-auto Camera::set_distance(const f32 distance) $ne -> mut Camera&
+auto Camera::set_distance(distance: const f32) $ne -> mut Camera&
 {
     distance_ = distance;
     apply_constraints();
     return *this;
 }
 
-auto Camera::set_yaw(const f32 yaw) $ne -> mut Camera&
+auto Camera::set_yaw(yaw: const f32) $ne -> mut Camera&
 {
     yaw_ = yaw;
     return *this;
 }
 
-auto Camera::set_pitch(const f32 pitch) $ne -> mut Camera&
+auto Camera::set_pitch(pitch: const f32) $ne -> mut Camera&
 {
     pitch_ = pitch;
     apply_constraints();
     return *this;
 }
 
-auto Camera::set_fov_y(const f32 fov_y) $ne -> mut Camera&
+auto Camera::set_fov_y(fov_y: const f32) $ne -> mut Camera&
 {
     fov_y_ = fov_y;
     return *this;
 }
 
-auto Camera::set_orbit_sensitivity(const f32 sensitivity) $ne -> mut Camera&
+auto Camera::set_orbit_sensitivity(sensitivity: const f32) $ne -> mut Camera&
 {
     orbit_sensitivity_ = sensitivity;
     return *this;
 }
 
-auto Camera::set_pivot_sensitivity(const f32 sensitivity) $ne -> mut Camera&
+auto Camera::set_pivot_sensitivity(sensitivity: const f32) $ne -> mut Camera&
 {
     pivot_sensitivity_ = sensitivity;
     return *this;
 }
 
-auto Camera::set_zoom_sensitivity(const f32 sensitivity) $ne -> mut Camera&
+auto Camera::set_zoom_sensitivity(sensitivity: const f32) $ne -> mut Camera&
 {
     zoom_sensitivity_ = sensitivity;
     return *this;
 }
 
-auto Camera::set_z_near(const f32 z_near) $ne -> mut Camera&
+auto Camera::set_z_near(z_near: const f32) $ne -> mut Camera&
 {
     z_near_ = z_near;
     return *this;
 }
 
-auto Camera::set_z_far(const f32 z_far) $ne -> mut Camera&
+auto Camera::set_z_far(z_far: const f32) $ne -> mut Camera&
 {
     z_far_ = z_far;
     return *this;
 }
 
-auto Camera::set_allow_pivot_move(const bool allow) $ne -> mut Camera&
+auto Camera::set_allow_pivot_move(allow: const bool) $ne -> mut Camera&
 {
     allow_pivot_move_ = allow;
     return *this;
 }
 
-auto Camera::set_clamp_position_z_min(const bool clamp) $ne -> mut Camera&
+auto Camera::set_clamp_position_z_min(clamp: const bool) $ne -> mut Camera&
 {
     clamp_position_z_min_ = clamp;
     apply_constraints();
     return *this;
 }
 
-auto Camera::set_min_position_z(const f32 min_z) $ne -> mut Camera&
+auto Camera::set_min_position_z(min_z: const f32) $ne -> mut Camera&
 {
     min_position_z_ = min_z;
     apply_constraints();
     return *this;
 }
 
-auto Camera::set_projection_mode(const ProjectionMode projection_mode) $ne -> mut Camera&
+auto Camera::set_projection_mode(projection_mode: const ProjectionMode) $ne -> mut Camera&
 {
     projection_mode_ = projection_mode;
     return *this;
@@ -179,7 +179,7 @@ auto Camera::view_matrix() const $ne -> Mat4
     return glm::lookAt(position(), pivot_, k_axis_z);
 }
 
-auto Camera::projection_matrix(f32 aspect) const $ne -> Mat4
+auto Camera::projection_matrix(aspect: f32) const $ne -> Mat4
 {
     clamped_aspect := max(0.01f, aspect);
     switch (projection_mode_)
@@ -204,7 +204,7 @@ auto Camera::projection_matrix(f32 aspect) const $ne -> Mat4
     return Mat4{1.0f};
 }
 
-auto Camera::view_projection_matrix(f32 aspect) const $ne -> Mat4
+auto Camera::view_projection_matrix(aspect: f32) const $ne -> Mat4
 {
     return projection_matrix(aspect) * view_matrix();
 }
@@ -226,18 +226,18 @@ auto Camera::view_height() const $ne -> f32
     return 2.0f * distance_ * tan(0.5f * fov_y_);
 }
 
-auto Camera::units_per_pixel_y(f32 viewport_height_px) const $ne -> f32
+auto Camera::units_per_pixel_y(viewport_height_px: f32) const $ne -> f32
 {
     return view_height() / max(1.0f, viewport_height_px);
 }
 
-auto Camera::pan_offset_world(f32 dx_px, f32 dy_px, f32 viewport_height_px) const $ne -> Vec3
+auto Camera::pan_offset_world(dx_px: f32, dy_px: f32, viewport_height_px: f32) const $ne -> Vec3
 {
     units := units_per_pixel_y(viewport_height_px);
     return (-dx_px * units) * right() + (dy_px * units) * up();
 }
 
-auto make_camera_ray(const Camera& camera, Vec2 cursor_logical_px, Vec2 viewport_logical_px) $ne
+auto make_camera_ray(camera: const Camera&, cursor_logical_px: Vec2, viewport_logical_px: Vec2) $ne
     -> Ray
 {
     viewport := glm::max(viewport_logical_px, Vec2{1.0f});

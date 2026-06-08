@@ -109,6 +109,28 @@ local function refresh(bufnr)
   local skip = vu.make_skipper(bufnr)
   local s0, e0 = vu.visible_range(bufnr)
 
+  -- When the flip (aliases module) is on it renders the WHOLE function parameter
+  -- -- type, pointers, optional, const, cstring -- so this module must stay out of
+  -- param regions or every one of those doubles up (e.g. `GLFWwindow*` -> window^^).
+  local flip_on = vu.module_enabled(bufnr, 'aliases')
+  local function in_func_param(node)
+    local p = node
+    while p do
+      local t = p:type()
+      if t == 'parameter_declaration' or t == 'optional_parameter_declaration' then
+        return true
+      end
+      if t == 'function_definition' or t == 'compound_statement' or t == 'field_declaration' then
+        return false -- reached the body / a data member: not a param
+      end
+      p = p:parent()
+    end
+    return false
+  end
+  local function param_skip(node)
+    return flip_on and node ~= nil and in_func_param(node)
+  end
+
   -- `hide` once held concealed return-type ranges from the classic-function ->
   -- trailing-return reorder pass; that pass was removed (it only ever fired on
   -- most-vexing-parse false positives, e.g. `vector<T> v(n)`), so it stays empty.
@@ -140,7 +162,8 @@ local function refresh(bufnr)
           break
         end
         -- me is the byte index of the `*`. The 0-based column of the `*` is me-1.
-        if not in_string_or_comment(line, me - 1) and not in_reorder(row0, me - 1) then
+        local _, cn = pcall(vim.treesitter.get_node, { bufnr = bufnr, pos = { row0, me - 1 } })
+        if not in_string_or_comment(line, me - 1) and not in_reorder(row0, me - 1) and not param_skip(cn) then
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, ms - 1, {
             end_col = me,
             conceal = '',
@@ -160,7 +183,7 @@ local function refresh(bufnr)
   if okp and pq then
     for _, node in pq:iter_captures(root, bufnr, s0, e0) do
       local sr, sc, _, ec = node:range()
-      if not skip.skip(sr) and not in_reorder(sr, sc) then
+      if not skip.skip(sr) and not in_reorder(sr, sc) and not param_skip(node) then
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc, {
           end_col = ec,
           conceal = '',
@@ -204,7 +227,7 @@ local function refresh(bufnr)
       if nm and ar and nm:type() == 'type_identifier' and vim.treesitter.get_node_text(nm, bufnr) == 'optional' then
         local nsr, nsc = nm:range()
         local asr, asc, aer, aec = ar:range()
-        if not skip.skip(nsr) and not in_reorder(nsr, nsc) and nsr == asr then
+        if not skip.skip(nsr) and not in_reorder(nsr, nsc) and nsr == asr and not param_skip(nm) then
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, nsr, nsc, { end_col = asc + 1, conceal = '' })
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, aer, aec - 1, { end_col = aec, conceal = '?' })
         end

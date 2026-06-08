@@ -467,39 +467,143 @@ local function imgui_asserts(bufnr, row0, line)
   end
 end
 
+-- A top-level single `&` in the type marks a non-const lvalue reference (default
+-- stripped, template/paren/brace groups skipped). `&&` is an rvalue ref (no mut).
+local function is_ref_param(typ)
+  local depth = 0
+  local i = 1
+  while i <= #typ do
+    local c = typ:sub(i, i)
+    if c == '<' or c == '(' or c == '[' or c == '{' then
+      depth = depth + 1
+    elseif c == '>' or c == ')' or c == ']' or c == '}' then
+      depth = depth - 1
+    elseif c == '&' and depth == 0 then
+      if typ:sub(i + 1, i + 1) == '&' then
+        i = i + 1 -- rvalue ref: mut is meaningless, skip
+      else
+        return true
+      end
+    end
+    i = i + 1
+  end
+  return false
+end
+
+-- Render one parameter `type name` as `name: type` chunks (the flip). The type
+-- goes through render.type_chunks (std:: stripped, *->^, string/lib coloring); a
+-- non-const lvalue-ref gets a `mut`; a leading const is hidden (the default).
+-- A constrained-auto param `Concept auto[&*] name` renders `name: ~Concept` in the
+-- concept color. Returns nil for an unnamed / unparseable param (left raw).
+local function flip_param(p)
+  local main, default = p:match '^(.-)%s*=%s*(.+)$'
+  main = vim.trim(main or p)
+  -- drop leading attributes ([[maybe_unused]] etc.) -- pure noise, like the decl path
+  main = vim.trim(main:gsub('^%s*%[%[.-%]%]%s*', ''))
+  local concept, asig, cname = main:match '^([%w_:]+)%s+auto([&*]*)%s*([%w_]+)$'
+  if concept then
+    local chunks = { { cname, 'Normal' }, { ': ', 'Normal' } }
+    if asig == '&' then
+      chunks[#chunks + 1] = { 'mut ', 'DansMarkerMut' }
+    end
+    chunks[#chunks + 1] = { '~' .. concept, CONCEPT_HL }
+    if asig == '&' then
+      chunks[#chunks + 1] = { '&', CONCEPT_HL }
+    elseif asig == '&&' then
+      chunks[#chunks + 1] = { '&&', CONCEPT_HL }
+    elseif asig == '*' then
+      chunks[#chunks + 1] = { '^', CONCEPT_HL }
+    end
+    return chunks
+  end
+  -- name = the TRAILING identifier (nothing after it but whitespace), at a type
+  -- boundary. `const Camera&` has no trailing identifier (it ends in `&`), so it's
+  -- unnamed and renders as just the type -- still std::-stripped + colored, so the
+  -- width matches the display and arrow_align stays right.
+  local npos = main:find '[%a_][%w_]*%s*$'
+  local name = npos and main:match('([%a_][%w_]*)%s*$')
+  local typ
+  if name and npos > 1 and main:sub(npos - 1, npos - 1):match '[%s&*>]' then
+    typ = vim.trim(main:sub(1, npos - 1))
+  end
+  if not typ or typ == '' then
+    return require('custom.dans_frontend_cpp.render').type_chunks(main) -- unnamed
+  end
+  local chunks = { { name, 'Normal' }, { ': ', 'Normal' } }
+  -- a non-const lvalue ref gets `mut`; const is left on the type (type_chunks
+  -- colors it like the pointee, and `const char*` needs it to read as CString).
+  local was_const = typ:match '^const%f[%A]' ~= nil
+  if is_ref_param(typ) and not was_const then
+    chunks[#chunks + 1] = { 'mut ', 'DansMarkerMut' }
+  end
+  for _, c in ipairs(require('custom.dans_frontend_cpp.render').type_chunks(typ)) do
+    chunks[#chunks + 1] = c
+  end
+  if default then
+    chunks[#chunks + 1] = { ' = ', 'Normal' }
+    chunks[#chunks + 1] = { default, 'Normal' }
+  end
+  return chunks
+end
+
+-- Is the `(` at 1-based col `open` the parameter list of a function declaration
+-- (not a call / `if (...)`)? Treesitter: a function_declarator ancestor.
+local function is_function_decl(bufnr, row0, open)
+  if not bufnr or not row0 then
+    return false
+  end
+  local ok, node = pcall(vim.treesitter.get_node, { bufnr = bufnr, pos = { row0, open - 1 } })
+  if not ok or not node then
+    return false
+  end
+  while node do
+    if node:type() == 'function_declarator' then
+      return true
+    end
+    node = node:parent()
+  end
+  return false
+end
+
+-- The param-list flip for a function signature `line`. Returns nil if it isn't a
+-- function declaration, else { open, close, edits, width }:
+--   open/close: 1-based source cols of `(` and `)`.
+--   edits: { {s0, e0, chunks} } -- conceal source [s0,e0) (0-based) and inject chunks.
+--   width: display width of the rendered `(...)` (so arrow_align lines up `->`).
+-- Shared by the flip (display) and arrow_align (width) so they never disagree.
+function M.flip_params(line, bufnr, row0)
+  local open, close = balanced_parens(line)
+  if not open or not is_function_decl(bufnr, row0, open) then
+    return nil
+  end
+  local width = vim.fn.strwidth(line:sub(open, close))
+  local edits = {}
+  for _, arg in ipairs(split_args(line:sub(open + 1, close - 1))) do
+    local lead = #(arg.text:match '^%s*' or '')
+    local trimmed = vim.trim(arg.text)
+    if trimmed ~= '' then
+      local chunks = flip_param(trimmed)
+      if chunks then
+        local s0 = open + arg.from + lead - 1
+        local rw = 0
+        for _, c in ipairs(chunks) do
+          rw = rw + vim.fn.strwidth(c[1])
+        end
+        edits[#edits + 1] = { s0 = s0, e0 = s0 + #trimmed, chunks = chunks }
+        width = width - vim.fn.strwidth(trimmed) + rw
+      end
+    end
+  end
+  return { open = open, close = close, edits = edits, width = width }
+end
+
 -- 0-based byte columns where a `mut ` should be injected before a function arg:
--- a non-const *reference* parameter. mut marks a mutable reference; whether a
--- by-value arg is a copy is the user's call via cpy, independent of mut -- so a
--- by-value param never qualifies, even when its default value contains a `*`
--- (`T eps = a * b`) or its type nests `&`/`*` in template args
--- (`std::function<void(int&)>`). Pointers don't get mut either. Only on
--- trailing-return decls (a `->` follows the parens). Exposed for arrow_align.
+-- a non-const *reference* parameter. (Legacy: the param flip now owns this; kept
+-- for any external caller.) Only on trailing-return decls (a `->` follows).
 function M.arg_mut_cols(line)
   local open, close = balanced_parens(line)
   if not open or not line:sub(close + 1):find('->', 1, true) then
     return {}
-  end
-  -- A top-level `&` in the type (default stripped, template/paren/brace groups
-  -- skipped) marks a reference parameter.
-  local function is_ref_param(typ)
-    local depth = 0
-    local i = 1
-    while i <= #typ do
-      local c = typ:sub(i, i)
-      if c == '<' or c == '(' or c == '[' or c == '{' then
-        depth = depth + 1
-      elseif c == '>' or c == ')' or c == ']' or c == '}' then
-        depth = depth - 1
-      elseif c == '&' and depth == 0 then
-        if typ:sub(i + 1, i + 1) == '&' then
-          i = i + 1 -- `&&` is an rvalue ref; mut on an rvalue ref is meaningless, skip
-        else
-          return true -- single `&`: an lvalue reference parameter
-        end
-      end
-      i = i + 1
-    end
-    return false
   end
   local cols = {}
   for _, arg in ipairs(split_args(line:sub(open + 1, close - 1))) do
@@ -635,14 +739,22 @@ local function refresh(bufnr)
         end
       end
 
-      -- Inject `mut` before each non-const reference/pointer parameter (the
-      -- source token is gone; the frontend shows it). arrow_align mirrors
-      -- these widths via M.arg_mut_cols so header arrows stay aligned.
-      for _, col0 in ipairs(M.arg_mut_cols(line)) do
-        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, col0, {
-          virt_text = { { 'mut ', 'DansMarkerMut' } },
-          virt_text_pos = 'inline',
-        })
+      -- Flip the function params: `type name` -> `name: type` (types blue, mut on
+      -- non-const refs). arrow_align mirrors the rendered width via M.flip_params
+      -- so the trailing `->` columns still line up. Skip a special-member line
+      -- (a copy/move ctor collapsed to $copy/$move by special_members) -- flipping
+      -- its `const X&` param would double-render on top of that.
+      local sm_ok, sm = pcall(require, 'custom.dans_frontend_cpp.special_members')
+      local fp = not (sm_ok and sm.covers(bufnr, row0)) and M.flip_params(line, bufnr, row0)
+      if fp then
+        for _, ed in ipairs(fp.edits) do
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, ed.s0, {
+            end_col = ed.e0,
+            conceal = '',
+            virt_text = ed.chunks,
+            virt_text_pos = 'inline',
+          })
+        end
       end
 
       -- Inject `mut` right after the param `)` of a non-const member function

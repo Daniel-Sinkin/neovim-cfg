@@ -354,7 +354,7 @@ function M.type_chunks(t)
     if c > i then
       vim.list_extend(out, string_token_chunks(shown:sub(i, c - 1), hl))
     end
-    out[#out + 1] = { '^', 'Normal' }
+    out[#out + 1] = { '^', hl } -- caret takes the pointee color (matches add_type)
     i = c + 1
   end
   return out

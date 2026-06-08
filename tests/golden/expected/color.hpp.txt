@@ -19,7 +19,7 @@ struct Color
     channels: [4]f32 = 1.0f, 1.0f, 1.0f, 1.0f;
 
     constexpr Color() $ne = default;
-    constexpr Color(f32 r, f32 g, f32 b, f32 a = 1.0f) $ne : channels{r, g, b, a}
+    constexpr Color(r: f32, g: f32, b: f32, a: f32 = 1.0f) $ne : channels{r, g, b, a}
     {
     }
 
@@ -68,7 +68,7 @@ struct ColorU8
     channels: [4]u8 = 255u, 255u, 255u, 255u;
 
     constexpr ColorU8() $ne = default;
-    constexpr ColorU8(u8 r, u8 g, u8 b, u8 a = 255u) $ne : channels{r, g, b, a}
+    constexpr ColorU8(r: u8, g: u8, b: u8, a: u8 = 255u) $ne : channels{r, g, b, a}
     {
     }
 
@@ -91,17 +91,17 @@ struct ColorU8
 static_assert(sizeof(Color) == 4zu * sizeof(f32));
 static_assert(sizeof(ColorU8) == 4zu * sizeof(u8));
 
-$nd constexpr auto to_vec4(Color color) $ne -> Vec4
+$nd constexpr auto to_vec4(color: Color) $ne -> Vec4
 {
     return Vec4{color.r(), color.g(), color.b(), color.a()};
 }
 
-$nd constexpr auto to_color(Vec4 value) $ne -> Color
+$nd constexpr auto to_color(value: Vec4) $ne -> Color
 {
     return Color{value.r, value.g, value.b, value.a};
 }
 
-$nd constexpr auto to_color(ColorU8 color) $ne -> Color
+$nd constexpr auto to_color(color: ColorU8) $ne -> Color
 {
     inv_255 := 1.0f / 255.0f;
     return Color{
@@ -112,13 +112,13 @@ $nd constexpr auto to_color(ColorU8 color) $ne -> Color
     };
 }
 
-$nd constexpr auto color_channel_to_u8(f32 value) $ne -> u8
+$nd constexpr auto color_channel_to_u8(value: f32) $ne -> u8
 {
     scaled := clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f;
     return $scast<u8>(scaled);
 }
 
-$nd constexpr auto to_color_u8(Color color) $ne -> ColorU8
+$nd constexpr auto to_color_u8(color: Color) $ne -> ColorU8
 {
     return ColorU8{
         color_channel_to_u8(color.r()),
@@ -128,12 +128,12 @@ $nd constexpr auto to_color_u8(Color color) $ne -> ColorU8
     };
 }
 
-$nd constexpr auto with_alpha(Color color, f32 alpha) $ne -> Color
+$nd constexpr auto with_alpha(color: Color, alpha: f32) $ne -> Color
 {
     return Color{color.r(), color.g(), color.b(), alpha};
 }
 
-$nd constexpr auto mix_color(Color a, Color b, f32 t) $ne -> Color
+$nd constexpr auto mix_color(a: Color, b: Color, t: f32) $ne -> Color
 {
     clamped_t := clamp(t, 0.0f, 1.0f);
     inv_t := 1.0f - clamped_t;
@@ -145,12 +145,12 @@ $nd constexpr auto mix_color(Color a, Color b, f32 t) $ne -> Color
     };
 }
 
-$nd constexpr auto luminance(Color color) $ne -> f32
+$nd constexpr auto luminance(color: Color) $ne -> f32
 {
     return 0.299f * color.r() + 0.587f * color.g() + 0.114f * color.b();
 }
 
-$nd constexpr auto grayscale(Color color) $ne -> Color
+$nd constexpr auto grayscale(color: Color) $ne -> Color
 {
     y := luminance(color);
     return Color{y, y, y, color.a()};
