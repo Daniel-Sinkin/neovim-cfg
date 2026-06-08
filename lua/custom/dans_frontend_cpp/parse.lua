@@ -326,7 +326,13 @@ function M.strip_type(typ)
   t = t:gsub('const%s+char%s*(%*+)', function(stars)
     return 'CString' .. stars:sub(2)
   end)
-  return M.ptr(t)
+  t = M.ptr(t)
+  -- `const char* const` (a const pointer to const char) -> `CString const` after
+  -- the rewrites above; move the pointer-const in front, like the leading-const
+  -- rule for pointers, so it reads `const CString` (`span<const char* const>` ->
+  -- `span<const CString>`).
+  t = t:gsub('CString(%^*)%s+const%f[%W]', 'const CString%1')
+  return t
 end
 
 -- Drop a library prefix from a type token for the overlay, matching the raw-line

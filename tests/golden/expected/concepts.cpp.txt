@@ -17,7 +17,9 @@ concept ItChar = I~value ~= char;
 <R>
 concept RefBool = R~& ~> bool;
 <Proj, R>
-concept Proj1 = Proj&(R~&) ~> string_view;
+concept Proj1 = Proj&(R~&)-> ~> string_view;
+<R>
+concept FormattableRange = R~input_range and not R~StringRange and (R~value ~> char);
 
 static_assert(std::same_as<ValueOf<R>, char>);
 static_assert(std::same_as<std::underlying_type_t<VkResult>, int>);

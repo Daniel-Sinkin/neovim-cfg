@@ -18,6 +18,8 @@ template <typename R>
 concept RefBool = convertible_to<range_reference_t<R>, bool>;
 template <typename Proj, typename R>
 concept Proj1 = std::convertible_to<std::invoke_result_t<Proj&, RefOf<R>>, std::string_view>;
+template <typename R>
+concept FormattableRange = input_range<R> and not StringRange<R> and CharLike<ValueOf<R>>;
 
 static_assert(std::same_as<ValueOf<R>, char>);
 static_assert(std::same_as<std::underlying_type_t<VkResult>, int>);

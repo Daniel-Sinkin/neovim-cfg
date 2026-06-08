@@ -145,8 +145,8 @@ local UNARY_CONCEPTS = {
 local CONCEPTS = {
   { kw = 'convertible_to', kind = 'infix', op = '~>' },
   { kw = 'same_as', kind = 'infix', op = '~=' },
-  { kw = 'invocable', kind = 'call' },
-  { kw = 'invoke_result_t', kind = 'call' },
+  { kw = 'invocable', kind = 'call' }, -- T(S): callable with S
+  { kw = 'invoke_result_t', kind = 'call', suffix = '->' }, -- T(S)->: the call's result type
   { kw = 'CharLike', kind = 'fixed', op = '~>', rhs = 'char' },
   { kw = 'BoolLike', kind = 'fixed', op = '~>', rhs = 'bool' },
   { kw = 'IntLike', kind = 'fixed', op = '~>', rhs = 'int' },
@@ -160,6 +160,33 @@ local CONCEPTS = {
 }
 for _, kw in ipairs(UNARY_CONCEPTS) do
   CONCEPTS[#CONCEPTS + 1] = { kw = kw, kind = 'uname', sym = '~' .. kw }
+end
+
+-- the concept keywords with a dedicated spec above -- a user concept by one of
+-- these names (unlikely) is left to its special spec, not the generic uname pass.
+local STATIC_KW = {}
+for _, s in ipairs(CONCEPTS) do
+  STATIC_KW[s.kw] = true
+end
+
+-- User-defined concept names (`concept NAME = ...`) in the buffer, so a usage
+-- `NAME<T>` renders T~NAME like the std unary concepts. Cached per changedtick.
+local uc_cache = {}
+local function user_concepts(bufnr)
+  local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+  local c = uc_cache[bufnr]
+  if c and c.tick == tick then
+    return c.set
+  end
+  local set = {}
+  for _, line in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+    local name = line:match '^%s*concept%s+([%w_]+)'
+    if name and not STATIC_KW[name] then
+      set[name] = true
+    end
+  end
+  uc_cache[bufnr] = { tick = tick, set = set }
+  return set
 end
 
 local function hide(bufnr, row0, s0, e0)
@@ -273,14 +300,15 @@ local function render_concept(bufnr, row0, line, spec, has_conj)
     elseif kind == 'call' and #args >= 1 then
       -- F(args): F kept, parens concept-colored, args keep their own colors.
       local f_s, f_e = arg_span(open, args[1])
+      local tail = ')' .. (spec.suffix or '') -- invoke_result_t -> `)->`
       hide(bufnr, row0, ms - 1, f_s - 1)
       if #args == 1 then
-        hide_inject(bufnr, row0, f_e, close, '()')
+        hide_inject(bufnr, row0, f_e, close, '(' .. tail)
       else
         local b_s = arg_span(open, args[2])
         local _, last_e = arg_span(open, args[#args])
         hide_inject(bufnr, row0, f_e, b_s - 1, '(')
-        hide_inject(bufnr, row0, last_e, close, ')')
+        hide_inject(bufnr, row0, last_e, close, tail)
       end
     end
     -- arity mismatch: leave verbatim (no extmarks)
@@ -293,6 +321,10 @@ local function concepts(bufnr, row0, line)
   local has_conj = line:match '%f[%a]and%f[%A]' ~= nil or line:match '%f[%a]or%f[%A]' ~= nil
   for _, spec in ipairs(CONCEPTS) do
     render_concept(bufnr, row0, line, spec, has_conj)
+  end
+  -- user-defined concepts: NAME<T> -> T~NAME (the same unary postfix).
+  for name in pairs(user_concepts(bufnr)) do
+    render_concept(bufnr, row0, line, { kw = name, kind = 'uname', sym = '~' .. name }, has_conj)
   end
 end
 

@@ -144,6 +144,9 @@ run('member double', 'struct', { 'double ratio{};' }, { 'ratio: f64;' })
 -- [[maybe_unused]] is hidden entirely (only its absence matters); on a decl the
 -- overlay drops it via split_markers.
 run('maybe_unused dropped on decl', 'fn', { '[[maybe_unused]] constexpr int n{4};' }, { 'n: int : 4;' })
+
+-- const char* const (const pointer to const char) -> const CString, not CString const
+run('span const cstring', 'struct', { 'std::span<const char* const> layers{};' }, { 'layers: span<const CString>;' })
 run('member nested template', 'struct', { 'std::vector<std::pair<int, int>> v{};' }, { 'v: vector<pair<int, int>>;' })
 run('member vector cstring', 'struct', { 'std::vector<const char*> v{};' }, { 'v: vector<CString>;' })
 run('member const-ref vector cstring', 'struct', { 'const std::vector<const char*>& e{};' }, { 'e: const vector<CString>&;' })
