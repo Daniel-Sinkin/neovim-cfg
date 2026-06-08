@@ -462,7 +462,7 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
   if name == 'operator' then
     name = nil
   end
-  local typ, nm, init, paren
+  local typ, nm, init, paren, no_init
   if not forp and not iflet and not sb_binds and not name then
     typ, nm, init = core:match '^(.-)%s+([%w_]+)%s*{(.*)}$'
     -- A brace-init declaration is a terminated statement; require the `;`.
@@ -488,13 +488,24 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
           typ, nm = core:match '^(.-[%w_>][&*]+)%s*([%w_]+)$'
           init = ''
           if not (typ and nm and had_semi and P.looks_like_type(typ)) then
-            -- bare value decl with no initializer: only rewritten for array types
-            -- (`std::array<T, N> x;` -> `x: [N]T;`), where the Odin form is wanted.
-            -- Other plain `Type name;` decls stay raw so two-word statements that
-            -- aren't declarations aren't grabbed.
+            -- bare value decl with no initializer (`Type name;`): the value is
+            -- indeterminate (no `{}` default-init), so render `name: T` plus a red
+            -- `no_init` marker. Array types additionally take the Odin `[N]T` form.
+            -- Non-array types are restricted to members/globals -- a bare local
+            -- (`int x;` assigned later) is an idiom, not worth flagging, and
+            -- widening it would grab two-word non-decl statements in fn bodies.
             local vtyp, vnm = core:match '^(.-)%s+([%w_]+)$'
-            if vtyp and vnm and had_semi and P.looks_like_type(vtyp) and P.strip_type(vtyp):match '^%[' then
-              typ, nm = vtyp, vnm
+            if vtyp and vnm and had_semi and P.looks_like_type(vtyp) then
+              local is_array = P.strip_type(vtyp):match '^%[' ~= nil
+              local kind = P.decl_kind(bufnr, row0)
+              -- const decls aren't "garbage": a const member is initialized in the
+              -- ctor init-list (or ill-formed), so it's never flagged and non-array
+              -- const stays raw as before. Arrays keep rendering at every scope.
+              if is_array or ((kind == 'member' or kind == 'global') and not was_const) then
+                typ, nm, no_init = vtyp, vnm, not was_const
+              else
+                return nil
+              end
             else
               return nil
             end
@@ -765,6 +776,10 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
       else
         add_value(init)
       end
+    end
+    -- Uninitialized: the value is indeterminate (no `{}`), flagged red like `mut`.
+    if no_init then
+      add(' no_init', 'DansMarkerMut')
     end
     add(semi)
   end

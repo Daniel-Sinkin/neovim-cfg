@@ -32,6 +32,7 @@ local STMT_KEYWORDS = {
   ['co_await'] = true,
   ['co_yield'] = true,
   ['static_assert'] = true,
+  ['goto'] = true,
 }
 
 local MARKERS = { 'cpy' }
