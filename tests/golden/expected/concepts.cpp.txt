@@ -1,22 +1,22 @@
 namespace test
 {
-template <typename V>
+<V>
 concept StringLike = V ~> string_view;
-template <typename R>
+<R>
 concept StringRange = R~input_range and (R~value ~> string_view);
-template <typename T>
+<T>
 concept IsInt = T ~= int;
-template <typename F>
+<F>
 concept Callback = F(int);
-template <typename T>
+<T>
 concept CharCol = T~& ~> char;
-template <typename T>
+<T>
 concept BoolCol = (T ~> bool) and (T ~> int);
-template <typename I>
+<I>
 concept ItChar = I~value ~= char;
-template <typename R>
+<R>
 concept RefBool = R~& ~> bool;
-template <typename Proj, typename R>
+<Proj, R>
 concept Proj1 = Proj&(R~&) ~> string_view;
 
 static_assert(std::same_as<ValueOf<R>, char>);
