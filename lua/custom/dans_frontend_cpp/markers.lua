@@ -305,9 +305,9 @@ local function apply(ev)
   -- gsl C-string aliases: zstring/czstring/wzstring/cwzstring/u16zstring/... and
   -- basic_zstring -- all pointers to a (zero-terminated) C string, so green too.
   vim.fn.matchadd('DansString', code_only [[\<\%(basic_\)\?[cwu0-9]*zstring\>]], 24)
-  -- First-party CamelCase z-string types (ZString / CZString / WZString / ...) --
-  -- same zero-terminated-string family, same green.
-  vim.fn.matchadd('DansString', code_only [[\<\u*ZString\>]], 24)
+  -- CamelCase string types: the z-string family (ZString / CZString / ...) and
+  -- FString / CFString (Unreal / CoreFoundation) -- all strings, same green.
+  vim.fn.matchadd('DansString', code_only [[\<\u*[ZF]String\>]], 24)
   vim.fn.matchadd('DansString', code_only [[\<const\s\+char\s*\*]], 24)
   -- Masks (priority 28): the color matches are syntax-blind, so they'd color
   -- tokens inside /* block comments */ and #include <...> paths. Recolor those

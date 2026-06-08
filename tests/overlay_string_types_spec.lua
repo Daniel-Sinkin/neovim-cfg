@@ -122,6 +122,14 @@ do
   chk('CZString green', chunk_hl(b, off, 'CZString'), 'DansString')
 end
 
+do
+  -- Unreal / CoreFoundation FString family is greened too.
+  local b, off = build('struct', { 'FString name{};' })
+  chk('FString green', chunk_hl(b, off, 'FString'), 'DansString')
+  local b2, off2 = build('struct', { 'CFString cf{};' })
+  chk('CFString green', chunk_hl(b2, off2, 'CFString'), 'DansString')
+end
+
 -- ===================== B: const char* -> CString =====================
 do
   local b, off = build('struct', { 'const char* s{};' })
