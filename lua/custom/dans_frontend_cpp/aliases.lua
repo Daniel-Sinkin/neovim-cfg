@@ -419,6 +419,29 @@ local function concept_def_line(bufnr, row0, line)
   hide(bufnr, row0, #indent, e) -- conceal `concept ` (keep the concept name)
 end
 
+-- `auto* const name` / `T* const name` (a const pointer) reads better with the
+-- const in front: `const auto^ name`. The pointer module turns `*` into `^` on the
+-- raw line; here the trailing pointer-const is moved ahead of the type. Only
+-- `<type>* const <name>` (a decl shape), never a `a * b` expression.
+local function const_pointer_reorder(bufnr, row0, line)
+  local from = 1
+  while true do
+    local s, e, tstart, typ, cstart = line:find('()([%w_:]+)%s*%*+%s+()const%s', from)
+    if not s then
+      return
+    end
+    from = e
+    local before = tstart > 1 and line:sub(tstart - 1, tstart - 1) or ''
+    if (before == '' or not before:match '[%w_]') and not in_string_or_comment(line, tstart - 1) and typ ~= 'return' then
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, tstart - 1, {
+        virt_text = { { 'const ', 'DansConst' } },
+        virt_text_pos = 'inline',
+      })
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, cstart - 1, { end_col = cstart - 1 + 6, conceal = '' })
+    end
+  end
+end
+
 -- ImGui's assert macros read as their std spelling, grayed like a real assert:
 -- IM_STATIC_ASSERT -> static_assert, IM_ASSERT -> assert, IM_ASSERT_USER_ERROR ->
 -- assert_user_error. (Strip IM_, lowercase the rest.) Other IM_* keep the bordeaux
@@ -562,6 +585,8 @@ local function refresh(bufnr)
       -- typename / class, color the params); concept def lines drop `concept `.
       template_header(bufnr, row0, line)
       concept_def_line(bufnr, row0, line)
+      -- `auto* const x` -> `const auto^ x` (pointer-const moved in front).
+      const_pointer_reorder(bufnr, row0, line)
       -- ImGui assert macros -> their std spelling, grayed.
       imgui_asserts(bufnr, row0, line)
       for _, alias in ipairs(ALIASES) do
