@@ -359,6 +359,12 @@ function M.strip_glfw(t)
   -- opengl: GL_X / glX (after glfw above, so glfw* is consumed first)
   t = t:gsub('%f[%w]GL_([A-Z0-9])', '%1')
   t = t:gsub('%f[%w_]gl([A-Z])', '%1')
+  -- dear imgui: ImGui:: / ImGuiX / ImX / IM_X. ImGui before Im so ImGuiContext
+  -- isn't left as GuiContext.
+  t = t:gsub('%f[%w]ImGui::', '')
+  t = t:gsub('%f[%w]ImGui([A-Z])', '%1')
+  t = t:gsub('%f[%w]Im([A-Z])', '%1')
+  t = t:gsub('%f[%w]IM_([A-Z0-9])', '%1')
   return t
 end
 

@@ -247,6 +247,31 @@ local function concepts(bufnr, row0, line)
   end
 end
 
+-- ImGui's assert macros read as their std spelling, grayed like a real assert:
+-- IM_STATIC_ASSERT -> static_assert, IM_ASSERT -> assert, IM_ASSERT_USER_ERROR ->
+-- assert_user_error. (Strip IM_, lowercase the rest.) Other IM_* keep the bordeaux
+-- coloring from markers; only these asserts are reworded.
+local function imgui_asserts(bufnr, row0, line)
+  local i = 1
+  while true do
+    local s, e, tok = line:find('(IM_[%u][%u%d_]*)', i)
+    if not s then
+      return
+    end
+    i = e + 1
+    local before = s > 1 and line:sub(s - 1, s - 1) or nil
+    if (tok == 'IM_STATIC_ASSERT' or tok:match '^IM_ASSERT') and not is_word_char(before) and not in_string_or_comment(line, s - 1) then
+      local repl = tok:gsub('^IM_', ''):lower()
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, s - 1, {
+        end_col = e,
+        conceal = '',
+        virt_text = { { repl, 'DansAssert' } },
+        virt_text_pos = 'inline',
+      })
+    end
+  end
+end
+
 -- 0-based byte columns where a `mut ` should be injected before a function arg:
 -- a non-const *reference* parameter. mut marks a mutable reference; whether a
 -- by-value arg is a copy is the user's call via cpy, independent of mut -- so a
@@ -361,6 +386,8 @@ local function refresh(bufnr)
       -- concept / type-trait `~`-notation (same_as -> ~=, convertible_to -> ~>,
       -- RefOf/ValueOf/CharLike/..., invocable -> ~(...)). Before the generic loop.
       concepts(bufnr, row0, line)
+      -- ImGui assert macros -> their std spelling, grayed.
+      imgui_asserts(bufnr, row0, line)
       for _, alias in ipairs(ALIASES) do
         local keyword, replacement, hl = alias[1], alias[2], alias[3] or 'Comment'
         local start_pos = 1

@@ -170,6 +170,8 @@ local function colorize(text)
           out[#out + 1] = { P.strip_glfw(word), 'DansVulkan' }
         elseif word:match '^stb' or word:match '^STB' then
           out[#out + 1] = { word, 'DansSTB' } -- stb*/STB*, matches markers (not stripped)
+        elseif word:match '^Im%u' or word:match '^IM_' then
+          out[#out + 1] = { P.strip_glfw(word), 'DansImGui' } -- imgui prefix hidden
         elseif word:match '^SDL_' or word:match '^GLFW' or word:match '^glfw%u' or word:match '^_GLFW' or word:match '^_glfw' then
           out[#out + 1] = { P.strip_glfw(word), 'DansSDL' } -- GLFW prefix hidden, SDL_ kept
         elseif word:match '^LLDB_' or word:match '^SB%u' or word == 'StateType' then
@@ -255,6 +257,9 @@ local function type_hl(t)
   end
   if t:match '^stb' or t:match '^STB' then
     return 'DansSTB'
+  end
+  if t:match '^Im%u' or t:match '^IM_' then
+    return 'DansImGui'
   end
   if t:match '^LLDB_' or t:match '^SB%u' or t == 'StateType' then
     return 'DansLLDB'

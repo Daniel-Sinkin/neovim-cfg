@@ -68,6 +68,8 @@ local function is_library(t)
     or t:match '^glfw%u' ~= nil
     or t:match '^_GLFW' ~= nil
     or t:match '^_glfw' ~= nil
+    or t:match '^IM_' ~= nil
+    or t:match '^Im%u' ~= nil
     or t:match '^stb' ~= nil
     or t:match '^STB' ~= nil
     or t:match '^LLDB_' ~= nil

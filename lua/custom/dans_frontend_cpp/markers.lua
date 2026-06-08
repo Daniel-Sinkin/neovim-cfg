@@ -22,6 +22,7 @@ local MATCH_GROUPS = {
   DansSDL = true,
   DansSTB = true,
   DansLLDB = true,
+  DansImGui = true,
   DansConcept = true,
   DansLambda = true,
   DansString = true,
@@ -82,6 +83,10 @@ local PREFIX_PATTERNS = {
   [==[\<vma\ze[A-Z]]==],
   [==[\<GL_\ze[A-Z0-9]]==], -- opengl
   [==[\<gl\ze[A-Z]]==],
+  [==[\<ImGui::]==], -- dear imgui: namespace, then types (ImGuiIO), Im* types, IM_ macros
+  [==[\<ImGui\ze[A-Z]]==],
+  [==[\<Im\ze[A-Z]]==],
+  [==[\<IM_\ze[A-Z0-9]]==], -- IM_STATIC_ASSERT / IM_ASSERT* are reworded in aliases.lua
 }
 local CPP_PATTERNS = {
   [==[\<std::ranges::views::]==],
@@ -262,6 +267,12 @@ local function apply(ev)
   vim.fn.matchadd('DansLLDB', code_only [[\<LLDB_[A-Za-z0-9_]*\>]], 25)
   vim.fn.matchadd('DansLLDB', code_only [[\<SB[A-Z][A-Za-z0-9_]*\>]], 25)
   vim.fn.matchadd('DansLLDB', code_only [[\<StateType\>]], 25)
+  -- Dear ImGui -> bordeaux: IM_* macros, ImGui::API calls, Im* types. The
+  -- IM_STATIC_ASSERT / IM_ASSERT* macros are reworded gray in aliases.lua; the
+  -- conceal there hides them, so coloring the underlying token is harmless.
+  vim.fn.matchadd('DansImGui', code_only [[\<IM_[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansImGui', code_only [[\<ImGui::[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansImGui', code_only [[\<Im[A-Z][A-Za-z0-9_]*\>]], 25)
   -- std::move / std::forward -> red: ownership-transfer points worth seeing (the
   -- source is left moved-from). `\zs` colors only the move/forward word; a member
   -- `.move()` (e.g. a widget) isn't std::-qualified so it's untouched.
