@@ -51,11 +51,22 @@ return {
     vim.keymap.set('n', '<leader><leader>', builtin.buffers, { desc = '[ ] Find existing buffers' })
 
     vim.keymap.set('n', '<leader>/', function()
-      builtin.current_buffer_fuzzy_find(require('telescope.themes').get_dropdown {
-        winblend = 10,
-        previewer = false,
-      })
-    end, { desc = '[/] Fuzzily search in current buffer' })
+      -- ripgrep the current file only (live regex search). An unnamed/scratch
+      -- buffer has nothing on disk to grep, so fall back to the in-buffer fuzzy
+      -- finder there.
+      local file = vim.api.nvim_buf_get_name(0)
+      if file == '' then
+        builtin.current_buffer_fuzzy_find(require('telescope.themes').get_dropdown {
+          winblend = 10,
+          previewer = false,
+        })
+        return
+      end
+      builtin.live_grep {
+        search_dirs = { file },
+        prompt_title = 'Grep current file',
+      }
+    end, { desc = '[/] Grep current file (ripgrep)' })
 
     vim.keymap.set('n', '<leader>s/', function()
       builtin.live_grep {
