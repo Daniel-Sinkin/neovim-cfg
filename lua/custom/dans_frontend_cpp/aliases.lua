@@ -296,6 +296,46 @@ local function concepts(bufnr, row0, line)
   end
 end
 
+-- Template header compaction: `template <typename V>` -> `<V>`, `template
+-- <typename T, usize N>` -> `<T, usize N>`. Conceals the `template ` keyword and
+-- the `typename`/`class` param kinds inside the angle brackets (scoped to a line
+-- that opens with `template`, so a dependent `typename T::x` elsewhere is safe).
+local function template_header(bufnr, row0, line)
+  local indent = line:match '^(%s*)template%s*<'
+  if not indent or in_string_or_comment(line, #indent) then
+    return
+  end
+  local lt = line:find('<', #indent + 1, true)
+  local depth, close = 0, nil
+  for i = lt, #line do
+    local c = line:sub(i, i)
+    if c == '<' then
+      depth = depth + 1
+    elseif c == '>' then
+      depth = depth - 1
+      if depth == 0 then
+        close = i
+        break
+      end
+    end
+  end
+  if not close then
+    return
+  end
+  hide(bufnr, row0, #indent, lt - 1) -- conceal `template ` (keep the `<`)
+  for _, kw in ipairs { 'typename', 'class' } do
+    local j = lt
+    while true do
+      local s, e = line:find('%f[%w]' .. kw .. '%s+', j)
+      if not s or s > close then
+        break
+      end
+      hide(bufnr, row0, s - 1, e) -- conceal `typename ` / `class `
+      j = e + 1
+    end
+  end
+end
+
 -- ImGui's assert macros read as their std spelling, grayed like a real assert:
 -- IM_STATIC_ASSERT -> static_assert, IM_ASSERT -> assert, IM_ASSERT_USER_ERROR ->
 -- assert_user_error. (Strip IM_, lowercase the rest.) Other IM_* keep the bordeaux
@@ -435,6 +475,8 @@ local function refresh(bufnr)
       -- concept / type-trait `~`-notation (same_as -> ~=, convertible_to -> ~>,
       -- RefOf/ValueOf/CharLike/..., invocable -> ~(...)). Before the generic loop.
       concepts(bufnr, row0, line)
+      -- template headers -> compact `<...>` (drop template / typename / class).
+      template_header(bufnr, row0, line)
       -- ImGui assert macros -> their std spelling, grayed.
       imgui_asserts(bufnr, row0, line)
       for _, alias in ipairs(ALIASES) do
