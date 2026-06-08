@@ -175,6 +175,8 @@ local function outline_ranges(buf)
     (class_specifier) @def
     (struct_specifier) @def
     (enum_specifier) @def
+    (initializer_list) @data
+    (switch_statement) @sw
   ]])
   if not ok3 or not q then
     return out
@@ -201,35 +203,43 @@ local function outline_ranges(buf)
   -- pass 1: count direct members per scope (defs AND nested namespaces, for the
   -- sole-member rule) and per-kind def counts per scope (for the label).
   local scope_count, scope_kinds = {}, {}
-  local defs, ns_fold = {}, {}
+  local defs, ns_fold, extras = {}, {}, {}
   for id, node in q:iter_captures(trees[1]:root(), buf, 0, -1) do
     local cap = q.captures[id]
-    -- count membership in ANY scope (namespace, file, class, struct, function) so
-    -- the sole-member rule also opens a one-method class and a one-thing file, not
-    -- just a one-thing namespace.
     local sc = nearest_scope(node)
     local key = sc and node_key(sc) or nil
-    if key then
-      scope_count[key] = (scope_count[key] or 0) + 1
-    end
-    if cap == 'ns' then
+    if cap == 'data' or cap == 'sw' then
+      -- arrays / switches always fold (never sole-member-gated). A namespace/file-
+      -- level array still COUNTS as a thing in that scope, so a lone function next
+      -- to a big data table isn't treated as the scope's sole member.
+      extras[#extras + 1] = node
+      if cap == 'data' and sc and (sc:type() == 'namespace_definition' or sc:type() == 'translation_unit') then
+        scope_count[key] = (scope_count[key] or 0) + 1
+      end
+    elseif cap == 'ns' then
+      if key then
+        scope_count[key] = (scope_count[key] or 0) + 1
+      end
       local name = node:field('name')[1]
       local fold = (not name) or (vim.treesitter.get_node_text(name, buf):find('detail', 1, true) ~= nil)
       if fold then
         ns_fold[#ns_fold + 1] = node
       end
     else
-      defs[#defs + 1] = { node = node, key = key }
+      -- count membership in ANY scope (namespace, file, class, struct, function) so
+      -- the sole-member rule also opens a one-method class and a one-thing file.
       if key then
+        scope_count[key] = (scope_count[key] or 0) + 1
         local k = scope_kinds[key] or { fn = 0, st = 0, en = 0 }
         scope_kinds[key] = k
         k[kind_of(node)] = k[kind_of(node)] + 1
       end
+      defs[#defs + 1] = { node = node, key = key }
     end
   end
 
-  -- pass 2: fold the namespaces (recording their member counts), then the defs
-  -- except a def that is the sole thing in its namespace / the file.
+  -- pass 2: fold namespaces (recording member counts), defs (except a sole member),
+  -- then the always-fold extras (arrays / switches).
   for _, node in ipairs(ns_fold) do
     add_range(node)
     local s = node:range()
@@ -239,6 +249,9 @@ local function outline_ranges(buf)
     if not (d.key and scope_count[d.key] == 1) then
       add_range(d.node)
     end
+  end
+  for _, node in ipairs(extras) do
+    add_range(node)
   end
   return out
 end

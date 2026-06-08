@@ -117,6 +117,38 @@ ok('member fn b folds', level(15) == '>2')
 ok('member struct folds', level(19) == '>2')
 ok('multi-member ns label', foldtext(9, 23) == '+-- 15 lines: namespace detail2 : 2 function : 1 struct')
 
+-- arrays + switches fold; a lone function next to a data table still folds
+local src3 = {
+  'namespace dans::vk', -- 1
+  '{', -- 2
+  'constexpr std::array k_codes = {', -- 3  array -> fold
+  '    A,', -- 4
+  '    B,', -- 5
+  '};', -- 6
+  'constexpr def to_string(int res) -> std::string_view', -- 7  sole fn, still folds
+  '{', -- 8
+  '    switch (res)', -- 9  switch -> fold
+  '    {', -- 10
+  '    case 0: return "a";', -- 11
+  '    default: return "?";', -- 12
+  '    }', -- 13
+  '}', -- 14
+  '}', -- 15
+}
+local b3 = vim.api.nvim_create_buf(false, true)
+vim.api.nvim_buf_set_lines(b3, 0, -1, false, src3)
+vim.api.nvim_buf_set_name(b3, '/tmp/fold_probe3.hpp')
+vim.bo[b3].filetype = 'cpp'
+vim.api.nvim_set_current_buf(b3)
+pcall(function()
+  vim.treesitter.get_parser(b3, 'cpp'):parse()
+end)
+ok('array folds', level(3) == '>1')
+ok('array fold ends', level(6) == '<1')
+ok('lone fn next to array still folds', level(7) == '>1')
+ok('switch folds', level(9) == '>2')
+ok('switch fold ends', level(13) == '<2')
+
 local report = { string.format('fold_spec: %d passed, %d failed', pass, fail) }
 for _, f in ipairs(fails) do
   report[#report + 1] = f
