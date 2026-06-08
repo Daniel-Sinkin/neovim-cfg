@@ -219,9 +219,11 @@ local function apply(ev)
   -- lines; this grays the ones that stay visible (args, trailing, and the
   -- leading one revealed on the cursor line).
   vim.fn.matchadd('DansConst', code_only [[\<const\>]], 20)
-  -- Gray every `ident::` scope qualifier. std:: is concealed off the cursor
-  -- line by a higher-priority match; the rest stay gray-but-visible.
-  vim.fn.matchadd('DansNamespace', code_only [[\<\w\+::]], 20)
+  -- Gray a lowercase `ns::` scope qualifier (std::/dans::/detail::...) -- those
+  -- are namespace noise. A CamelCase `Type::` (e.g. ApiVersion::vulkan(), a static
+  -- method, or VkResult::eFoo) is a TYPE, not a namespace, so it's left for the
+  -- type/library color matches above; only true namespaces gray out.
+  vim.fn.matchadd('DansNamespace', code_only [[\<\l\w*::]], 20)
   -- Generic macro coloring lives in custom.dans_macros now: it colors the
   -- project's actual #define names (scanned with rg), falling back to the all-caps
   -- heuristic only when no scan is available. The library-prefixed macros

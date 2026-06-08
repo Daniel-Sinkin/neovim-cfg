@@ -405,6 +405,35 @@ do
   end
 end
 
+-- ===================== type qualifier not grayed as namespace =====================
+do
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, {
+    'struct S', '{',
+    '    ApiVersion v{ApiVersion::vulkan()};',
+    '};',
+  })
+  vim.bo[b].filetype = 'cpp'
+  vim.api.nvim_set_current_buf(b)
+  pcall(function() vim.treesitter.get_parser(b, 'cpp'):parse() end)
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+  vim.cmd 'doautocmd FileType'
+  vim.cmd 'doautocmd BufEnter'
+  local m = vim.api.nvim_buf_get_extmarks(b, jns, { 2, 0 }, { 2, -1 }, { details = true })
+  local grayed = false
+  for _, c in ipairs(m[1] and m[1][4].virt_text or {}) do
+    if c[1]:find('ApiVersion', 1, true) and c[2] == 'DansNamespace' then
+      grayed = true
+    end
+  end
+  if not grayed then
+    pass = pass + 1
+  else
+    fail = fail + 1
+    fails[#fails + 1] = 'FAIL  CamelCase Type:: qualifier grayed as a namespace'
+  end
+end
+
 -- ===================== string type color =====================
 do
   local b = vim.api.nvim_create_buf(false, true)

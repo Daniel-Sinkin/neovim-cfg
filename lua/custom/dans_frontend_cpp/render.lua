@@ -88,6 +88,10 @@ local function match_angle(s, open)
   return nil
 end
 
+-- Forward declaration: colorize (below) colors a CamelCase `Type::` qualifier by
+-- its type color, and type_hl is defined further down.
+local type_hl
+
 -- Split `text` into chunks: string literals colored green (contents untouched),
 -- namespace qualifiers grayed/hidden, cast keywords aliased, marker/Vk/SDL/macro
 -- words colored. Mirrors the raw-line matchadd coloring inside the overlay.
@@ -146,13 +150,15 @@ local function colorize(text)
               end
             end
           end
-        elseif word:match '^LLDB_' or word:match '^SB%u' or word == 'StateType' then
-          -- LLDB class used as a qualifier (SBTarget::...): keep the class orange.
-          out[#out + 1] = { word, 'DansLLDB' }
+        elseif word:match '^%u' then
+          -- A type/class used as a qualifier (ApiVersion::vulkan(), VkResult::eFoo,
+          -- SBTarget::...): it's a type, not namespace noise, so keep it in its type
+          -- color (orange Vk, LLDB orange, blue user type); only the `::` is gray.
+          out[#out + 1] = { P.strip_glfw(word), type_hl(word) }
           out[#out + 1] = { '::', 'DansNamespace' }
           i = e + 3
         else
-          -- Other namespace qualifier: gray it.
+          -- lowercase qualifier = a namespace: gray the whole thing.
           out[#out + 1] = { word .. '::', 'DansNamespace' }
           i = e + 3
         end
@@ -239,7 +245,7 @@ end
 -- Highlight for a type in declaration position: Vulkan types (Vk*/VK_*) keep
 -- their purple even here, so a type doesn't flip blue<->purple as the cursor
 -- enters/leaves its line; everything else is the blue inlay-type color.
-local function type_hl(t)
+function type_hl(t)
   -- std::string (-> stripped to `string`, with an optional &/^ suffix) reads as
   -- a string: the "..."-literal green, matching the raw-line matchadd.
   if t:match '^string[&^]?$' then
