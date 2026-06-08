@@ -35,18 +35,29 @@ end
 ok('no macro coloring in a /** */ block', marks_on(1) == 0)
 ok('macro coloring still applies in code', marks_on(3) >= 1)
 
--- the markers comment mask must be registered as a MULTI-LINE matchadd (`\_.`),
--- else `copy` / macros inside a block comment keep their code color. Trigger
+-- the markers comment masks: a MULTI-LINE matchadd (`\_.`) for precise inline
+-- `/* */` spans, plus per-line anchored masks (`^\s*/\*` / `^\s*\*`) so a block
+-- comment scrolled past its `/*` still grays without the multiline lag. Trigger
 -- markers, then inspect the window's matches.
 vim.cmd 'doautocmd FileType'
-local mask
+local patterns = {}
 for _, m in ipairs(vim.fn.getmatches()) do
   if m.group == 'DansCommentMask' then
-    mask = m.pattern
+    patterns[#patterns + 1] = m.pattern
   end
 end
-ok('comment mask matchadd exists', mask ~= nil)
-ok('comment mask is multi-line (\\_.)', mask ~= nil and mask:find('\\_', 1, true) ~= nil)
+local has_multiline, has_perline = false, false
+for _, p in ipairs(patterns) do
+  if p:find('\\_', 1, true) then
+    has_multiline = true
+  end
+  if p:find('^%^') then
+    has_perline = true -- a `^...`-anchored per-line mask
+  end
+end
+ok('comment mask matchadd exists', #patterns > 0)
+ok('comment mask has a multi-line span (\\_.)', has_multiline)
+ok('comment mask has per-line anchored masks', has_perline)
 
 local report = { string.format('comment_color_spec: %d passed, %d failed', pass, fail) }
 for _, f in ipairs(fails) do

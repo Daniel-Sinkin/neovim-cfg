@@ -130,6 +130,40 @@ function M.static_assert_lines(bufnr)
   return set
 end
 
+-- 0-based rows that are wholly inside a comment (block /* */ or a full-line //),
+-- so the frontend leaves them untouched -- a comment is prose, not code. A row is
+-- included when the comment owns the line's first non-blank char (so `code; //
+-- tail` keeps its code, but ` * doc` and `/* ... */` block lines are skipped).
+-- Cached per changedtick. Treesitter `(comment)`.
+local comment_cache = {}
+function M.comment_lines(bufnr)
+  local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+  local c = comment_cache[bufnr]
+  if c and c.tick == tick then
+    return c.set
+  end
+  local set = {}
+  pcall(function()
+    local parser = vim.treesitter.get_parser(bufnr)
+    local tree = parser:parse()[1]
+    local q = vim.treesitter.query.parse(parser:lang(), '(comment) @c')
+    local lines
+    for _, node in q:iter_captures(tree:root(), bufnr, 0, -1) do
+      local sr, sc, er = node:range()
+      lines = lines or vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+      local first = lines[sr + 1] and #(lines[sr + 1]:match '^%s*' or '') or 0
+      if sc <= first then
+        set[sr] = true -- the comment starts the line (no code before it)
+      end
+      for r = sr + 1, er do
+        set[r] = true -- continuation / closing lines are wholly inside the comment
+      end
+    end
+  end)
+  comment_cache[bufnr] = { tick = tick, set = set }
+  return set
+end
+
 -- 0-based [start, end) line range to decorate: the on-screen window plus a
 -- margin, so a big file isn't re-scanned whole on every edit / scroll / cursor
 -- move. Off-screen rows are (re)decorated as they scroll in (WinScrolled). A
@@ -153,6 +187,7 @@ function M.make_skipper(bufnr)
   local reveal = M.reveal_set(bufnr)
   local cfoff = M.clang_format_off(bufnr)
   local sa = M.static_assert_lines(bufnr)
+  local cmt = M.comment_lines(bufnr)
   local diag = M.diagnostic_lines(bufnr)
   local view_ok, view = pcall(require, 'custom.dans_frontend_cpp.view')
   local view_on = view_ok and view.is_enabled(bufnr)
@@ -166,7 +201,7 @@ function M.make_skipper(bufnr)
     return line ~= nil and view.covers(line, bufnr, row0)
   end
   local function any(row0, line)
-    return reveal[row0] or diag[row0] == true or cfoff[row0] or sa[row0] or covered(row0, line)
+    return reveal[row0] or diag[row0] == true or cfoff[row0] or sa[row0] or cmt[row0] or covered(row0, line)
   end
   return { skip = any, skip_conceal = any }
 end

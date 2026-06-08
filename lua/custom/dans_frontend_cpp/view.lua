@@ -64,8 +64,10 @@ end
 -- Render the overlay for one row (or leave it raw if revealed / a diagnostic /
 -- clang-format-off line). The row's namespace must already be cleared by the
 -- caller. Shared by the full refresh and the per-row incremental path.
-local function render_one(bufnr, row0, line, set, cfoff, diag, align)
-  if set[row0] or diag[row0] or cfoff[row0] then
+local function render_one(bufnr, row0, line, set, cfoff, diag, cmt, align)
+  -- a comment line that happens to parse like a decl (e.g. a `void (*PFN)(...)`
+  -- inside a /* */ block) must stay raw -- comments are prose, never overlaid.
+  if set[row0] or diag[row0] or cfoff[row0] or cmt[row0] then
     return
   end
   local start_col, chunks = R.render_line(line, type_for(bufnr, row0), align[row0], bufnr, row0)
@@ -91,9 +93,10 @@ local function refresh(bufnr)
   local set = vu.reveal_set(bufnr)
   local cfoff = vu.clang_format_off(bufnr)
   local diag = vu.diagnostic_lines(bufnr)
+  local cmt = vu.comment_lines(bufnr)
   local c = align_for(bufnr)
   for idx, line in ipairs(c.lines) do
-    render_one(bufnr, c.s0 + idx - 1, line, set, cfoff, diag, c.align)
+    render_one(bufnr, c.s0 + idx - 1, line, set, cfoff, diag, cmt, c.align)
   end
 end
 
@@ -113,7 +116,7 @@ function M.render_row(bufnr, row0)
   end
   local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
   if line then
-    render_one(bufnr, row0, line, vu.reveal_set(bufnr), vu.clang_format_off(bufnr), vu.diagnostic_lines(bufnr), c.align)
+    render_one(bufnr, row0, line, vu.reveal_set(bufnr), vu.clang_format_off(bufnr), vu.diagnostic_lines(bufnr), vu.comment_lines(bufnr), c.align)
   end
 end
 

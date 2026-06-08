@@ -308,6 +308,13 @@ local function apply(ev)
   -- `copy`, a #define, etc. inside one keep their code color. There is no // mask:
   -- code_only keeps every match out of // line comments already.
   vim.fn.matchadd('DansCommentMask', [[/\*\_.\{-}\*/]], 28)
+  -- Per-line block-comment masks too: the multiline pattern above lags when the
+  -- `/*` is scrolled off-screen (Vim won't scan far enough back), which let the
+  -- library colors flash on a comment until the view settled. These are anchored
+  -- to the line start, so they match every block-comment line on its own with no
+  -- backward scan -- the opener `/*...`, and continuation/closer `* ...` / `*/`.
+  vim.fn.matchadd('DansCommentMask', [[^\s*/\*.*]], 28)
+  vim.fn.matchadd('DansCommentMask', [[^\s*\*.*]], 28)
   -- Quoted (not [[...]]): the trailing [>"] char class would close a long string.
   vim.fn.matchadd('DansIncludeMask', '^\\s*#\\s*include\\s*\\zs[<"].\\{-}[>"]', 28)
 end
