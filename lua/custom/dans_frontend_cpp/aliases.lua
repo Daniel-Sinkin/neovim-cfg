@@ -284,6 +284,16 @@ local function render_concept(bufnr, row0, line, spec, has_conj)
       else
         hide(bufnr, row0, b_e, close)
       end
+    elseif kind == 'infix' and #args == 1 then
+      -- constrained template param: `convertible_to<bool> A` -> `A ~> bool`. The
+      -- param name after the `>` is the implicit first operand, moved in front.
+      local ws, pname = line:sub(close + 1):match '^(%s+)([%a_][%w_]*)'
+      if pname then
+        local a_s, a_e = arg_span(open, args[1])
+        local pend = close + #ws + #pname
+        hide_inject(bufnr, row0, ms - 1, a_s - 1, pname .. ' ' .. spec.op .. ' ')
+        hide(bufnr, row0, a_e, pend) -- conceal `> <pname>` after the kept rhs
+      end
     elseif kind == 'fixed' and #args == 1 then
       local a_s, a_e = arg_span(open, args[1])
       local br = nested

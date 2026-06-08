@@ -1,0 +1,6 @@
+// constrained template params
+<A ~> bool, B ~= int>
+void f();
+
+concept<A ~> bool>
+Boolish = A;
