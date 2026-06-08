@@ -365,6 +365,46 @@ do
   chk('deleter tilde mut', chunk_hl(6, '~'), 'DansMarkerMut')
 end
 
+-- ===================== template param name color =====================
+do
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, {
+    '// x', -- cursor parks here so the template line renders
+    'template <typename V, usize N>',
+    'class Span {};',
+  })
+  vim.bo[b].filetype = 'cpp'
+  vim.api.nvim_set_current_buf(b)
+  pcall(function() vim.treesitter.get_parser(b, 'cpp'):parse() end)
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+  vim.cmd 'doautocmd FileType'
+  vim.cmd 'doautocmd BufEnter'
+  local ans = vim.api.nvim_get_namespaces()['ds_cpp_aliases']
+  local line = 'template <typename V, usize N>'
+  local function hl_at(text)
+    local col = line:find(text, 1, true) - 1
+    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(b, ans, { 1, col }, { 1, col + #text }, { details = true })) do
+      if m[4].hl_group then
+        return m[4].hl_group
+      end
+    end
+  end
+  local okp, vhl = pcall(hl_at, 'V')
+  local okp2, nhl = pcall(hl_at, ' N') -- the N param name
+  if okp and vhl == 'DansConcept' then
+    pass = pass + 1
+  else
+    fail = fail + 1
+    fails[#fails + 1] = 'FAIL  template param V is concept-colored  got ' .. tostring(vhl)
+  end
+  if okp2 and nhl == 'DansConcept' then
+    pass = pass + 1
+  else
+    fail = fail + 1
+    fails[#fails + 1] = 'FAIL  template param N is concept-colored  got ' .. tostring(nhl)
+  end
+end
+
 -- ===================== string type color =====================
 do
   local b = vim.api.nvim_create_buf(false, true)

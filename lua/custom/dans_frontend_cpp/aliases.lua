@@ -330,8 +330,11 @@ end
 
 -- Template header compaction: `template <typename V>` -> `<V>`, `template
 -- <typename T, usize N>` -> `<T, usize N>`. Conceals the `template ` keyword and
--- the `typename`/`class` param kinds inside the angle brackets (scoped to a line
--- that opens with `template`, so a dependent `typename T::x` elsewhere is safe).
+-- the `typename`/`class` param kinds. When the next line defines a concept, the
+-- header instead reads `concept<...>` (the `concept` keyword is dropped from the
+-- def line by concept_def_line below). The introduced param names get the concept
+-- color. Scoped to a line opening with `template`, so a dependent `typename T::x`
+-- elsewhere is safe.
 local function template_header(bufnr, row0, line)
   local indent = line:match '^(%s*)template%s*<'
   if not indent or in_string_or_comment(line, #indent) then
@@ -354,7 +357,12 @@ local function template_header(bufnr, row0, line)
   if not close then
     return
   end
-  hide(bufnr, row0, #indent, lt - 1) -- conceal `template ` (keep the `<`)
+  local nextl = vim.api.nvim_buf_get_lines(bufnr, row0 + 1, row0 + 2, false)[1] or ''
+  if nextl:match '^%s*concept%f[%A]' then
+    hide_inject(bufnr, row0, #indent, lt - 1, 'concept') -- `template ` -> `concept`
+  else
+    hide(bufnr, row0, #indent, lt - 1) -- conceal `template ` (keep the `<`)
+  end
   for _, kw in ipairs { 'typename', 'class' } do
     local j = lt
     while true do
@@ -366,6 +374,39 @@ local function template_header(bufnr, row0, line)
       j = e + 1
     end
   end
+  -- color each introduced param name (the last identifier before a default) in the
+  -- concept color, so the template parameters read as parameters.
+  for _, arg in ipairs(split_args(line:sub(lt + 1, close - 1))) do
+    local atext = arg.text:gsub('%s*=.*$', '')
+    local name, name_off
+    for off, id in atext:gmatch '()([%a_][%w_]*)' do
+      name, name_off = id, off
+    end
+    if name then
+      local col = lt + arg.from + name_off - 2 -- 0-based col of the name
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, col, { end_col = col + #name, hl_group = CONCEPT_HL, priority = 200 })
+    end
+  end
+end
+
+-- A concept definition line whose previous line is a template header: drop the
+-- `concept ` keyword (the params moved up into `concept<...>`), so
+-- `template <typename T>` / `concept CharLike = ...` reads `concept<T>` /
+-- `CharLike = ...`.
+local function concept_def_line(bufnr, row0, line)
+  if row0 == 0 then
+    return
+  end
+  local indent = line:match '^(%s*)concept%s'
+  if not indent then
+    return
+  end
+  local prev = vim.api.nvim_buf_get_lines(bufnr, row0 - 1, row0, false)[1] or ''
+  if not prev:match '^%s*template%s*<' then
+    return
+  end
+  local _, e = line:find '^%s*concept%s+'
+  hide(bufnr, row0, #indent, e) -- conceal `concept ` (keep the concept name)
 end
 
 -- ImGui's assert macros read as their std spelling, grayed like a real assert:
@@ -507,8 +548,10 @@ local function refresh(bufnr)
       -- concept / type-trait `~`-notation (same_as -> ~=, convertible_to -> ~>,
       -- RefOf/ValueOf/CharLike/..., invocable -> ~(...)). Before the generic loop.
       concepts(bufnr, row0, line)
-      -- template headers -> compact `<...>` (drop template / typename / class).
+      -- template headers -> compact `<...>` / `concept<...>` (drop template /
+      -- typename / class, color the params); concept def lines drop `concept `.
       template_header(bufnr, row0, line)
+      concept_def_line(bufnr, row0, line)
       -- ImGui assert macros -> their std spelling, grayed.
       imgui_asserts(bufnr, row0, line)
       for _, alias in ipairs(ALIASES) do
