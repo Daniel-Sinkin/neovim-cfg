@@ -378,14 +378,18 @@ end
 
 -- Trailing identifier of a *pure* member-access chain (`cfg.center` -> "center",
 -- `obj->p` -> "p", `center` -> "center", `&application_info` -> "application_info"),
--- or nil if `v` is anything else (a call, index, operator, literal). A wrapping
--- `std::move(...)` / `copy(...)` and a leading address-of are peeled off first, so
--- `.field = std::move(field)` and a `p`-prefixed pointer field against `&local`
--- both pun. Drives the designated-init pun: `.center = cfg.center` collapses to
--- `center` because the last access already matches the field name.
+-- or the type name of an empty default/value construction (`DebugMessengerCfg{}` ->
+-- "DebugMessengerCfg"); nil for anything else (a call with args, index, operator,
+-- literal). A wrapping `std::move(...)` / `copy(...)` and a leading address-of are
+-- peeled off first, so `.field = std::move(field)` and a `p`-prefixed pointer field
+-- against `&local` both pun. Drives the designated-init pun: `.center = cfg.center`
+-- collapses to `center` because the last access already matches the field name.
 function M.access_tail(v)
   local norm = vim.trim(v)
   norm = vim.trim(norm:gsub('^std::move%s*%((.+)%)$', '%1'):gsub('^copy%s*%((.+)%)$', '%1'))
+  -- a default/value-constructed temporary (`DebugMessengerCfg{}` / `Foo()`) puns on
+  -- its type name: drop an empty trailing `{}` / `()` so the name is what's matched.
+  norm = norm:gsub('%s*{%s*}$', ''):gsub('%s*%(%s*%)$', '')
   norm = norm:gsub('^&%s*', ''):gsub('%s*%->%s*', '.'):gsub('%s*%.%s*', '.')
   if norm:match '^[%a_][%w_]*$' or norm:match '^[%a_][%w_]*%.[%w_.]*[%w_]$' then
     return norm:match '([%w_]+)$'
@@ -403,11 +407,65 @@ local function norm_field(s)
   s = s:gsub('^pp(%u)', '%1'):gsub('^p(%u)', '%1')
   return s:gsub('_', ''):lower()
 end
+
+-- Split an identifier into lowercased words: break on `_`, on camelCase humps, and
+-- drop a leading Hungarian p/pp. `dbg_messenger_cfg` and `DebugMessengerCfg` both
+-- give {dbg|debug, messenger, cfg}.
+local function words_of(s)
+  s = s:gsub('^pp(%u)', '%1'):gsub('^p(%u)', '%1')
+  s = s:gsub('(%l)(%u)', '%1_%2'):gsub('(%u)(%u%l)', '%1_%2')
+  local out = {}
+  for w in s:gmatch '[%a%d]+' do
+    out[#out + 1] = w:lower()
+  end
+  return out
+end
+
+-- One word abbreviates the other: equal, or the shorter (>= 3 chars, so a bare
+-- loop var `h` is not read as short for `height`) is a same-first-letter
+-- subsequence of the longer (dbg<->debug, cfg<->config, msg<->message, idx<->index).
+local function word_abbrev(a, b)
+  if a == b then
+    return true
+  end
+  local short, long = a, b
+  if #short > #long then
+    short, long = long, short
+  end
+  if #short < 3 or short:sub(1, 1) ~= long:sub(1, 1) then
+    return false
+  end
+  local i = 1
+  for j = 1, #long do
+    if long:sub(j, j) == short:sub(i, i) then
+      i = i + 1
+      if i > #short then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 function M.field_eq(tail, field)
   if not tail or not field then
     return false
   end
-  return norm_field(tail) == norm_field(field)
+  if norm_field(tail) == norm_field(field) then
+    return true
+  end
+  -- abbreviation-aware fallback: same word count, each word abbreviating its peer,
+  -- so .dbg_messenger_cfg = DebugMessengerCfg{} collapses (dbg~Debug, cfg~Cfg).
+  local wt, wf = words_of(tail), words_of(field)
+  if #wt == 0 or #wt ~= #wf then
+    return false
+  end
+  for i = 1, #wt do
+    if not word_abbrev(wt[i], wf[i]) then
+      return false
+    end
+  end
+  return true
 end
 
 -- Split a designated-init body (`.a = x, .b = y`) into { {field, value}, ... } on

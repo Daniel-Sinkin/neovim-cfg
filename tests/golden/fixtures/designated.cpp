@@ -30,6 +30,14 @@ auto from_moves() -> VkInstanceCreateInfo
     };
 }
 
+auto with_defaults() -> InstanceConfig
+{
+    return InstanceConfig{
+        .dbg_messenger_cfg = DebugMessengerCfg{},
+        .alloc_cfg = AllocationCfg{},
+    };
+}
+
 auto from_locals() -> VkDebugUtilsMessengerCreateInfoEXT
 {
     return VkDebugUtilsMessengerCreateInfoEXT{
