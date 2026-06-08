@@ -33,10 +33,34 @@ return {
             vim.keymap.set(mode, keys, func, { buffer = event.buf, desc = 'LSP: ' .. desc })
           end
 
-          map('gd', require('telescope.builtin').lsp_definitions, '[G]oto [D]efinition')
+          -- gd jumps to the definition, but when you're already standing ON a
+          -- definition (a function def has no other origin) clangd returns only the
+          -- current spot -- fall through to "find all references" there, which is
+          -- what you actually want. (Replaces the buggy <leader>D type-definition
+          -- jump, which matched a function's return type from its name.)
+          local function goto_def_or_refs()
+            vim.lsp.buf.definition {
+              on_list = function(opts)
+                local here = vim.api.nvim_win_get_cursor(0)[1]
+                local file = vim.api.nvim_buf_get_name(0)
+                local elsewhere = false
+                for _, it in ipairs(opts.items or {}) do
+                  if it.lnum ~= here or it.filename ~= file then
+                    elsewhere = true
+                    break
+                  end
+                end
+                if elsewhere then
+                  require('telescope.builtin').lsp_definitions()
+                else
+                  require('telescope.builtin').lsp_references()
+                end
+              end,
+            }
+          end
+          map('gd', goto_def_or_refs, '[G]oto [D]efinition (or references when on one)')
           map('gr', require('telescope.builtin').lsp_references, '[G]oto [R]eferences')
           map('gI', require('telescope.builtin').lsp_implementations, '[G]oto [I]mplementation')
-          map('<leader>D', require('telescope.builtin').lsp_type_definitions, 'Type [D]efinition')
           map('<leader>ds', require('telescope.builtin').lsp_document_symbols, '[D]ocument [S]ymbols')
           map('<leader>ws', require('telescope.builtin').lsp_dynamic_workspace_symbols, '[W]orkspace [S]ymbols')
           map('<leader>rn', vim.lsp.buf.rename, '[R]e[n]ame')
