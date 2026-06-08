@@ -27,7 +27,7 @@ local ns = vim.api.nvim_create_namespace 'ds_cpp_doc_md'
 local enabled = {} -- bufnr -> bool; nil means "default", which is ON for .hpp
 local last_row = {} -- bufnr -> cursor row, to skip refresh on horizontal moves
 
-local BLOCK_WIDTH = 100 -- doc / code blocks render as a fixed-width band, not full-window
+local BLOCK_WIDTH = 120 -- doc / code blocks render as a fixed-width band, not full-window
 local dw = vim.fn.strdisplaywidth
 
 local function is_hpp(bufnr)
