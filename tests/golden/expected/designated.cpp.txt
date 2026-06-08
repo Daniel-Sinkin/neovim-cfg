@@ -1,7 +1,7 @@
 auto debug_messenger_create_info() -> MessengerCreateInfoEXT
 {
     return MessengerCreateInfoEXT{
-        sType           = STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+        DebugUtilsMessengerCreateInfoEXT,
         pNext           = {},
         flags           = Flags{0},
         messageSeverity = MESSAGE_SEVERITY_WARNING_BIT_EXT
@@ -11,6 +11,14 @@ auto debug_messenger_create_info() -> MessengerCreateInfoEXT
                           | MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
         pfnUserCallback = debug_callback,
         pUserData       = nullptr,
+    };
+}
+
+auto instance_create_info() -> InstanceCreateInfo
+{
+    return InstanceCreateInfo{
+        InstanceCreateInfo,
+        pNext = nullptr,
     };
 }
 

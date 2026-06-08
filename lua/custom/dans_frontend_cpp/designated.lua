@@ -18,6 +18,23 @@ local P = require 'custom.dans_frontend_cpp.parse'
 
 local DESIG_QUERY = [[(field_designator) @fd]]
 
+-- VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO -> InstanceCreateInfo. Each _-word is
+-- Capitalized; a trailing vendor tag (EXT/KHR/NV/...) stays all-caps to match the
+-- real Vk type name (VkDebugUtilsMessengerCreateInfoEXT).
+local VK_VENDOR = {
+  KHR = true, KHX = true, EXT = true, NV = true, NVX = true, AMD = true, AMDX = true,
+  INTEL = true, GOOGLE = true, MVK = true, NN = true, QCOM = true, ARM = true,
+  IMG = true, FUCHSIA = true, HUAWEI = true, VALVE = true, SEC = true, GGP = true,
+  QNX = true, ANDROID = true, MESA = true, LUNARG = true,
+}
+local function vk_struct_camel(rest)
+  local out = {}
+  for word in rest:gmatch '[^_]+' do
+    out[#out + 1] = VK_VENDOR[word] and word or (word:sub(1, 1):upper() .. word:sub(2):lower())
+  end
+  return table.concat(out)
+end
+
 local function refresh(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
@@ -94,6 +111,24 @@ local function refresh(bufnr)
         local eqs, eqe = rest:find('=%s*')
         if field ~= '' and eqs then
           local value = vim.trim(rest:sub(eqe + 1))
+          local stype_rest = single and field == 'sType' and value:match '^VK_STRUCTURE_TYPE_(.+)$'
+          if stype_rest then
+            -- `.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO` -> `InstanceCreateInfo`,
+            -- with a dark band from this line down through the struct's closing brace.
+            pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc, { end_col = pec, conceal = '' })
+            pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc, {
+              virt_text = { { vk_struct_camel(stype_rest), 'DansVkStructName' } },
+              virt_text_pos = 'inline',
+            })
+            local list = pair:parent()
+            if list and list:type() == 'initializer_list' then
+              local _, _, ler = list:range()
+              for bl = sr, ler do
+                pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, bl, 0, { line_hl_group = 'DansVkStructBand', priority = 1 })
+              end
+            end
+            goto continue
+          end
           -- drop the leading dot
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc, { end_col = sc + 1, conceal = '' })
           -- muted hint color on the field name
@@ -144,6 +179,7 @@ local function refresh(bufnr)
         end
       end
     end
+    ::continue::
   end
 end
 

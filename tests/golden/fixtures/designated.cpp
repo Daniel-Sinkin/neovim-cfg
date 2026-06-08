@@ -14,6 +14,14 @@ auto debug_messenger_create_info() -> VkDebugUtilsMessengerCreateInfoEXT
     };
 }
 
+auto instance_create_info() -> VkInstanceCreateInfo
+{
+    return VkInstanceCreateInfo{
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pNext = nullptr,
+    };
+}
+
 auto from_locals() -> VkDebugUtilsMessengerCreateInfoEXT
 {
     return VkDebugUtilsMessengerCreateInfoEXT{
