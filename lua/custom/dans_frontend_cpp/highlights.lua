@@ -22,7 +22,12 @@ function M.apply()
   -- (bold was too heavy for how dense these are), distinct from the generic macro
   -- purple. The Vk/VK_ prefixes are concealed in markers.lua, so only the
   -- meaningful tail shows in this color.
-  hi('DansVulkan', { fg = '#e0af68' })
+  -- Vulkan + OpenGL (Vk/VK_/vk, GL_/gl) -- orange. Same color: same graphics
+  -- domain, never both in one project. Distinct from LLDB's lighter #ff9e64.
+  hi('DansVulkan', { fg = '#ef843c' })
+  -- Vulkan Memory Allocator (VMA_/Vma/vma) -- a darker shade of the Vulkan orange,
+  -- so it reads as related but a separate library.
+  hi('DansVMA', { fg = '#ad5f24' })
   -- Other all-caps macros / preprocessor constants -- purple. The hue alone
   -- carries the category (no bold), since these are dense in API-heavy code.
   hi('DansMacro', { fg = '#bb9af7' })

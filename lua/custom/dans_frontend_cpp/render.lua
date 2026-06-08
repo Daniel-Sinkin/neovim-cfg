@@ -160,13 +160,15 @@ local function colorize(text)
         local alias = expr_aliases()[word]
         if alias then
           out[#out + 1] = { alias[1], alias[2] }
-        elseif word:match '^Vk' or word:match '^VK_' or word:match '^vk%u' then
+        elseif word:match '^VMA_' or word:match '^Vma' or word:match '^vma%u' then
+          out[#out + 1] = { P.strip_glfw(word), 'DansVMA' } -- VMA prefix hidden, darker orange
+        elseif word:match '^Vk' or word:match '^VK_' or word:match '^vk%u' or word:match '^GL_' or word:match '^gl%u' then
           -- prefix hidden in the value too (VK_DEBUG_UTILS_X -> X), matching the
           -- raw-line conceal; strip_glfw leaves lowercase vk functions verbatim.
           out[#out + 1] = { P.strip_glfw(word), 'DansVulkan' }
         elseif word:match '^stb' or word:match '^STB' then
           out[#out + 1] = { word, 'DansSTB' } -- stb*/STB*, matches markers (not stripped)
-        elseif word:match '^SDL_' or word:match '^GLFW' or word:match '^glfw%u' then
+        elseif word:match '^SDL_' or word:match '^GLFW' or word:match '^glfw%u' or word:match '^_GLFW' or word:match '^_glfw' then
           out[#out + 1] = { P.strip_glfw(word), 'DansSDL' } -- GLFW prefix hidden, SDL_ kept
         elseif word:match '^LLDB_' or word:match '^SB%u' or word == 'StateType' then
           out[#out + 1] = { word, 'DansLLDB' } -- LLDB_*/SB*/StateType, matches markers
@@ -237,10 +239,13 @@ local function type_hl(t)
   if t:match '^string[&^]?$' then
     return 'DansString'
   end
-  if t:match '^Vk' or t:match '^VK_' then
+  if t:match '^VMA_' or t:match '^Vma' then
+    return 'DansVMA'
+  end
+  if t:match '^Vk' or t:match '^VK_' or t:match '^GL_' then
     return 'DansVulkan'
   end
-  if t:match '^SDL_' or t:match '^GLFW' then
+  if t:match '^SDL_' or t:match '^GLFW' or t:match '^_GLFW' or t:match '^_glfw' then
     return 'DansSDL'
   end
   if t:match '^stb' or t:match '^STB' then

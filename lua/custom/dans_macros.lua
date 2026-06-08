@@ -56,9 +56,16 @@ local function is_library(t)
   return t:match '^VK_' ~= nil
     or t:match '^Vk' ~= nil
     or t:match '^vk%u' ~= nil
+    or t:match '^VMA_' ~= nil
+    or t:match '^Vma' ~= nil
+    or t:match '^vma%u' ~= nil
+    or t:match '^GL_' ~= nil
+    or t:match '^gl%u' ~= nil
     or t:match '^SDL_' ~= nil
     or t:match '^GLFW' ~= nil
     or t:match '^glfw%u' ~= nil
+    or t:match '^_GLFW' ~= nil
+    or t:match '^_glfw' ~= nil
     or t:match '^stb' ~= nil
     or t:match '^STB' ~= nil
     or t:match '^LLDB_' ~= nil

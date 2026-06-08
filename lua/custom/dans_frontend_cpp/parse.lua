@@ -308,16 +308,28 @@ function M.strip_glfw(t)
   t = t:gsub('%f[%w]GLFW_([A-Z0-9])', '%1')
   t = t:gsub('%f[%w]GLFW([a-z])', '%1')
   t = t:gsub('%f[%w]glfw([A-Z])', '%1')
-  -- longer DebugUtils sub-prefix first, then the generic Vk/VK_
+  -- internal glfw, leading underscore: _GLFWmonitor -> monitor (NOT the _GLFW_X
+  -- build macros -- a letter must follow). `[%w_]` frontier so the leading `_` is
+  -- the token start.
+  t = t:gsub('%f[%w_]_GLFW([A-Za-z])', '%1')
+  t = t:gsub('%f[%w_]_glfw([A-Za-z])', '%1')
+  -- vulkan: longer sub-prefixes (DebugUtils, KHR) first, then generic Vk/VK_/vk.
   t = t:gsub('%f[%w]VK_DEBUG_UTILS_([A-Z0-9])', '%1')
   t = t:gsub('%f[%w]VkDebugUtils([A-Z])', '%1')
+  t = t:gsub('%f[%w]VK_KHR_([A-Z0-9])', '%1')
   t = t:gsub('%f[%w]VK_([A-Z0-9])', '%1')
   t = t:gsub('%f[%w]Vk([A-Z])', '%1')
   -- lowercase vk functions (vkCreateInstance -> CreateInstance), like glfw. The
   -- `[%w_]` frontier treats `_` as a word char (matching the raw-line `\<vk`
-  -- conceal), so an embedded `PFN_vkCreateX` keeps its vk rather than becoming
-  -- `PFN_CreateX`.
+  -- conceal), so an embedded `PFN_vkCreateX` keeps its vk rather than `PFN_CreateX`.
   t = t:gsub('%f[%w_]vk([A-Z])', '%1')
+  -- vulkan memory allocator
+  t = t:gsub('%f[%w]VMA_([A-Z0-9])', '%1')
+  t = t:gsub('%f[%w]Vma([A-Z])', '%1')
+  t = t:gsub('%f[%w_]vma([A-Z])', '%1')
+  -- opengl: GL_X / glX (after glfw above, so glfw* is consumed first)
+  t = t:gsub('%f[%w]GL_([A-Z0-9])', '%1')
+  t = t:gsub('%f[%w_]gl([A-Z])', '%1')
   return t
 end
 

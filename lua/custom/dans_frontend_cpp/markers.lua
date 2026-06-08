@@ -17,6 +17,7 @@ local MATCH_GROUPS = {
   DansNamespace = true,
   DansMacro = true,
   DansVulkan = true,
+  DansVMA = true,
   DansSDL = true,
   DansSTB = true,
   DansLLDB = true,
@@ -65,11 +66,19 @@ local PREFIX_PATTERNS = {
   [==[\<glfw\ze[A-Z]]==],
   [==[\<GLFW\ze[a-z]]==],
   [==[\<GLFW_\ze[A-Z0-9]]==],
+  [==[\<_GLFW\ze[A-Za-z]]==], -- internal glfw, leading underscore (NOT _GLFW_X macros)
+  [==[\<_glfw\ze[A-Za-z]]==],
   [==[\<VkDebugUtils\ze[A-Z]]==],
   [==[\<VK_DEBUG_UTILS_\ze[A-Z0-9]]==],
+  [==[\<VK_KHR_\ze[A-Z0-9]]==], -- strip the whole KHR sub-prefix, not just VK_
   [==[\<Vk\ze[A-Z]]==],
   [==[\<VK_\ze[A-Z0-9]]==],
   [==[\<vk\ze[A-Z]]==],
+  [==[\<VMA_\ze[A-Z0-9]]==], -- vulkan memory allocator
+  [==[\<Vma\ze[A-Z]]==],
+  [==[\<vma\ze[A-Z]]==],
+  [==[\<GL_\ze[A-Z0-9]]==], -- opengl
+  [==[\<gl\ze[A-Z]]==],
 }
 local CPP_PATTERNS = {
   [==[\<std::ranges::views::]==],
@@ -208,13 +217,25 @@ local function apply(ev)
   vim.fn.matchadd('DansVulkan', code_only [[\<VK_[A-Z0-9_]*\>]], 25)
   vim.fn.matchadd('DansVulkan', code_only [[\<Vk[A-Za-z0-9_]*\>]], 25)
   vim.fn.matchadd('DansVulkan', code_only [[\<vk[A-Z][A-Za-z0-9_]*\>]], 25)
+  -- OpenGL shares the Vulkan color (same graphics domain, never both at once):
+  -- GL_* macros and gl* functions.
+  vim.fn.matchadd('DansVulkan', code_only [[\<GL_[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansVulkan', code_only [[\<gl[A-Z][A-Za-z0-9_]*\>]], 25)
+  -- Vulkan Memory Allocator -> a darker shade of the Vulkan color: related but
+  -- distinct. VMA_ macros, Vma* types, vma* functions.
+  vim.fn.matchadd('DansVMA', code_only [[\<VMA_[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansVMA', code_only [[\<Vma[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansVMA', code_only [[\<vma[A-Z][A-Za-z0-9_]*\>]], 25)
   -- SDL identifiers (SDL_*) -> teal. Same priority; SDL_FOO also matches the
   -- macro pattern, so the higher priority makes the teal win.
   vim.fn.matchadd('DansSDL', code_only [[\<SDL_[A-Za-z0-9_]*\>]], 25)
   -- GLFW shares the SDL color (you wouldn't use both in one project): GLFW_*
-  -- macros + GLFWwindow/GLFWmonitor types, and glfw* functions.
+  -- macros + GLFWwindow/GLFWmonitor types, glfw* functions, and the internal
+  -- _GLFW*/_glfw* names (leading underscore, but not the _GLFW_X build macros).
   vim.fn.matchadd('DansSDL', code_only [[\<GLFW[A-Za-z0-9_]*\>]], 25)
   vim.fn.matchadd('DansSDL', code_only [[\<glfw[A-Z][A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansSDL', code_only [[\<_GLFW[A-Za-z][A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansSDL', code_only [[\<_glfw[A-Za-z][A-Za-z0-9_]*\>]], 25)
   -- stb single-header libs -> bright cyan: stb_/stbi_/stbtt_/stbsp_/... functions
   -- and types (lowercase stb...+_), plus the STB*/STBI_/STBIDEF macros.
   vim.fn.matchadd('DansSTB', code_only [[\<stb[a-z0-9]*_[A-Za-z0-9_]*\>]], 25)
