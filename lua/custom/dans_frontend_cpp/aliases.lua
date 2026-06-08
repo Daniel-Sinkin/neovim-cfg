@@ -26,7 +26,7 @@ local ALIASES = {
   { 'const_cast', '$ccast' },
   { 'noexcept', '$ne' },
   { '[[nodiscard]]', '$nd' },
-  { '[[maybe_unused]]', '$mu' },
+  { '[[maybe_unused]]', '' }, -- '' = hidden entirely (incl one trailing space)
   { 'static_assert', '$sa' },
   { 'std::runtime_error', '$re' },
   { 'std::unique_ptr', '$up' },
@@ -492,12 +492,19 @@ local function refresh(bufnr)
           -- the templated static_assert<...> is handled above, not as `$sa`.
           local templated_sa = keyword == 'static_assert' and after == '<'
           if not is_word_char(before) and not is_word_char(after) and not in_string_or_comment(line, s - 1) and not templated_sa then
-            pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, s - 1, {
-              end_col = e,
-              conceal = '',
-              virt_text = { { replacement, hl } },
-              virt_text_pos = 'inline',
-            })
+            if replacement == '' then
+              -- hide entirely: conceal the keyword plus one trailing space (if any)
+              -- so the following token doesn't shift, and inject nothing.
+              local ec = (line:sub(e + 1, e + 1) == ' ') and e + 1 or e
+              pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, s - 1, { end_col = ec, conceal = '' })
+            else
+              pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, s - 1, {
+                end_col = e,
+                conceal = '',
+                virt_text = { { replacement, hl } },
+                virt_text_pos = 'inline',
+              })
+            end
           end
           start_pos = e + 1
         end

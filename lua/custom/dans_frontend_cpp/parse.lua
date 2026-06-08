@@ -38,15 +38,16 @@ local STMT_KEYWORDS = {
 local MARKERS = { 'cpy' }
 
 -- Peel leading attributes/markers. `const`/`constexpr`/`inline` and the (now
--- source-removed) `mut`/`mut_unchecked` are dropped; `cpy` and `[[maybe_unused]]`
--- are kept as a prefix. mut is re-inferred from non-const in build_chunks.
+-- source-removed) `mut`/`mut_unchecked` are dropped, as is `[[maybe_unused]]`
+-- (pure noise -- only its absence matters); `cpy` is kept as a prefix. mut is
+-- re-inferred from non-const in build_chunks.
 -- Returns prefix, rest, is_const, is_constexpr. Leading cv/storage specifiers in
 -- ANY order are peeled and hidden: const/constexpr drive the rendering
 -- (const-ness hides const + suppresses the inferred mut; constexpr additionally
 -- renders as a `:` constant binding); static/inline/thread_local/extern/constinit
--- are pure storage noise. `mut`/`mut_unchecked` are dropped (re-inferred from
--- non-const, no longer a source token); `cpy` and `[[maybe_unused]]` are kept as
--- a visible prefix.
+-- are pure storage noise. `mut`/`mut_unchecked` and `[[maybe_unused]]` are dropped
+-- (mut is re-inferred from non-const; maybe_unused only matters when missing);
+-- `cpy` is kept as a visible prefix.
 function M.split_markers(s)
   local prefix = ''
   local rest = s
@@ -97,9 +98,10 @@ function M.split_markers(s)
     end
 
     if not matched then
+      -- [[maybe_unused]] is dropped entirely (not shown): the only time it matters
+      -- is when it's MISSING, which clang-tidy flags -- showing it is pure noise.
       local after_mu = rest:match '^%[%[maybe_unused%]%]%s+(.*)$'
       if after_mu then
-        prefix = prefix .. '[[maybe_unused]] '
         rest, matched = after_mu, true
       end
     end

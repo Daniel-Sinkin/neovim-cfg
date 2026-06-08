@@ -238,6 +238,9 @@ local function apply(ev)
   -- brighter color marks it as mine.
   vim.fn.matchadd('DansVulkanMine', code_only [[\<vk_[A-Za-z0-9_]*\>]], 26)
   vim.fn.matchadd('DansVulkanMine', code_only [[\<VK[A-Z][A-Za-z0-9_]*\>]], 26)
+  -- VKAPI_ATTR / VKAPI_CALL / VKAPI_PTR are real lib macros, not my wrappers: lib
+  -- color, full name kept. Priority 27 so it beats the VK[A-Z] mine-match above.
+  vim.fn.matchadd('DansVulkan', code_only [[\<VKAPI_[A-Za-z0-9_]*\>]], 27)
   -- OpenGL shares the Vulkan color (same graphics domain, never both at once):
   -- GL_* macros and gl* functions.
   vim.fn.matchadd('DansVulkan', code_only [[\<GL_[A-Za-z0-9_]*\>]], 25)

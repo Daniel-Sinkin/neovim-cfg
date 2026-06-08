@@ -162,6 +162,8 @@ local function colorize(text)
           out[#out + 1] = { alias[1], alias[2] }
         elseif word:match '^VMA_' or word:match '^Vma' or word:match '^vma%u' then
           out[#out + 1] = { P.strip_glfw(word), 'DansVMA' } -- VMA prefix hidden, darker orange
+        elseif word:match '^VKAPI_' then
+          out[#out + 1] = { word, 'DansVulkan' } -- lib macro, full name, muted
         elseif word:match '^VK%u' or word:match '^vk_' then
           out[#out + 1] = { word, 'DansVulkanMine' } -- user's wrapper/var, not stripped, brighter
         elseif word:match '^Vk' or word:match '^VK_' or word:match '^vk%u' or word:match '^GL_' or word:match '^gl%u' then
@@ -245,6 +247,9 @@ local function type_hl(t)
   end
   if t:match '^VMA_' or t:match '^Vma' then
     return 'DansVMA'
+  end
+  if t:match '^VKAPI_' then
+    return 'DansVulkan' -- lib macro, full name kept (not a first-party wrapper)
   end
   if t:match '^VK%u' or t:match '^vk_' then
     return 'DansVulkanMine' -- the user's wrapper type / raw-vk var, brighter

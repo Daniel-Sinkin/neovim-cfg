@@ -82,6 +82,9 @@ local ATOM = {
   sv = 'std::string_view',
   rv = 'std::ranges::views',
   ra = 'std::ranges',
+  -- $mu still types the attribute even though the frontend now hides it (so it's
+  -- no longer importable from aliases.ALIASES, where its replacement is '').
+  mu = '[[maybe_unused]]',
 }
 do
   local ok, aliases = pcall(function()

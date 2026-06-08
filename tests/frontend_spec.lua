@@ -140,6 +140,10 @@ run('member raw uint32', 'struct', { 'uint32_t count{};' }, { 'count: u32;' })
 run('member raw float', 'struct', { 'float scale{};' }, { 'scale: f32;' })
 run('member std int32', 'struct', { 'std::int32_t off{};' }, { 'off: i32;' })
 run('member double', 'struct', { 'double ratio{};' }, { 'ratio: f64;' })
+
+-- [[maybe_unused]] is hidden entirely (only its absence matters); on a decl the
+-- overlay drops it via split_markers.
+run('maybe_unused dropped on decl', 'fn', { '[[maybe_unused]] constexpr int n{4};' }, { 'n: int : 4;' })
 run('member nested template', 'struct', { 'std::vector<std::pair<int, int>> v{};' }, { 'v: vector<pair<int, int>>;' })
 run('member vector cstring', 'struct', { 'std::vector<const char*> v{};' }, { 'v: vector<CString>;' })
 run('member const-ref vector cstring', 'struct', { 'const std::vector<const char*>& e{};' }, { 'e: const vector<CString>&;' })

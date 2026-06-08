@@ -58,6 +58,8 @@ local function is_library(t)
   return t:match '^VK_' ~= nil
     or t:match '^Vk' ~= nil
     or t:match '^vk%u' ~= nil
+    or t:match '^VK%u' ~= nil -- first-party wrapper VKBuffer / lib VKAPI_*
+    or t:match '^vk_' ~= nil
     or t:match '^VMA_' ~= nil
     or t:match '^Vma' ~= nil
     or t:match '^vma%u' ~= nil
