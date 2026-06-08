@@ -422,6 +422,130 @@ function M.resolve(line, col, class_fn)
   return { action = 'remove', bs = bs }
 end
 
+-- std symbol (after `std::`) -> the header that provides it. Used to auto-add an
+-- include when a snippet expands to a std type, the way LSP auto-import does.
+local STD_HEADERS = {
+  string = '<string>',
+  string_view = '<string_view>',
+  vector = '<vector>',
+  array = '<array>',
+  span = '<span>',
+  optional = '<optional>',
+  nullopt = '<optional>',
+  unordered_map = '<unordered_map>',
+  map = '<map>',
+  unique_ptr = '<memory>',
+  shared_ptr = '<memory>',
+  ranges = '<ranges>',
+  views = '<ranges>',
+  convertible_to = '<concepts>',
+  same_as = '<concepts>',
+  invocable = '<concepts>',
+  invoke_result_t = '<type_traits>',
+  runtime_error = '<stdexcept>',
+}
+
+-- Add any std headers `text` needs to the file's `// StdLib` block, skipping ones
+-- already included. No-op (returns nil) when there is no `// StdLib` demarcation
+-- -- the convention is opt-in. Returns (insert_row0, count) for cursor fixup.
+local function add_std_includes(bufnr, text)
+  local need = {}
+  for sym in text:gmatch 'std::([%w_]+)' do
+    if STD_HEADERS[sym] then
+      need[STD_HEADERS[sym]] = true
+    end
+  end
+  if not next(need) then
+    return
+  end
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local stdlib_row, have = nil, {}
+  for i, l in ipairs(lines) do
+    if l:match '^%s*//%s*StdLib%s*$' then
+      stdlib_row = i - 1
+    end
+    local inc = l:match '^%s*#%s*include%s*(<[^>]+>)'
+    if inc then
+      have[inc] = true
+    end
+  end
+  if not stdlib_row then
+    return -- no StdLib demarcation: skip (clang-format / the user owns layout)
+  end
+  local add = {}
+  for h in pairs(need) do
+    if not have[h] then
+      add[#add + 1] = '#include ' .. h
+    end
+  end
+  if #add == 0 then
+    return
+  end
+  table.sort(add)
+  vim.api.nvim_buf_set_lines(bufnr, stdlib_row + 1, stdlib_row + 1, false, add)
+  return stdlib_row + 1, #add
+end
+
+-- :DansCppFormat -- reformat to the dans layout. Two things it does reliably:
+--   1. line 1 is `// <relative path>`.
+--   2. every std header (`<name>`, no `/` and no `.`) is grouped under a `// StdLib`
+--      marker (created after the last include if absent), so clang-format sorts the
+--      std group on its own.
+-- Internals / Externals classification is project-specific (this project and
+-- dans-core both live under <dans/...>), so those groups are left exactly as the
+-- user arranged them.
+function M.format()
+  local buf = 0
+  local name = vim.api.nvim_buf_get_name(buf)
+  if name == '' then
+    return
+  end
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+
+  -- 1. path comment on line 1
+  local rel = vim.fn.fnamemodify(name, ':.'):gsub('\\', '/')
+  local pathline = '// ' .. rel
+  local l1 = lines[1]
+  local is_path = l1 and l1:match '^//%s+%S' and (l1:find('/', 1, true) or l1:match '%.%a+%s*$')
+  if is_path then
+    lines[1] = pathline
+  else
+    table.insert(lines, 1, pathline)
+  end
+
+  -- 2. gather std headers under // StdLib
+  local kept, std, seen, last_inc, stdlib_at = {}, {}, {}, nil, nil
+  for _, l in ipairs(lines) do
+    local h = l:match '^%s*#%s*include%s*<([%w_]+)>%s*$' -- std: no `/`, no `.`
+    if h and not seen['<' .. h .. '>'] then
+      seen['<' .. h .. '>'] = true
+      std[#std + 1] = '#include <' .. h .. '>'
+    elseif not h then
+      kept[#kept + 1] = l
+      if l:match '^%s*//%s*StdLib%s*$' then
+        stdlib_at = #kept
+      elseif l:match '^%s*#%s*include' then
+        last_inc = #kept
+      end
+    end
+  end
+  table.sort(std)
+  if #std > 0 then
+    if not stdlib_at then
+      -- create the block right after the last (non-std) include, else after line 1
+      local at = last_inc or 1
+      table.insert(kept, at + 1, '// StdLib')
+      stdlib_at = at + 1
+    end
+    for i = #std, 1, -1 do
+      table.insert(kept, stdlib_at + 1, std[i])
+    end
+    lines = kept
+  end
+
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+end
+
 local function on_space()
   local pos = vim.api.nvim_win_get_cursor(0)
   local row, col = pos[1] - 1, pos[2]
@@ -433,7 +557,14 @@ local function on_space()
   elseif r.action == 'expand' then
     -- replace the block (it ends at the cursor) and keep the space (iabbrev style)
     vim.api.nvim_buf_set_text(0, row, r.bs, row, col, { r.text .. ' ' })
-    vim.api.nvim_win_set_cursor(0, { row + 1, r.bs + #r.text + 1 })
+    local crow, ccol = row + 1, r.bs + #r.text + 1
+    -- pull in the std header(s) the expansion needs (LSP-style auto-import); if
+    -- they land above the edit, shift the cursor down so it stays put.
+    local ins, n = add_std_includes(0, r.text)
+    if ins and ins <= row then
+      crow = crow + n
+    end
+    vim.api.nvim_win_set_cursor(0, { crow, ccol })
   else -- a `$block` that didn't resolve is garbage ($ isn't valid C++): delete it
     -- and the triggering space with it (clean removal).
     vim.api.nvim_buf_set_text(0, row, r.bs, row, col, { '' })
@@ -455,6 +586,9 @@ function M.setup()
       end
     end,
   })
+  vim.api.nvim_create_user_command('DansCppFormat', function()
+    M.format()
+  end, { desc = 'Format the C++ file to the dans layout (path line + StdLib group)' })
 end
 
 return M
