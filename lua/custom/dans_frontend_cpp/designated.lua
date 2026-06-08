@@ -98,9 +98,10 @@ local function refresh(bufnr)
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc, { end_col = sc + 1, conceal = '' })
           -- muted hint color on the field name
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc + 1, { end_col = fec, hl_group = 'DansHint' })
-          if single and P.access_tail(value) == field then
-            -- pun: `.center = center` or `.center = cfg.center` -> `center` (the
-            -- value's last access already names the field, so hide ` = value`).
+          if single and P.field_eq(P.access_tail(value), field) then
+            -- pun: `.center = center` / `.center = cfg.center` / `.messageSeverity =
+            -- message_severity` -> `center` (the value's last access names the field
+            -- across naming conventions, so hide ` = value`).
             pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, fec, { end_col = pec, conceal = '' })
           else
             local eqcol = fec + eqs - 1

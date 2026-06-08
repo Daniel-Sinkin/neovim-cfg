@@ -388,6 +388,17 @@ function M.access_tail(v)
   return nil
 end
 
+-- Whether an access-tail matches a field name across naming conventions: strip
+-- underscores and lowercase both, so .messageSeverity = message_severity collapses
+-- (messageSeverity / message_severity / MessageSeverity / MESSAGE_SEVERITY all
+-- compare equal). nil tail never matches.
+function M.field_eq(tail, field)
+  if not tail or not field then
+    return false
+  end
+  return tail:gsub('_', ''):lower() == field:gsub('_', ''):lower()
+end
+
 -- Split a designated-init body (`.a = x, .b = y`) into { {field, value}, ... } on
 -- top-level commas, or nil if any element isn't `.field = value`. Lets the value
 -- renderer fold designated inits the same way cpp_designated does on raw lines.

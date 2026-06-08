@@ -13,3 +13,12 @@ auto debug_messenger_create_info() -> VkDebugUtilsMessengerCreateInfoEXT
         .pUserData = nullptr,
     };
 }
+
+auto from_locals() -> VkDebugUtilsMessengerCreateInfoEXT
+{
+    return VkDebugUtilsMessengerCreateInfoEXT{
+        .messageSeverity = message_severity,
+        .messageType = message_type,
+        .pUserData = user_data,
+    };
+}

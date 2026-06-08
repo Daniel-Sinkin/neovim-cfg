@@ -805,7 +805,7 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
             add ', '
           end
           add(p.field, 'DansHint')
-          if P.access_tail(p.value) ~= p.field then
+          if not P.field_eq(P.access_tail(p.value), p.field) then
             add '='
             add_value(p.value)
           end

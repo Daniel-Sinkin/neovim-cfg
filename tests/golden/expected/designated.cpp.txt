@@ -13,3 +13,12 @@ auto debug_messenger_create_info() -> MessengerCreateInfoEXT
         pUserData       = nullptr,
     };
 }
+
+auto from_locals() -> MessengerCreateInfoEXT
+{
+    return MessengerCreateInfoEXT{
+        messageSeverity,
+        messageType,
+        pUserData       = user_data,
+    };
+}
