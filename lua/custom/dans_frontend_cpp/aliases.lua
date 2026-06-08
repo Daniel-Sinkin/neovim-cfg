@@ -146,7 +146,7 @@ local CONCEPTS = {
   { kw = 'convertible_to', kind = 'infix', op = '~>' },
   { kw = 'same_as', kind = 'infix', op = '~=' },
   { kw = 'invocable', kind = 'call' }, -- T(S): callable with S
-  { kw = 'invoke_result_t', kind = 'call', suffix = '->()' }, -- T(S)->(): the call's result type
+  { kw = 'invoke_result_t', kind = 'call', prefix = '{ ', suffix = ' }' }, -- { T(S) }: requires-expr spelling of the call's result type
   { kw = 'CharLike', kind = 'fixed', op = '~>', rhs = 'char' },
   { kw = 'BoolLike', kind = 'fixed', op = '~>', rhs = 'bool' },
   { kw = 'IntLike', kind = 'fixed', op = '~>', rhs = 'int' },
@@ -335,10 +335,17 @@ local function render_concept(bufnr, row0, line, spec, has_conj)
         hide_inject(bufnr, row0, a_e, close, spec.sym)
       end
     elseif kind == 'call' and #args >= 1 then
-      -- F(args): F kept, parens concept-colored, args keep their own colors.
+      -- F(args): F kept, parens concept-colored, args keep their own colors. A
+      -- prefix/suffix wraps it: invoke_result_t -> `{ F(args) }` (the requires
+      -- compound-requirement spelling, so ` ~> string_view` reads as the trailing
+      -- `-> convertible_to`).
       local f_s, f_e = arg_span(open, args[1])
-      local tail = ')' .. (spec.suffix or '') -- invoke_result_t -> `)->`
-      hide(bufnr, row0, ms - 1, f_s - 1)
+      local tail = ')' .. (spec.suffix or '')
+      if spec.prefix then
+        hide_inject(bufnr, row0, ms - 1, f_s - 1, spec.prefix)
+      else
+        hide(bufnr, row0, ms - 1, f_s - 1)
+      end
       if #args == 1 then
         hide_inject(bufnr, row0, f_e, close, '(' .. tail)
       else
