@@ -27,6 +27,30 @@ local enabled = {} -- bufnr -> bool; nil = default on
 
 local DENY = { FILE = true, SEEK_SET = true, SEEK_CUR = true, SEEK_END = true, EOF = true, NULL = true }
 
+-- Common standard-library macros. The rg scan only covers the project, not the
+-- stdlib headers, so these would never be found there -- color them as macros via
+-- this curated set instead (EXIT_FAILURE etc.). Add more here as you hit them.
+local STDLIB = {}
+for _, name in ipairs {
+  'EXIT_SUCCESS', 'EXIT_FAILURE', 'RAND_MAX', 'BUFSIZ', 'CHAR_BIT', 'MB_LEN_MAX',
+  'SCHAR_MIN', 'SCHAR_MAX', 'UCHAR_MAX', 'CHAR_MIN', 'CHAR_MAX',
+  'SHRT_MIN', 'SHRT_MAX', 'USHRT_MAX', 'INT_MIN', 'INT_MAX', 'UINT_MAX',
+  'LONG_MIN', 'LONG_MAX', 'ULONG_MAX', 'LLONG_MIN', 'LLONG_MAX', 'ULLONG_MAX',
+  'INT8_MIN', 'INT8_MAX', 'INT16_MIN', 'INT16_MAX', 'INT32_MIN', 'INT32_MAX',
+  'INT64_MIN', 'INT64_MAX', 'UINT8_MAX', 'UINT16_MAX', 'UINT32_MAX', 'UINT64_MAX',
+  'INTPTR_MIN', 'INTPTR_MAX', 'UINTPTR_MAX', 'INTMAX_MIN', 'INTMAX_MAX', 'UINTMAX_MAX',
+  'SIZE_MAX', 'PTRDIFF_MIN', 'PTRDIFF_MAX', 'WCHAR_MIN', 'WCHAR_MAX', 'WINT_MIN', 'WINT_MAX',
+  'FLT_MIN', 'FLT_MAX', 'FLT_EPSILON', 'FLT_DIG', 'FLT_RADIX', 'FLT_MANT_DIG',
+  'DBL_MIN', 'DBL_MAX', 'DBL_EPSILON', 'DBL_DIG', 'DBL_MANT_DIG',
+  'LDBL_MIN', 'LDBL_MAX', 'LDBL_EPSILON',
+  'HUGE_VAL', 'HUGE_VALF', 'INFINITY', 'NAN',
+  'M_PI', 'M_E', 'M_SQRT2', 'M_SQRT1_2', 'M_PI_2', 'M_PI_4', 'M_1_PI', 'M_2_PI',
+  'M_LN2', 'M_LN10', 'M_LOG2E', 'M_LOG10E',
+  'va_start', 'va_arg', 'va_end', 'va_copy', 'offsetof',
+} do
+  STDLIB[name] = true
+end
+
 -- Tokens markers.lua already colors as their own library -- leave them to it.
 local function is_library(t)
   return t:match '^VK_' ~= nil
@@ -45,6 +69,9 @@ end
 local function is_macro(tok)
   if DENY[tok] or is_library(tok) then
     return false
+  end
+  if STDLIB[tok] then
+    return true -- a known stdlib macro, regardless of the project scan
   end
   if M.names then
     return M.names[tok] == true
