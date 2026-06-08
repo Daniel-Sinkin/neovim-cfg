@@ -247,8 +247,35 @@ end
 -- Strip the parts of a type the view hides: leading constexpr/inline and the
 -- std::/dans:: qualifiers, and render pointer `*` as `^`. Shared by build_chunks
 -- and the alignment pass (so column widths match).
+-- Raw / std fixed-width types -> the dans aliases, so a Vulkan signature spelled
+-- in `uint32_t` / `float` reads the same as first-party code that uses u32 / f32.
+-- Whole-word only (frontier guards), so `float32_t` and `my_uint32_t` aren't
+-- partially rewritten. `std::` is already dropped before these run.
+local TYPE_ALIAS = {
+  uint8_t = 'u8',
+  uint16_t = 'u16',
+  uint32_t = 'u32',
+  uint64_t = 'u64',
+  int8_t = 'i8',
+  int16_t = 'i16',
+  int32_t = 'i32',
+  int64_t = 'i64',
+  size_t = 'usize',
+  ptrdiff_t = 'isize',
+  uintptr_t = 'uptr',
+  intptr_t = 'iptr',
+  char8_t = 'c8',
+  float32_t = 'f32',
+  float64_t = 'f64',
+  float = 'f32',
+  double = 'f64',
+}
+
 function M.strip_type(typ)
   local t = typ:gsub('^constexpr%s+', ''):gsub('^inline%s+', ''):gsub('std::', ''):gsub('dans::', '')
+  for from, to in pairs(TYPE_ALIAS) do
+    t = t:gsub('%f[%w_]' .. from .. '%f[^%w_]', to)
+  end
   -- std::optional<T> -> T?, keeping any trailing ref/ptr after the `?`:
   -- optional<T>& -> T?&, optional<T>* -> T?^ (once M.ptr rewrites the star).
   t = t:gsub('^optional<(.+)>%s*([&*]*)$', '%1?%2')

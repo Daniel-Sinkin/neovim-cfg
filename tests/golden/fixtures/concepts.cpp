@@ -12,6 +12,10 @@ template <typename T>
 concept CharCol = CharLike<RefOf<T>>;
 template <typename T>
 concept BoolCol = BoolLike<T> and IntLike<T>;
+template <typename I>
+concept ItChar = std::same_as<iter_value_t<I>, char>;
+template <typename R>
+concept RefBool = convertible_to<range_reference_t<R>, bool>;
 
 static_assert(std::same_as<ValueOf<R>, char>);
 static_assert(std::same_as<std::underlying_type_t<VkResult>, int>);

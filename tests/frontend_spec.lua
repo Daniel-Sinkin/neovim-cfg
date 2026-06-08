@@ -133,6 +133,13 @@ run('member pointer no-init', 'struct', { 'void* userPointer;' }, { 'no_init use
 run('member ref no no_init', 'struct', { 'Foo& ref;' }, { 'ref: mut Foo&;' })
 -- a bare local stays raw (deferred-init idiom), not flagged
 run('local value no-init stays raw', 'fn', { 'int x;' }, { false })
+
+-- raw / std fixed-width types render as the dans aliases (so Vulkan's uint32_t /
+-- float read the same as first-party u32 / f32)
+run('member raw uint32', 'struct', { 'uint32_t count{};' }, { 'count: u32;' })
+run('member raw float', 'struct', { 'float scale{};' }, { 'scale: f32;' })
+run('member std int32', 'struct', { 'std::int32_t off{};' }, { 'off: i32;' })
+run('member double', 'struct', { 'double ratio{};' }, { 'ratio: f64;' })
 run('member nested template', 'struct', { 'std::vector<std::pair<int, int>> v{};' }, { 'v: vector<pair<int, int>>;' })
 run('member vector cstring', 'struct', { 'std::vector<const char*> v{};' }, { 'v: vector<CString>;' })
 run('member const-ref vector cstring', 'struct', { 'const std::vector<const char*>& e{};' }, { 'e: const vector<CString>&;' })

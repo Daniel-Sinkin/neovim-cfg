@@ -147,6 +147,11 @@ local CONCEPTS = {
   { kw = 'StringLike', kind = 'suffix', sym = '~>string_view' },
   { kw = 'ValueOf', kind = 'suffix', sym = '~value' },
   { kw = 'RefOf', kind = 'suffix', sym = '~&' },
+  -- raw std value/reference traits, same notation as the ValueOf/RefOf aliases.
+  { kw = 'iter_value_t', kind = 'suffix', sym = '~value' },
+  { kw = 'range_value_t', kind = 'suffix', sym = '~value' },
+  { kw = 'iter_reference_t', kind = 'suffix', sym = '~&' },
+  { kw = 'range_reference_t', kind = 'suffix', sym = '~&' },
 }
 
 local function hide(bufnr, row0, s0, e0)

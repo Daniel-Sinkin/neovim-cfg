@@ -12,6 +12,10 @@ template <typename T>
 concept CharCol = T~&~>char;
 template <typename T>
 concept BoolCol = T~>bool and T~>int;
+template <typename I>
+concept ItChar = I~value~=char;
+template <typename R>
+concept RefBool = R~&~>bool;
 
 static_assert(std::same_as<ValueOf<R>, char>);
 static_assert(std::same_as<std::underlying_type_t<VkResult>, int>);
