@@ -146,7 +146,7 @@ local CONCEPTS = {
   { kw = 'convertible_to', kind = 'infix', op = '~>' },
   { kw = 'same_as', kind = 'infix', op = '~=' },
   { kw = 'invocable', kind = 'call' }, -- T(S): callable with S
-  { kw = 'invoke_result_t', kind = 'call', suffix = '->' }, -- T(S)->: the call's result type
+  { kw = 'invoke_result_t', kind = 'call', suffix = '->()' }, -- T(S)->(): the call's result type
   { kw = 'CharLike', kind = 'fixed', op = '~>', rhs = 'char' },
   { kw = 'BoolLike', kind = 'fixed', op = '~>', rhs = 'bool' },
   { kw = 'IntLike', kind = 'fixed', op = '~>', rhs = 'int' },
