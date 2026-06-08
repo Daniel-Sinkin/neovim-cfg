@@ -252,55 +252,57 @@ local function type_hl(t)
   return 'DansInlayType'
 end
 
--- Split a (caret-free) type segment so each whole-word `string` or `CString` is
--- green (DansString) and the rest keeps `base_hl`: a nested `std::string` /
--- `const char*` inside a template (`vector<string>`, `vector<CString>`) reads as
--- a string just like a standalone one, mirroring the raw-line matchadds. Whole-
--- word means the char on either side isn't `[%w_]`, so `string_view` /
--- `u32string` / `MyString` / `MyCString` stay `base_hl`. When `base_hl` is
--- already DansString (the whole type IS the string, e.g. `string&`) the segment
--- is returned whole -- splitting would fracture a chunk that's already right.
+-- A type token that reads as a string: std::string / string_view, the C-string
+-- CString, and the gsl `*zstring` aliases (zstring/czstring/wzstring/cwzstring/
+-- u16zstring/.../basic_zstring). Whole-word only, so string_view IS one but
+-- u32string / MyString / MyCString are not.
+local function is_string_type(w)
+  return w == 'string'
+    or w == 'string_view'
+    or w == 'CString'
+    or w == 'basic_zstring'
+    or w:match '^[cwu0-9]*zstring$' ~= nil
+end
+
+-- Split a (caret-free) type segment so each whole-word string-type token is green
+-- (DansString) and the rest keeps `base_hl`: a nested `std::string` / `string_view`
+-- / `const char*` inside a template (`vector<string>`, `span<czstring>`) reads as a
+-- string just like a standalone one, mirroring the raw-line matchadds. When
+-- `base_hl` is already DansString (the whole type IS the string, e.g. `string&`)
+-- the segment is returned whole -- splitting would fracture an already-right chunk.
 local function string_token_chunks(text, base_hl)
   if base_hl == 'DansString' then
     return { { text, base_hl } }
   end
-  -- earliest whole-word `string` (lowercase, std::string) or `CString` (capital
-  -- S, so the lowercase `string` scan would miss it) at/after `from`.
-  local function next_tok(from)
-    local bs, be
-    for _, w in ipairs { 'string', 'CString' } do
-      local j = from
-      while true do
-        local s, e = text:find(w, j, true)
-        if not s then
-          break
-        end
-        local before = s > 1 and text:sub(s - 1, s - 1) or ''
-        local after = text:sub(e + 1, e + 1)
-        if not before:match '[%w_]' and not after:match '[%w_]' then
-          if not bs or s < bs then
-            bs, be = s, e
-          end
-          break
-        end
-        j = e + 1 -- part of a longer identifier; keep scanning this word
-      end
+  -- coalesce runs of non-string text (punctuation + non-string words) into one
+  -- base_hl chunk, so e.g. `vector<` stays a single chunk and only the string
+  -- token is split out.
+  local out, run, i, n = {}, {}, 1, #text
+  local function flush()
+    if #run > 0 then
+      out[#out + 1] = { table.concat(run), base_hl }
+      run = {}
     end
-    return bs, be
   end
-  local out, i, n = {}, 1, #text
   while i <= n do
-    local s, e = next_tok(i)
+    local s, e = text:find('[%w_]+', i)
     if not s then
-      out[#out + 1] = { text:sub(i), base_hl }
+      run[#run + 1] = text:sub(i)
       break
     end
     if s > i then
-      out[#out + 1] = { text:sub(i, s - 1), base_hl }
+      run[#run + 1] = text:sub(i, s - 1)
     end
-    out[#out + 1] = { text:sub(s, e), 'DansString' }
+    local word = text:sub(s, e)
+    if is_string_type(word) then
+      flush()
+      out[#out + 1] = { word, 'DansString' }
+    else
+      run[#run + 1] = word
+    end
     i = e + 1
   end
+  flush()
   return out
 end
 

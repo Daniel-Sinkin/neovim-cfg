@@ -96,11 +96,17 @@ do
 end
 
 do
-  -- string_view must stay blue: the whole-word guard rejects `string` followed by
-  -- `_`, so no chunk on the line is string-green.
+  -- string_view reads as a string, so it IS greened (whole-word, nested in the
+  -- template) -- like string / CString / the gsl zstring aliases.
   local b, off = build('struct', { 'std::vector<std::string_view> sv{};' })
   chk('vector<string_view> text', overlay(b, off), 'sv: vector<string_view>;')
-  chk('vector<string_view> no green', has_hl(b, off, 'DansString'), false)
+  chk('vector<string_view> green', has_hl(b, off, 'DansString'), true)
+end
+
+do
+  -- gsl czstring (a C-string alias) is greened like CString.
+  local b, off = build('struct', { 'gsl::czstring name{};' })
+  chk('czstring green', has_hl(b, off, 'DansString'), true)
 end
 
 -- ===================== B: const char* -> CString =====================
