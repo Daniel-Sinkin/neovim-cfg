@@ -116,32 +116,74 @@ local function split_args(s)
   return args
 end
 
--- A binary concept `keyword<A, B>` rendered infix as `A <op> B`: conceal
--- `keyword<`, turn the top-level `,` into the op, conceal the closing `>`. A
--- leading std::/dans:: is concealed separately by markers. Only the exact
--- 2-argument form is rewritten. `~` reads as "the concept relation" (it's
--- otherwise only destructors / bitwise-not, so it's free for this).
---   same_as<A, B>        -> A ~= B    (type identity)
---   convertible_to<V, T> -> V ~> T    (V is convertible to T)
--- static_assert is intentionally absent: those statements are left fully verbatim
--- (util.static_assert_lines), so this never fires inside one.
-local BINARY_RELATIONS = {
-  { kw = 'same_as', op = ' ~= ' },
-  { kw = 'convertible_to', op = ' ~> ' },
+-- ===================== concept / type-trait rendering =====================
+-- One mechanism renders a template `Keyword<...>` in a compact `~`-notation. `~`
+-- reads as "the concept sigil" (otherwise only destructors / bitwise-not, so it's
+-- free) and everything injected here is colored DansConcept. Each row of CONCEPTS
+-- is string-matched exactly -- a hardcoded whitelist, no inference from a concept's
+-- definition. Three emit shapes:
+--
+--   infix   Keyword<A, B>      -> A<sym>B     convertible_to<V,T> -> V~>T
+--                                             same_as<A,B>        -> A~=B
+--   suffix  Keyword<A>         -> A<sym>      RefOf<T>            -> T~&
+--                                             ValueOf<T>          -> T~v
+--                                             CharLike<T>         -> T~>char   (sym
+--                                             bakes in the fixed RHS)
+--   call    Keyword<F, R...>   -> F~(R...)    invocable<S,T>      -> S~(T)
+--
+-- No spaces around the symbols. Nesting falls out for free: each occurrence is
+-- concealed/injected independently, so CharLike<RefOf<R>> renders RefOf<R> -> R~&
+-- and then CharLike<...> -> R~&~>char. static_assert lines are skipped wholesale
+-- by the caller, so this never fires inside one. CharLike/BoolLike/IntLike/
+-- StringLike are the only fixed-RHS aliases recognized (per the whitelist).
+local CONCEPT_HL = 'DansConcept'
+local CONCEPTS = {
+  { kw = 'convertible_to', kind = 'infix', sym = '~>' },
+  { kw = 'same_as', kind = 'infix', sym = '~=' },
+  { kw = 'invocable', kind = 'call' },
+  { kw = 'CharLike', kind = 'suffix', sym = '~>char' },
+  { kw = 'BoolLike', kind = 'suffix', sym = '~>bool' },
+  { kw = 'IntLike', kind = 'suffix', sym = '~>int' },
+  { kw = 'StringLike', kind = 'suffix', sym = '~>string_view' },
+  { kw = 'ValueOf', kind = 'suffix', sym = '~v' },
+  { kw = 'RefOf', kind = 'suffix', sym = '~&' },
 }
-local function binary_relation(bufnr, row0, line, kw, op)
-  local from = 1
+
+local function hide(bufnr, row0, s0, e0)
+  if e0 > s0 then
+    pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, s0, { end_col = e0, conceal = '' })
+  end
+end
+local function hide_inject(bufnr, row0, s0, e0, text)
+  pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, s0, {
+    end_col = e0,
+    conceal = '',
+    virt_text = { { text, CONCEPT_HL } },
+    virt_text_pos = 'inline',
+  })
+end
+
+-- 1-based inclusive [start, end] of a trimmed arg within the line. `open` is the
+-- 1-based column of the `<`; arg.from is the 1-based offset inside the `<...>` body.
+local function arg_span(open, arg)
+  local lead = #(arg.text:match '^%s*' or '')
+  local s = open + arg.from + lead
+  return s, s + #vim.trim(arg.text) - 1
+end
+
+-- Find the next `kw<...>` whose `kw` starts at a word boundary and isn't in a
+-- string/comment. Returns ms (kw start), open (`<`), close (`>`), args, next-from.
+local function find_concept(line, kw, from)
   while true do
     local ms, me = line:find(kw .. '%s*<', from)
     if not ms then
-      return
+      return nil
     end
     from = me + 1
     local before = ms > 1 and line:sub(ms - 1, ms - 1) or nil
     if not is_word_char(before) and not in_string_or_comment(line, ms - 1) then
-      local open = me -- the `<`
       local depth, close = 0, nil
-      for i = open, #line do
+      for i = me, #line do
         local c = line:sub(i, i)
         if c == '<' then
           depth = depth + 1
@@ -154,29 +196,49 @@ local function binary_relation(bufnr, row0, line, kw, op)
         end
       end
       if close then
-        local args = split_args(line:sub(open + 1, close - 1))
-        if #args == 2 then
-          local a_start = open + args[1].from + #(args[1].text:match '^%s*' or '')
-          local a_end = a_start + #vim.trim(args[1].text) - 1
-          local b_start = open + args[2].from + #(args[2].text:match '^%s*' or '')
-          local b_end = b_start + #vim.trim(args[2].text) - 1
-          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, ms - 1, { end_col = a_start - 1, conceal = '' })
-          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, a_end, {
-            end_col = b_start - 1,
-            conceal = '',
-            virt_text = { { op, 'Comment' } },
-            virt_text_pos = 'inline',
-          })
-          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, b_end, { end_col = close, conceal = '' })
-        end
+        return ms, me, close, split_args(line:sub(me + 1, close - 1)), from
       end
     end
   end
 end
 
-local function binary_relations(bufnr, row0, line)
-  for _, rel in ipairs(BINARY_RELATIONS) do
-    binary_relation(bufnr, row0, line, rel.kw, rel.op)
+local function render_concept(bufnr, row0, line, spec)
+  local from = 1
+  while true do
+    local ms, open, close, args, nxt = find_concept(line, spec.kw, from)
+    if not ms then
+      return
+    end
+    from = nxt
+    if spec.kind == 'infix' and #args == 2 then
+      local a_s, a_e = arg_span(open, args[1])
+      local b_s, b_e = arg_span(open, args[2])
+      hide(bufnr, row0, ms - 1, a_s - 1)
+      hide_inject(bufnr, row0, a_e, b_s - 1, spec.sym)
+      hide(bufnr, row0, b_e, close)
+    elseif spec.kind == 'suffix' and #args == 1 then
+      local a_s, a_e = arg_span(open, args[1])
+      hide(bufnr, row0, ms - 1, a_s - 1)
+      hide_inject(bufnr, row0, a_e, close, spec.sym)
+    elseif spec.kind == 'call' and #args >= 1 then
+      local f_s, f_e = arg_span(open, args[1])
+      hide(bufnr, row0, ms - 1, f_s - 1)
+      if #args == 1 then
+        hide_inject(bufnr, row0, f_e, close, '~()')
+      else
+        local b_s = arg_span(open, args[2])
+        local _, last_e = arg_span(open, args[#args])
+        hide_inject(bufnr, row0, f_e, b_s - 1, '~(')
+        hide_inject(bufnr, row0, last_e, close, ')')
+      end
+    end
+    -- arity mismatch: leave the call verbatim (no extmarks)
+  end
+end
+
+local function concepts(bufnr, row0, line)
+  for _, spec in ipairs(CONCEPTS) do
+    render_concept(bufnr, row0, line, spec)
   end
 end
 
@@ -291,10 +353,9 @@ local function refresh(bufnr)
   for idx, line in ipairs(lines) do
     local row0 = s0 + idx - 1
     if not skip.skip(row0, line) then
-      -- binary relations: static_assert<A,B>/same_as<A,B> -> A === B,
-      -- convertible_to<V,T> -> V -> T. Before the generic loop, which would
-      -- otherwise turn `static_assert` into `$sa`.
-      binary_relations(bufnr, row0, line)
+      -- concept / type-trait `~`-notation (same_as -> ~=, convertible_to -> ~>,
+      -- RefOf/ValueOf/CharLike/..., invocable -> ~(...)). Before the generic loop.
+      concepts(bufnr, row0, line)
       for _, alias in ipairs(ALIASES) do
         local keyword, replacement, hl = alias[1], alias[2], alias[3] or 'Comment'
         local start_pos = 1

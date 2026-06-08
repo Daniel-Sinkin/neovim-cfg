@@ -21,6 +21,8 @@ local MATCH_GROUPS = {
   DansSDL = true,
   DansSTB = true,
   DansLLDB = true,
+  DansConcept = true,
+  DansLambda = true,
   DansString = true,
   DansAssert = true,
   DansCommentMask = true,
@@ -200,6 +202,13 @@ local function apply(ev)
   -- following type/name.
   vim.fn.matchadd('DansMarkerCpy', code_only [[\<copy\>]], 20)
   vim.fn.matchadd('DansMarkerCpy', code_only [[\<cpy\>]], 20)
+  -- `def` (the trailing-return function macro) reads like a definer, so color it
+  -- green-bold like lambda/defer rather than letting dans_macros gray-purple it.
+  vim.fn.matchadd('DansLambda', code_only [[\<def\>]], 22)
+  -- `concept` / `requires` keywords in the concept cyan (the `~`-notation aliases
+  -- render inline in the same color via aliases.lua).
+  vim.fn.matchadd('DansConcept', code_only [[\<concept\>]], 20)
+  vim.fn.matchadd('DansConcept', code_only [[\<requires\>]], 20)
   -- Gray every `const`. The leading-const conceal still hides it on non-cursor
   -- lines; this grays the ones that stay visible (args, trailing, and the
   -- leading one revealed on the cursor line).

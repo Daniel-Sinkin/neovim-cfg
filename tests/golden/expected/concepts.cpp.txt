@@ -1,11 +1,17 @@
 namespace test
 {
 template <typename V>
-concept StringLike = V ~> string_view;
+concept StringLike = V~>string_view;
 template <typename R>
-concept StringRange = input_range<R> and StringLike<ValueOf<R>>;
+concept StringRange = input_range<R> and R~v~>string_view;
 template <typename T>
-concept IsInt = T ~= int;
+concept IsInt = T~=int;
+template <typename F>
+concept Callback = F~(int);
+template <typename T>
+concept CharCol = T~&~>char;
+template <typename T>
+concept BoolCol = T~>bool and T~>int;
 
 static_assert(std::same_as<ValueOf<R>, char>);
 static_assert(std::same_as<std::underlying_type_t<VkResult>, int>);

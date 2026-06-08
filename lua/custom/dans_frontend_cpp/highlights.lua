@@ -34,8 +34,14 @@ function M.apply()
   -- GLFW / SDL identifiers (GLFW*, SDL_*) -- a darker teal, so the brighter STB
   -- cyan below reads as a distinct, louder library.
   hi('DansSDL', { fg = '#1f93a8' })
-  -- stb single-header libs (stb_*, stbi_*, stbtt_*, STB* macros) -- bright cyan.
-  hi('DansSTB', { fg = '#6ad7ff' })
+  -- stb single-header libs (stb_*, stbi_*, stbtt_*, STB* macros) -- a teal-green,
+  -- moved off the bright cyan so concepts can claim that (and distinct from SDL's
+  -- darker blue-teal and the string green).
+  hi('DansSTB', { fg = '#73daca' })
+  -- concept / type-trait `~`-notation (~> ~= ~v ~& ~(...)) and the `concept` /
+  -- `requires` keywords -- the bright cyan stb used to have. Common in this code,
+  -- so it gets the loud color.
+  hi('DansConcept', { fg = '#6ad7ff' })
   -- LLDB identifiers (LLDB_*, SB* API classes, the bare StateType enum) -- orange,
   -- clear of the purples/teal/greens so an LLDB-heavy file reads distinctly.
   hi('DansLLDB', { fg = '#ff9e64' })

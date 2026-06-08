@@ -25,7 +25,9 @@ local DEFINE_GLOBS = '*.{h,hpp,hxx,hh,c,cc,cpp,cxx,cu,cuh,inl,ipp,ixx}'
 M.names = nil
 local enabled = {} -- bufnr -> bool; nil = default on
 
-local DENY = { FILE = true, SEEK_SET = true, SEEK_CUR = true, SEEK_END = true, EOF = true, NULL = true }
+-- `def` is the trailing-return function macro; markers colors it green-bold like
+-- lambda/defer, so keep the purple macro coloring off it.
+local DENY = { FILE = true, SEEK_SET = true, SEEK_CUR = true, SEEK_END = true, EOF = true, NULL = true, def = true }
 
 -- Common standard-library macros. The rg scan only covers the project, not the
 -- stdlib headers, so these would never be found there -- color them as macros via
