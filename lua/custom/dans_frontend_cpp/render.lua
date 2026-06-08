@@ -487,7 +487,16 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
           -- bitwise/multiply statements like `a & b;` aren't grabbed.
           typ, nm = core:match '^(.-[%w_>][&*]+)%s*([%w_]+)$'
           init = ''
-          if not (typ and nm and had_semi and P.looks_like_type(typ)) then
+          if typ and nm and had_semi and P.looks_like_type(typ) then
+            -- a pointer member with no initializer holds garbage -> flag no_init
+            -- (even `const T*`: the const is on the pointee, the pointer is still
+            -- uninitialized). A reference member is bound in the ctor init-list, so
+            -- it's never flagged.
+            local sigil = typ:match '([&*]+)%s*$'
+            if sigil and sigil:sub(-1) == '*' then
+              no_init = true
+            end
+          else
             -- bare value decl with no initializer (`Type name;`): the value is
             -- indeterminate (no `{}` default-init), so render `name: T` plus a red
             -- `no_init` marker. Array types additionally take the Odin `[N]T` form.
@@ -706,6 +715,11 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     else
       disp_typ = shown_typ
     end
+    -- Uninitialized member: indeterminate value (no `{}`), flagged at the very
+    -- start in the mut red so the dangerous fields jump out at the line head.
+    if no_init then
+      add('no_init ', 'DansMarkerMut')
+    end
     add(nm)
     if align then
       add(string.rep(' ', math.max(0, align.nw - vim.fn.strwidth(nm))))
@@ -776,10 +790,6 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
       else
         add_value(init)
       end
-    end
-    -- Uninitialized: the value is indeterminate (no `{}`), flagged red like `mut`.
-    if no_init then
-      add(' no_init', 'DansMarkerMut')
     end
     add(semi)
   end
