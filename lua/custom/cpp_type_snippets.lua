@@ -20,6 +20,7 @@
 --   $um$K$V / $um(K, V) -> std::unordered_map<K, V>
 --   $map$K$V / $arr$T$N -> std::map<K, V> / std::array<T, N>
 --   $sc$u32 / $sc(u32) -> static_cast<u32>   (also $rc / $cc / $dc casts)
+--   $<T, S>         -> template <typename T, typename S>  (angle form, closing >)
 --   relations (concept ~-notation), prefix or infix:
 --   $~> / $~=       -> std::convertible_to / std::same_as
 --   $~>$T$S / $T$~>$S / $~>(T, S) -> std::convertible_to<T, S>
@@ -255,6 +256,23 @@ function M.expand(token)
   if token:sub(1, #SIGIL) ~= SIGIL then
     return nil
   end
+  -- angle form `$<T, S>` -> `template <typename T, typename S>`: each bare
+  -- identifier becomes a `typename` param, a multi-token arg (e.g. `usize N`) is
+  -- kept verbatim. (`$<` without a closing `>` is still the vector wrapper below.)
+  local targs = token:match('^' .. SIGIL_PAT .. '<(.-)>$')
+  if targs then
+    local parts = {}
+    for _, a in ipairs(split_commas(targs)) do
+      a = vim.trim(a)
+      if a ~= '' then
+        parts[#parts + 1] = a:match '^[%a_][%w_]*$' and ('typename ' .. a) or a
+      end
+    end
+    if #parts == 0 then
+      return nil
+    end
+    return 'template <' .. table.concat(parts, ', ') .. '>'
+  end
   local head, argstr = token:match('^' .. SIGIL_PAT .. '([%w_?<>%^~=]+)%((.*)%)$')
   if head then
     return expand_paren(head, argstr)
@@ -360,6 +378,17 @@ function M.resolve(line, col, class_fn)
     if not in_string(line, pbs) then
       local ptext = M.expand(paren)
       return { action = ptext and 'expand' or 'remove', bs = pbs, text = ptext }
+    end
+  end
+  -- angle template form `$<T, S>` ending at the cursor (holds commas/spaces too).
+  -- Requires a closing `>`, so the bare `$<` vector wrapper still goes to the run
+  -- scan below.
+  local angle = before:match('(' .. SIGIL_PAT .. '<[^<>]*>)$')
+  if angle then
+    local abs = col - #angle
+    if not in_string(line, abs) then
+      local atext = M.expand(angle)
+      return { action = atext and 'expand' or 'remove', bs = abs, text = atext }
     end
   end
   -- sigil form: the trailing run of snippet chars (incl the relation `~>=` and `>`).

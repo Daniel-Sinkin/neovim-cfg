@@ -111,6 +111,15 @@ eq('$~>$T', 'std::convertible_to<T, ')
 eq('$T$~>', 'std::convertible_to<T, $>')
 eq('$~>(A, B)', 'std::convertible_to<A, B>')
 
+-- angle template form: $<T, S> -> template <typename T, typename S>
+eq('$<T>', 'template <typename T>')
+eq('$<T, S>', 'template <typename T, typename S>')
+eq('$<T, usize N>', 'template <typename T, usize N>')
+-- vector forms unaffected (no closing > = the wrapper)
+eq('$<', 'std::vector')
+eq('$<$Foo', 'std::vector<Foo>')
+eq('$<(Foo)', 'std::vector<Foo>')
+
 -- old postfix forms no longer expand (committed to prefix, no order-guessing)
 eq('$str$?', nil)
 eq('$Foo<', nil)
