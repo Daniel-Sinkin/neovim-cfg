@@ -61,6 +61,42 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   end,
 })
 
+-- Write duration in the "written" message. The autoformatter runs in BufWritePre
+-- (conform; clang-format/LSP for c/cpp), so a big file can take a noticeable beat
+-- and the built-in line doesn't say how long. Time pre->post and re-echo Neovim's
+-- message with the duration appended. This autocmd is created at startup, before
+-- conform lazy-loads, so its BufWritePre fires first and the timer spans the
+-- format. (Progress *during* a slow format would need to hook the formatter, so
+-- it's intentionally left out.)
+local write_start = {}
+local hrtime = (vim.uv or vim.loop).hrtime
+local wgroup = vim.api.nvim_create_augroup('dans-write-time', { clear = true })
+vim.api.nvim_create_autocmd('BufWritePre', {
+  group = wgroup,
+  callback = function(ev)
+    write_start[ev.buf] = hrtime()
+  end,
+})
+vim.api.nvim_create_autocmd('BufWritePost', {
+  group = wgroup,
+  callback = function(ev)
+    local t0 = write_start[ev.buf]
+    write_start[ev.buf] = nil
+    if not t0 or vim.bo[ev.buf].buftype ~= '' then
+      return
+    end
+    local ms = (hrtime() - t0) / 1e6
+    local name = vim.fn.fnamemodify(ev.file, ':.')
+    local lines = vim.api.nvim_buf_line_count(ev.buf)
+    local bytes = vim.fn.getfsize(ev.file)
+    -- scheduled so it lands after Neovim's own "written" line (which prints when
+    -- the :w command finishes, just after this autocmd).
+    vim.schedule(function()
+      vim.api.nvim_echo({ { string.format('"%s" %dL, %dB written in %dms', name, lines, bytes, ms) } }, false, {})
+    end)
+  end,
+})
+
 -- C/C++/CUDA: 4-space tabs and the built-in `cindent`. Treesitter indent is
 -- disabled for these in custom/plugins/treesitter.lua because the frozen master
 -- module goes stale mid-edit and drops the Enter indent to column 0; cindent is
