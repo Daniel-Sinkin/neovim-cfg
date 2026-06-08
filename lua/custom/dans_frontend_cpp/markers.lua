@@ -32,6 +32,17 @@ local function set_hl()
   require('custom.dans_frontend_cpp.highlights').apply()
 end
 
+-- Drop this module's window-local color matches (matchadd). Needed both before a
+-- re-apply (so repeats don't stack) and when a non-cpp buffer enters a cpp window
+-- (matchadd is per-window, so the colors would otherwise leak onto the other file).
+local function clear_color_matches()
+  for _, m in ipairs(vim.fn.getmatches()) do
+    if MATCH_GROUPS[m.group] then
+      pcall(vim.fn.matchdelete, m.id)
+    end
+  end
+end
+
 -- Prefix conceals are extmarks (this namespace), not matchadds, so they can be
 -- treesitter-gated to skip string / char / comment literals -- a window matchadd
 -- is syntax-blind and would strip the prefix inside e.g. the "vkCreateInstance"
@@ -159,23 +170,18 @@ local function apply(ev)
   -- concealcursor is empty so the cursor line shows the real text. The prefix
   -- conceals themselves are extmarks applied by conceal_refresh (literal-aware);
   -- only the colors below are window matchadds.
-  vim.opt_local.conceallevel = 2
-  vim.opt_local.concealcursor = ''
   local bufnr = (ev and ev.buf) or vim.api.nvim_get_current_buf()
 
-  -- Drop our own previous color matches so repeated FileType events don't stack.
-  for _, m in ipairs(vim.fn.getmatches()) do
-    if MATCH_GROUPS[m.group] then
-      pcall(vim.fn.matchdelete, m.id)
-    end
+  -- Color matches are WINDOW-local (matchadd), so a cpp window switched to a
+  -- non-cpp buffer would keep coloring `copy`/macros in e.g. an .xml. Clear them
+  -- first, and bail without re-adding unless this really is a c/cpp/cuda buffer.
+  clear_color_matches()
+  conceal_refresh(bufnr) -- buffer-local extmarks; itself a no-op on non-cpp
+  if not vu.is_cpp(vim.bo[bufnr].filetype) or not vu.module_enabled(bufnr, 'markers') then
+    return
   end
-
-  -- Prefix conceals (extmarks, skip string/comment literals).
-  conceal_refresh(bufnr)
-
-  if not vu.module_enabled(bufnr, 'markers') then
-    return -- disabled: colors cleared above, conceals cleared in conceal_refresh
-  end
+  vim.opt_local.conceallevel = 2
+  vim.opt_local.concealcursor = ''
 
   -- Window-local matches, priority above the flattened monochrome syntax.
   -- Only the keyword is colored (not the following type/name). mut/mut_unchecked
@@ -274,10 +280,24 @@ function M.setup()
       apply(ev)
     end,
   })
-  -- The prefix conceals are visible-range extmarks, so re-scan on edit, scroll
-  -- (the debounced settled event), and buffer enter. No CursorMoved: the cursor
-  -- line is revealed by concealcursor='', not by skipping it in the scan.
-  vu.on_decorate(group, { 'BufEnter', 'TextChanged', 'TextChangedI' }, conceal_refresh)
+  -- On entering ANY buffer: re-apply for a cpp buffer (matchadds were cleared when
+  -- a non-cpp buffer was entered in this window), and clear the window's cpp color
+  -- matches when it's not cpp -- this is what stops `copy`/macros coloring an .xml
+  -- shown in a cpp window.
+  vim.api.nvim_create_autocmd('BufEnter', {
+    group = group,
+    callback = function(ev)
+      if vu.is_cpp(vim.bo[ev.buf].filetype) then
+        apply(ev) -- also refreshes conceals, so it's not in the on_decorate list
+      else
+        clear_color_matches()
+      end
+    end,
+  })
+  -- The prefix conceals are visible-range extmarks, so re-scan on edit and scroll
+  -- (the debounced settled event); buffer-enter is handled by the apply above. No
+  -- CursorMoved: the cursor line is revealed by concealcursor='', not by skipping.
+  vu.on_decorate(group, { 'TextChanged', 'TextChangedI' }, conceal_refresh)
   -- Re-assert colors after a colorscheme change (tokyonight day/night swap).
   vim.api.nvim_create_autocmd('ColorScheme', { group = group, callback = set_hl })
 end
