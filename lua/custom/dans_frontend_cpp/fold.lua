@@ -12,9 +12,36 @@
 local M = {}
 
 local vu = require 'custom.dans_frontend_cpp.util'
+local P = require 'custom.dans_frontend_cpp.parse'
 
 local function is_hpp(buf)
   return vim.api.nvim_buf_get_name(buf):sub(-4) == '.hpp'
+end
+
+-- The frontend view of one opener line (function signature / class / namespace),
+-- for a fold's gray label. Reconstructing it from the live conceal/virt extmarks
+-- is unreliable -- a fold off the rendered window (cursor +/- 40) has no marks --
+-- so re-apply the same transforms purely: drop the trailing `{`, hide the prefixes
+-- the frontend conceals (inline/static, the std::/dans:: scopes, the glfw/vk/vma/gl
+-- library prefixes), and the leading const. The whole foldtext is already gray, so
+-- param `const`s that stay (grayed in the buffer too) read correctly.
+local function signature_label(first)
+  local s = first:gsub('%s*{%s*$', '') -- trailing opener brace
+  s = s:gsub('^%s+', '')
+  s = s:gsub('%f[%w]inline%s+', '')
+  s = s:gsub('%f[%w]static%s+', '')
+  s = P.strip_glfw(s)
+  s = s:gsub('%f[%w]std::ranges::views::', '')
+  s = s:gsub('%f[%w]std::ranges::', '')
+  s = s:gsub('%f[%w]std::views::', '')
+  s = s:gsub('%f[%w]std::', '')
+  s = s:gsub('%f[%w]dans::', '')
+  s = s:gsub('^const%s+', '')
+  s = s:gsub('%s+$', '')
+  if s == '' then
+    return nil
+  end
+  return s
 end
 
 -- Contract / grouping scopes: each `{ // Expects` / `{ // Ensures` / `{ // Asserts`
@@ -122,13 +149,10 @@ local function outline_ranges(buf)
   for id, node in q:iter_captures(trees[1]:root(), buf, 0, -1) do
     local cap = q.captures[id]
     local keep = true
-    -- functions fold only the body `{ ... }`, so the signature line stays visible
-    -- and greppable by name; everything else folds the whole construct.
+    -- functions fold the whole construct (signature + body), same as classes; the
+    -- foldtext shows the frontend-rendered signature so the name stays readable.
     local rnode = node
-    if cap == 'fn' then
-      rnode = node:field('body')[1]
-      keep = rnode ~= nil
-    elseif cap == 'ns' then
+    if cap == 'ns' then
       local name = node:field('name')[1]
       if name then
         keep = vim.treesitter.get_node_text(name, buf):find('detail', 1, true) ~= nil
@@ -245,10 +269,8 @@ function _G.dans_cpp_foldtext()
     label = first:match '^%s*{%s*//%s*(%a+)'
   end
   if not label then
-    label = first:gsub('%s*{%s*$', ''):gsub('^%s+', '')
-    if label == '' then
-      label = nil
-    end
+    -- outline folds (function / class / namespace): the frontend-rendered opener.
+    label = signature_label(first)
   end
   return indent .. '+-- ' .. n .. ' lines:' .. (label and (' ' .. label) or '')
 end

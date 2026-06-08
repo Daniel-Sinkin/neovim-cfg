@@ -305,14 +305,15 @@ end
 -- color BEFORE calling this so it survives. `%f[%w]` anchors to a token start so an
 -- embedded prefix isn't touched.
 function M.strip_glfw(t)
-  t = t:gsub('%f[%w]GLFW_([A-Z0-9])', '%1')
-  t = t:gsub('%f[%w]GLFW([a-z])', '%1')
-  t = t:gsub('%f[%w]glfw([A-Z])', '%1')
-  -- internal glfw, leading underscore: _GLFWmonitor -> monitor (NOT the _GLFW_X
-  -- build macros -- a letter must follow). `[%w_]` frontier so the leading `_` is
-  -- the token start.
+  -- internal glfw first (leading underscore: _GLFWwindow -> window), so the
+  -- GLFW-without-underscore rules below don't strip the GLFW and strand the `_`.
+  -- NOT the _GLFW_X build macros (a letter must follow). `[%w_]` frontier so `_`
+  -- counts as a word char, matching the raw-line `\<` conceal (where `_` is one).
   t = t:gsub('%f[%w_]_GLFW([A-Za-z])', '%1')
   t = t:gsub('%f[%w_]_glfw([A-Za-z])', '%1')
+  t = t:gsub('%f[%w_]GLFW_([A-Z0-9])', '%1')
+  t = t:gsub('%f[%w_]GLFW([a-z])', '%1')
+  t = t:gsub('%f[%w_]glfw([A-Z])', '%1')
   -- vulkan: longer sub-prefixes (DebugUtils, KHR) first, then generic Vk/VK_/vk.
   t = t:gsub('%f[%w]VK_DEBUG_UTILS_([A-Z0-9])', '%1')
   t = t:gsub('%f[%w]VkDebugUtils([A-Z])', '%1')
