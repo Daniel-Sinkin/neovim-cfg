@@ -71,6 +71,52 @@ ok('class foldtext', foldtext(3, 5) == '+-- 3 lines: class Camera')
 ok('update foldtext strips inline + std::', foldtext(7, 10) == '+-- 4 lines: auto update(const string& s) -> void')
 ok('make foldtext strips Vk + _GLFW prefixes', foldtext(12, 15) == '+-- 4 lines: auto make(Instance inst) -> window*')
 
+-- sole-member suppression + namespace member counts
+local src2 = {
+  'namespace detail', -- 1  one multi-line fn -> fn suppressed, ns folds
+  '{', -- 2
+  'inline void only() -> void', -- 3
+  '{', -- 4
+  '    work();', -- 5
+  '}', -- 6
+  '}', -- 7
+  '', -- 8
+  'namespace detail2', -- 9  two multi-line fns + one struct -> all fold, ns labeled
+  '{', -- 10
+  'void a()', -- 11
+  '{', -- 12
+  '    x();', -- 13
+  '}', -- 14
+  'void b()', -- 15
+  '{', -- 16
+  '    y();', -- 17
+  '}', -- 18
+  'struct S', -- 19
+  '{', -- 20
+  '    int x;', -- 21
+  '};', -- 22
+  '}', -- 23
+}
+local b2 = vim.api.nvim_create_buf(false, true)
+vim.api.nvim_buf_set_lines(b2, 0, -1, false, src2)
+vim.api.nvim_buf_set_name(b2, '/tmp/fold_probe2.hpp')
+vim.bo[b2].filetype = 'cpp'
+vim.api.nvim_set_current_buf(b2)
+pcall(function()
+  vim.treesitter.get_parser(b2, 'cpp'):parse()
+end)
+
+-- detail (sole fn): ns folds, the fn does NOT (suppressed)
+ok('sole-member ns folds', level(1) == '>1')
+ok('sole fn not folded', level(3) == '1')
+ok('sole-member ns label', foldtext(1, 7) == '+-- 7 lines: namespace detail : 1 function')
+-- detail2 (2 fn + 1 struct): all fold, label lists counts
+ok('multi-member ns folds', level(9) == '>1')
+ok('member fn a folds', level(11) == '>2')
+ok('member fn b folds', level(15) == '>2')
+ok('member struct folds', level(19) == '>2')
+ok('multi-member ns label', foldtext(9, 23) == '+-- 15 lines: namespace detail2 : 2 function : 1 struct')
+
 local report = { string.format('fold_spec: %d passed, %d failed', pass, fail) }
 for _, f in ipairs(fails) do
   report[#report + 1] = f

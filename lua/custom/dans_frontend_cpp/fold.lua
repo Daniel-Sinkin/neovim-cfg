@@ -121,11 +121,44 @@ local function static_assert_ranges(lines)
   return out
 end
 
+-- Direct-member counts per folding namespace (start-line 1-based -> {fn,st,en}),
+-- filled by outline_ranges and read by the foldtext for the count annotation.
+local ns_member_counts = {}
+
+-- The enclosing scope of `node`: the nearest ancestor that is a namespace, the
+-- file, a class/struct, or a function. Used to tell a direct namespace/file member
+-- from one nested inside a class (a method) or another def.
+local SCOPE_TYPES = {
+  namespace_definition = true,
+  translation_unit = true,
+  class_specifier = true,
+  struct_specifier = true,
+  function_definition = true,
+}
+local function nearest_scope(node)
+  local p = node:parent()
+  while p do
+    if SCOPE_TYPES[p:type()] then
+      return p
+    end
+    p = p:parent()
+  end
+end
+local function node_key(node)
+  -- type + full range: a translation_unit and a first-line namespace both start at
+  -- 0:0, so start alone collides; the end and type disambiguate.
+  local sr, sc, er, ec = node:range()
+  return node:type() .. ':' .. sr .. ':' .. sc .. ':' .. er .. ':' .. ec
+end
+
 -- .hpp outline (treesitter): function/class/struct/enum definitions, plus
 -- anonymous and `detail` namespaces. Named non-detail namespaces are skipped so
--- they stay open. Returns inclusive 1-based ranges. All failure paths return {}.
+-- they stay open. A def that is the ONLY thing in its namespace / the file isn't
+-- folded -- no point making you unfold a one-thing scope twice. Returns inclusive
+-- 1-based ranges. All failure paths return {}.
 local function outline_ranges(buf)
   local out = {}
+  ns_member_counts[buf] = {}
   local ok, parser = pcall(vim.treesitter.get_parser, buf, 'cpp')
   if not ok or not parser then
     return out
@@ -146,26 +179,65 @@ local function outline_ranges(buf)
   if not ok3 or not q then
     return out
   end
+  local function add_range(node)
+    local s, _, e, ec = node:range()
+    if ec == 0 then
+      e = e - 1 -- node ends at col 0 of the following line; last real line is e-1
+    end
+    if e > s then
+      out[#out + 1] = { s + 1, e + 1 }
+    end
+  end
+  local function kind_of(node)
+    local t = node:type()
+    if t == 'function_definition' then
+      return 'fn'
+    elseif t == 'enum_specifier' then
+      return 'en'
+    end
+    return 'st' -- class_specifier / struct_specifier
+  end
+
+  -- pass 1: count direct members per scope (defs AND nested namespaces, for the
+  -- sole-member rule) and per-kind def counts per scope (for the label).
+  local scope_count, scope_kinds = {}, {}
+  local defs, ns_fold = {}, {}
   for id, node in q:iter_captures(trees[1]:root(), buf, 0, -1) do
     local cap = q.captures[id]
-    local keep = true
-    -- functions fold the whole construct (signature + body), same as classes; the
-    -- foldtext shows the frontend-rendered signature so the name stays readable.
-    local rnode = node
+    -- count membership in ANY scope (namespace, file, class, struct, function) so
+    -- the sole-member rule also opens a one-method class and a one-thing file, not
+    -- just a one-thing namespace.
+    local sc = nearest_scope(node)
+    local key = sc and node_key(sc) or nil
+    if key then
+      scope_count[key] = (scope_count[key] or 0) + 1
+    end
     if cap == 'ns' then
       local name = node:field('name')[1]
-      if name then
-        keep = vim.treesitter.get_node_text(name, buf):find('detail', 1, true) ~= nil
+      local fold = (not name) or (vim.treesitter.get_node_text(name, buf):find('detail', 1, true) ~= nil)
+      if fold then
+        ns_fold[#ns_fold + 1] = node
+      end
+    else
+      defs[#defs + 1] = { node = node, key = key }
+      if key then
+        local k = scope_kinds[key] or { fn = 0, st = 0, en = 0 }
+        scope_kinds[key] = k
+        k[kind_of(node)] = k[kind_of(node)] + 1
       end
     end
-    if keep then
-      local s, _, e, ec = rnode:range()
-      if ec == 0 then
-        e = e - 1 -- node ends at col 0 of the following line; last real line is e-1
-      end
-      if e > s then
-        out[#out + 1] = { s + 1, e + 1 }
-      end
+  end
+
+  -- pass 2: fold the namespaces (recording their member counts), then the defs
+  -- except a def that is the sole thing in its namespace / the file.
+  for _, node in ipairs(ns_fold) do
+    add_range(node)
+    local s = node:range()
+    ns_member_counts[buf][s + 1] = scope_kinds[node_key(node)] or { fn = 0, st = 0, en = 0 }
+  end
+  for _, d in ipairs(defs) do
+    if not (d.key and scope_count[d.key] == 1) then
+      add_range(d.node)
     end
   end
   return out
@@ -276,6 +348,25 @@ function _G.dans_cpp_foldtext()
   if not label then
     -- outline folds (function / class / namespace): the frontend-rendered opener.
     label = signature_label(first)
+    -- a folded namespace shows what's inside: ": 2 function : 1 struct : 3 enum"
+    -- (zero counts omitted, enum last).
+    local counts = ns_member_counts[vim.api.nvim_get_current_buf()]
+    local c = counts and counts[start]
+    if label and c then
+      local parts = {}
+      if c.fn > 0 then
+        parts[#parts + 1] = c.fn .. ' function'
+      end
+      if c.st > 0 then
+        parts[#parts + 1] = c.st .. ' struct'
+      end
+      if c.en > 0 then
+        parts[#parts + 1] = c.en .. ' enum'
+      end
+      if #parts > 0 then
+        label = label .. ' : ' .. table.concat(parts, ' : ')
+      end
+    end
   end
   return indent .. '+-- ' .. n .. ' lines:' .. (label and (' ' .. label) or '')
 end
