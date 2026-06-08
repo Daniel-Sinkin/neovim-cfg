@@ -113,20 +113,12 @@ local function refresh(bufnr)
           local value = vim.trim(rest:sub(eqe + 1))
           local stype_rest = single and field == 'sType' and value:match '^VK_STRUCTURE_TYPE_(.+)$'
           if stype_rest then
-            -- `.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO` -> `InstanceCreateInfo`,
-            -- with a dark band from this line down through the struct's closing brace.
+            -- `.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO` -> `InstanceCreateInfo`.
             pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc, { end_col = pec, conceal = '' })
             pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, sr, sc, {
               virt_text = { { vk_struct_camel(stype_rest), 'DansVkStructName' } },
               virt_text_pos = 'inline',
             })
-            local list = pair:parent()
-            if list and list:type() == 'initializer_list' then
-              local _, _, ler = list:range()
-              for bl = sr, ler do
-                pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, bl, 0, { line_hl_group = 'DansVkStructBand', priority = 1 })
-              end
-            end
             goto continue
           end
           -- drop the leading dot

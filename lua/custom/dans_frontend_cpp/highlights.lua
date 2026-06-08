@@ -33,10 +33,6 @@ function M.apply()
   -- `.sType = VK_STRUCTURE_TYPE_*` rendered as the bare struct identity
   -- (InstanceCreateInfo): a bright bold orange so it reads as the struct's title.
   hi('DansVkStructName', { fg = '#ffb070', bold = true })
-  -- The band painted from that sType line down through the struct's closing brace:
-  -- a dark warm background, much darker than the Vulkan orange, so the whole
-  -- designated-init block reads as one unit.
-  hi('DansVkStructBand', { bg = '#382310' })
   -- Vulkan Memory Allocator (VMA_/Vma/vma) -- a darker shade of the Vulkan orange,
   -- so it reads as related but a separate library.
   hi('DansVMA', { fg = '#ad5f24' })
