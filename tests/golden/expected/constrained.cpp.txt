@@ -4,3 +4,12 @@ void f();
 
 concept<A ~> bool>
 Boolish = A;
+
+concept<T>
+Convertible = true;
+
+<A~BoolLike, B ~> bool>
+void g();
+
+<T~BoolLike, S~Convertible<T>>
+void h();

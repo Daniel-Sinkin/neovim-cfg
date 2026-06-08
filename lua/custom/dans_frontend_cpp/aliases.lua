@@ -189,6 +189,24 @@ local function user_concepts(bufnr)
   return set
 end
 
+-- Concept names usable as a bare unary template-param constraint (`BoolLike A` ->
+-- `A~BoolLike`): the fixed + uname specs plus user-defined concepts. Relations
+-- (convertible_to / same_as) need an explicit operand, so they're excluded here --
+-- their constrained form (`convertible_to<bool> B` -> `B ~> bool`) is the infix
+-- branch of render_concept.
+local function unary_constraint_set(bufnr)
+  local set = {}
+  for _, s in ipairs(CONCEPTS) do
+    if s.kind == 'fixed' or s.kind == 'uname' then
+      set[s.kw] = true
+    end
+  end
+  for name in pairs(user_concepts(bufnr)) do
+    set[name] = true
+  end
+  return set
+end
+
 local function hide(bufnr, row0, s0, e0)
   if e0 > s0 then
     pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, s0, { end_col = e0, conceal = '' })
@@ -304,9 +322,18 @@ local function render_concept(bufnr, row0, line, spec, has_conj)
       end
       hide_inject(bufnr, row0, a_e, close, ' ' .. spec.op .. ' ' .. spec.rhs .. (br and ')' or ''))
     elseif (kind == 'suffix' or kind == 'uname') and #args == 1 then
-      local a_s, a_e = arg_span(open, args[1])
-      hide(bufnr, row0, ms - 1, a_s - 1)
-      hide_inject(bufnr, row0, a_e, close, spec.sym)
+      local ws, pname = line:sub(close + 1):match '^(%s+)([%a_][%w_]*)'
+      if kind == 'uname' and pname and line:match '^%s*template%s*<' then
+        -- constrained template param `Concept<Arg> Name` -> `Name~Concept<Arg>`
+        -- (the param after the `>` is the constrained type, moved in front).
+        local argtext = vim.trim(line:sub(open + 1, close - 1))
+        local pend = close + #ws + #pname
+        hide_inject(bufnr, row0, ms - 1, pend, pname .. spec.sym .. '<' .. argtext .. '>')
+      else
+        local a_s, a_e = arg_span(open, args[1])
+        hide(bufnr, row0, ms - 1, a_s - 1)
+        hide_inject(bufnr, row0, a_e, close, spec.sym)
+      end
     elseif kind == 'call' and #args >= 1 then
       -- F(args): F kept, parens concept-colored, args keep their own colors.
       local f_s, f_e = arg_span(open, args[1])
@@ -342,9 +369,10 @@ end
 -- <typename T, usize N>` -> `<T, usize N>`. Conceals the `template ` keyword and
 -- the `typename`/`class` param kinds. When the next line defines a concept, the
 -- header instead reads `concept<...>` (the `concept` keyword is dropped from the
--- def line by concept_def_line below). The introduced param names get the concept
--- color. Scoped to a line opening with `template`, so a dependent `typename T::x`
--- elsewhere is safe.
+-- def line by concept_def_line below). A bare unary-concept constraint reads as a
+-- postfix: `template <BoolLike A>` -> `<A~BoolLike>`. The introduced param names
+-- get the concept color. Scoped to a line opening with `template`, so a dependent
+-- `typename T::x` elsewhere is safe.
 local function template_header(bufnr, row0, line)
   local indent = line:match '^(%s*)template%s*<'
   if not indent or in_string_or_comment(line, #indent) then
@@ -384,17 +412,27 @@ local function template_header(bufnr, row0, line)
       j = e + 1
     end
   end
-  -- color each introduced param name (the last identifier before a default) in the
-  -- concept color, so the template parameters read as parameters.
+  -- Per param: a bare unary-concept constraint `BoolLike A` (no `<...>`, so the
+  -- find_concept pass above misses it) renders as `A~BoolLike`. Otherwise color the
+  -- introduced name (last identifier before a default) in the concept color, so the
+  -- template parameters read as parameters. The `Concept<Arg> Name` and
+  -- `convertible_to<bool> Name` constrained forms are handled by render_concept.
+  local uset = unary_constraint_set(bufnr)
   for _, arg in ipairs(split_args(line:sub(lt + 1, close - 1))) do
     local atext = arg.text:gsub('%s*=.*$', '')
-    local name, name_off
-    for off, id in atext:gmatch '()([%a_][%w_]*)' do
-      name, name_off = id, off
-    end
-    if name then
-      local col = lt + arg.from + name_off - 2 -- 0-based col of the name
-      pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, col, { end_col = col + #name, hl_group = CONCEPT_HL, priority = 200 })
+    local concept, pname = vim.trim(atext):match '^([%w_:]+)%s+([%a_][%w_]*)$'
+    if concept and uset[concept:gsub('^.*::', '')] then
+      local a_s, a_e = arg_span(lt, arg) -- span of the trimmed `Concept Name`
+      hide_inject(bufnr, row0, a_s - 1, a_e, pname .. '~' .. concept:gsub('^.*::', ''))
+    else
+      local name, name_off
+      for off, id in atext:gmatch '()([%a_][%w_]*)' do
+        name, name_off = id, off
+      end
+      if name then
+        local col = lt + arg.from + name_off - 2 -- 0-based col of the name
+        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, col, { end_col = col + #name, hl_group = CONCEPT_HL, priority = 200 })
+      end
     end
   end
 end
