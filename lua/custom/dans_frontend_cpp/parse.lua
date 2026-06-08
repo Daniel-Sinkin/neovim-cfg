@@ -377,11 +377,13 @@ function M.strip_glfw(t)
 end
 
 -- Trailing identifier of a *pure* member-access chain (`cfg.center` -> "center",
--- `obj->p` -> "p", `center` -> "center"), or nil if `v` is anything else (a call,
--- index, operator, literal). Drives the designated-init pun: `.center = cfg.center`
--- collapses to `center` because the last access already matches the field name.
+-- `obj->p` -> "p", `center` -> "center", `&application_info` -> "application_info"),
+-- or nil if `v` is anything else (a call, index, operator, literal). A leading
+-- address-of is dropped so a `p`-prefixed pointer field puns against `&local`.
+-- Drives the designated-init pun: `.center = cfg.center` collapses to `center`
+-- because the last access already matches the field name.
 function M.access_tail(v)
-  local norm = vim.trim(v):gsub('%s*%->%s*', '.'):gsub('%s*%.%s*', '.')
+  local norm = vim.trim(v):gsub('^&%s*', ''):gsub('%s*%->%s*', '.'):gsub('%s*%.%s*', '.')
   if norm:match '^[%a_][%w_]*$' or norm:match '^[%a_][%w_]*%.[%w_.]*[%w_]$' then
     return norm:match '([%w_]+)$'
   end

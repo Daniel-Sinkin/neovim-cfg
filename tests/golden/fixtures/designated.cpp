@@ -19,6 +19,7 @@ auto from_locals() -> VkDebugUtilsMessengerCreateInfoEXT
     return VkDebugUtilsMessengerCreateInfoEXT{
         .messageSeverity = message_severity,
         .messageType = message_type,
+        .pApplicationInfo = &application_info,
         .pUserData = user_data,
     };
 }
