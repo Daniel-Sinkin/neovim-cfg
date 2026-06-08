@@ -22,9 +22,14 @@ function M.apply()
   -- (bold was too heavy for how dense these are), distinct from the generic macro
   -- purple. The Vk/VK_ prefixes are concealed in markers.lua, so only the
   -- meaningful tail shows in this color.
-  -- Vulkan + OpenGL (Vk/VK_/vk, GL_/gl) -- orange. Same color: same graphics
-  -- domain, never both in one project. Distinct from LLDB's lighter #ff9e64.
-  hi('DansVulkan', { fg = '#ef843c' })
+  -- Vulkan + OpenGL (Vk/VK_/vk, GL_/gl) -- a muted orange. Same color: same
+  -- graphics domain, never both in one project. The user's own vulkan-adjacent
+  -- names (vk_ vars, VK* wrappers) get the brighter DansVulkanMine below; lib vs
+  -- mine read as the same family, brightness telling them apart.
+  hi('DansVulkan', { fg = '#d98248' })
+  -- First-party vulkan: a raw-vk variable (vk_handle) or a thin wrapper type
+  -- (VKBuffer) -- the brighter orange against the muted lib one.
+  hi('DansVulkanMine', { fg = '#ff9540' })
   -- Vulkan Memory Allocator (VMA_/Vma/vma) -- a darker shade of the Vulkan orange,
   -- so it reads as related but a separate library.
   hi('DansVMA', { fg = '#ad5f24' })

@@ -151,7 +151,7 @@ run('member unique_ptr nested deleter', 'struct', { 'std::unique_ptr<std::pair<i
 run('member glfw type (overlay strips prefix)', 'struct', { 'GLFWwindow win{};' }, { 'win: window;' })
 run('member glfw unique_ptr deleter', 'struct', { 'std::unique_ptr<GLFWwindow, WindowDeleter> w{};' }, { 'w: window^, WindowDeleter~;' })
 run('member optional', 'struct', { 'std::optional<int> o{};' }, { 'o: int?;' })
-run('member vulkan null', 'struct', { 'VkBuffer buf{VK_NULL_HANDLE};' }, { 'buf: Buffer = {};' })
+run('member vulkan null', 'struct', { 'VkBuffer buf{VK_NULL_HANDLE};' }, { 'buf: Buffer = nullptr;' })
 run('member vk PFN kept', 'struct', { 'PFN_vkCreateInstance fn{};' }, { 'fn: PFN_vkCreateInstance;' })
 run('member static constexpr', 'struct', { 'static constexpr usize cap{16};' }, { 'cap: usize : 16;' })
 

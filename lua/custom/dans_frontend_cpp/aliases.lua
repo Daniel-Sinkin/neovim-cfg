@@ -8,7 +8,7 @@
 --   noexcept          -> $ne
 --   [[nodiscard]]     -> $nd
 --   static_assert     -> $as
---   VK_NULL_HANDLE    -> {}  (in the Vulkan color)
+--   VK_NULL_HANDLE    -> nullptr  (in the Vulkan color; a clearer disambiguator than {})
 
 local M = {}
 
@@ -31,7 +31,7 @@ local ALIASES = {
   { 'std::runtime_error', '$re' },
   { 'std::unique_ptr', '$up' },
   { 'std::shared_ptr', '$sp' },
-  { 'VK_NULL_HANDLE', '{}', 'DansVulkan' },
+  { 'VK_NULL_HANDLE', 'nullptr', 'DansVulkan' },
 }
 
 -- Exposed so arrow_align.lua can mirror these widths when it computes the

@@ -162,6 +162,8 @@ local function colorize(text)
           out[#out + 1] = { alias[1], alias[2] }
         elseif word:match '^VMA_' or word:match '^Vma' or word:match '^vma%u' then
           out[#out + 1] = { P.strip_glfw(word), 'DansVMA' } -- VMA prefix hidden, darker orange
+        elseif word:match '^VK%u' or word:match '^vk_' then
+          out[#out + 1] = { word, 'DansVulkanMine' } -- user's wrapper/var, not stripped, brighter
         elseif word:match '^Vk' or word:match '^VK_' or word:match '^vk%u' or word:match '^GL_' or word:match '^gl%u' then
           -- prefix hidden in the value too (VK_DEBUG_UTILS_X -> X), matching the
           -- raw-line conceal; strip_glfw leaves lowercase vk functions verbatim.
@@ -241,6 +243,9 @@ local function type_hl(t)
   end
   if t:match '^VMA_' or t:match '^Vma' then
     return 'DansVMA'
+  end
+  if t:match '^VK%u' or t:match '^vk_' then
+    return 'DansVulkanMine' -- the user's wrapper type / raw-vk var, brighter
   end
   if t:match '^Vk' or t:match '^VK_' or t:match '^GL_' then
     return 'DansVulkan'

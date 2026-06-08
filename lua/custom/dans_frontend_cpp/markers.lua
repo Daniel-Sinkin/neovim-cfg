@@ -17,6 +17,7 @@ local MATCH_GROUPS = {
   DansNamespace = true,
   DansMacro = true,
   DansVulkan = true,
+  DansVulkanMine = true,
   DansVMA = true,
   DansSDL = true,
   DansSTB = true,
@@ -226,6 +227,12 @@ local function apply(ev)
   vim.fn.matchadd('DansVulkan', code_only [[\<VK_[A-Z0-9_]*\>]], 25)
   vim.fn.matchadd('DansVulkan', code_only [[\<Vk[A-Za-z0-9_]*\>]], 25)
   vim.fn.matchadd('DansVulkan', code_only [[\<vk[A-Z][A-Za-z0-9_]*\>]], 25)
+  -- First-party vulkan, brighter: `vk_*` (a raw-vk variable -- the `_` keeps it
+  -- off the lib `vk[A-Z]` funcs) and `VK[A-Z]*` (a wrapper type -- the missing
+  -- `_` keeps it off the `VK_` macros). Not stripped; the visible prefix plus the
+  -- brighter color marks it as mine.
+  vim.fn.matchadd('DansVulkanMine', code_only [[\<vk_[A-Za-z0-9_]*\>]], 26)
+  vim.fn.matchadd('DansVulkanMine', code_only [[\<VK[A-Z][A-Za-z0-9_]*\>]], 26)
   -- OpenGL shares the Vulkan color (same graphics domain, never both at once):
   -- GL_* macros and gl* functions.
   vim.fn.matchadd('DansVulkan', code_only [[\<GL_[A-Za-z0-9_]*\>]], 25)
