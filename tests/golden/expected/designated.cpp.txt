@@ -19,6 +19,6 @@ auto from_locals() -> MessengerCreateInfoEXT
     return MessengerCreateInfoEXT{
         messageSeverity,
         messageType,
-        pUserData       = user_data,
+        pUserData,
     };
 }

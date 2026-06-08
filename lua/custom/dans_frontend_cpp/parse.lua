@@ -388,15 +388,21 @@ function M.access_tail(v)
   return nil
 end
 
--- Whether an access-tail matches a field name across naming conventions: strip
--- underscores and lowercase both, so .messageSeverity = message_severity collapses
--- (messageSeverity / message_severity / MessageSeverity / MESSAGE_SEVERITY all
--- compare equal). nil tail never matches.
+-- Whether an access-tail matches a field name across naming conventions: drop a
+-- leading Hungarian pointer prefix (`p`/`pp` before an uppercase letter, as Vulkan
+-- and others use -- pUserData, ppEnabledLayerNames), then strip underscores and
+-- lowercase. So .messageSeverity = message_severity and .pUserData = user_data both
+-- collapse (messageSeverity/message_severity/MessageSeverity/MESSAGE_SEVERITY, and
+-- pUserData/user_data, all compare equal). nil tail never matches.
+local function norm_field(s)
+  s = s:gsub('^pp(%u)', '%1'):gsub('^p(%u)', '%1')
+  return s:gsub('_', ''):lower()
+end
 function M.field_eq(tail, field)
   if not tail or not field then
     return false
   end
-  return tail:gsub('_', ''):lower() == field:gsub('_', ''):lower()
+  return norm_field(tail) == norm_field(field)
 end
 
 -- Split a designated-init body (`.a = x, .b = y`) into { {field, value}, ... } on
