@@ -22,6 +22,14 @@ auto instance_create_info() -> VkInstanceCreateInfo
     };
 }
 
+auto from_moves() -> VkInstanceCreateInfo
+{
+    return VkInstanceCreateInfo{
+        .pApplicationInfo = std::move(application_info),
+        .pUserData = copy(user_data),
+    };
+}
+
 auto from_locals() -> VkDebugUtilsMessengerCreateInfoEXT
 {
     return VkDebugUtilsMessengerCreateInfoEXT{

@@ -22,6 +22,14 @@ auto instance_create_info() -> InstanceCreateInfo
     };
 }
 
+auto from_moves() -> InstanceCreateInfo
+{
+    return InstanceCreateInfo{
+        pApplicationInfo,
+        pUserData,
+    };
+}
+
 auto from_locals() -> MessengerCreateInfoEXT
 {
     return MessengerCreateInfoEXT{
