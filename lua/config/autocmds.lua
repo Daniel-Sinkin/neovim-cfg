@@ -46,6 +46,21 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   end,
 })
 
+-- Split paste registers: a yank goes to register `y`, every change/delete/x goes
+-- to register `z` (TextYankPost fires for y, c and d). Paired with the p/P remaps
+-- in keymaps.lua, `p` pastes the last yank and `P` pastes the last change/delete,
+-- so cutting text never clobbers what you copied. d/x/s all count as the "cut"
+-- side (operator d or c) and land in z.
+vim.api.nvim_create_autocmd('TextYankPost', {
+  desc = 'Route yank -> reg y, change/delete -> reg z',
+  group = vim.api.nvim_create_augroup('dans-paste-registers', { clear = true }),
+  callback = function()
+    local ev = vim.v.event
+    local reg = ev.operator == 'y' and 'y' or 'z'
+    vim.fn.setreg(reg, ev.regcontents, ev.regtype)
+  end,
+})
+
 -- C/C++/CUDA: 4-space tabs and the built-in `cindent`. Treesitter indent is
 -- disabled for these in custom/plugins/treesitter.lua because the frozen master
 -- module goes stale mid-edit and drops the Enter indent to column 0; cindent is

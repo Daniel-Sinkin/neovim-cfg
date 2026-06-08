@@ -10,6 +10,18 @@ vim.keymap.set({ 'n', 'i', 'v' }, '<ScrollWheelDown>', '<C-e><C-e><C-e>', { sile
 
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
+-- Split paste registers (see the TextYankPost router in autocmds.lua): bare `p`
+-- pastes the last yank (register y), bare `P` pastes the last change/delete
+-- (register z). An explicit register is honored -- `"ap` still pastes register a;
+-- only the default `"` is redirected. Mapped in normal + visual; in visual the
+-- replaced selection lands on the cut side, so y survives a paste-over.
+vim.keymap.set({ 'n', 'x' }, 'p', function()
+  return '"' .. (vim.v.register == '"' and 'y' or vim.v.register) .. 'p'
+end, { expr = true, desc = 'Paste last yank (reg y)' })
+vim.keymap.set({ 'n', 'x' }, 'P', function()
+  return '"' .. (vim.v.register == '"' and 'z' or vim.v.register) .. 'P'
+end, { expr = true, desc = 'Paste last change/delete (reg z)' })
+
 -- DANS frontend config menu: toggle modules + common settings (font size).
 vim.keymap.set('n', '<leader>da', function()
   require('custom.dans_menu').open()
