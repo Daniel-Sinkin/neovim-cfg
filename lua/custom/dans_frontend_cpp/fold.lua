@@ -235,6 +235,11 @@ function _G.dans_cpp_foldexpr()
     for _, r in ipairs(static_assert_ranges(lines)) do
       ranges[#ranges + 1] = r
     end
+    -- platform-dead `#if` branches fold (and gray, via ppif's own extmarks), in
+    -- every c/cpp/cuda buffer -- not just headers.
+    for _, r in ipairs(require('custom.dans_frontend_cpp.ppif').inactive_ranges(lines)) do
+      ranges[#ranges + 1] = r
+    end
     if is_hpp(buf) then
       for _, r in ipairs(outline_ranges(buf)) do
         ranges[#ranges + 1] = r

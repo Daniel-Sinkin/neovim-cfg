@@ -60,6 +60,9 @@ function M.apply()
   -- comments back to Comment, #include <...> paths back to Normal.
   hi('DansCommentMask', { link = 'Comment' })
   hi('DansIncludeMask', { link = 'Normal' })
+  -- Dead preprocessor branch (a `#if` inactive on this platform): dimmer than the
+  -- gray above so a whole inactive block recedes as one block of dead code.
+  hi('DansInactive', { fg = '#4a5160' })
   -- Closed contract-block fold line -- gray on the normal background (drops
   -- tokyonight's banded Folded bg; the `+-- N lines:` foldtext reads as quiet).
   hi('Folded', { fg = '#6b7280' })
