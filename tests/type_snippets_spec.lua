@@ -67,6 +67,17 @@ eq('$cc', 'const_cast')
 eq('$dc', 'dynamic_cast')
 eq('$sc$?$int', 'static_cast<std::optional<int>>')
 
+-- casts with a second operand wrap the expression: type + expr (sigil + paren)
+eq('$sc$u32$x', 'static_cast<u32>(x)')
+eq('$rc$int$p', 'reinterpret_cast<int>(p)')
+eq('$cc$Bar$ref', 'const_cast<Bar>(ref)')
+eq('$dc$Foo$base', 'dynamic_cast<Foo>(base)')
+eq('$scast$u32$x', 'static_cast<u32>(x)')
+eq('$sc(u32, x)', 'static_cast<u32>(x)')
+eq('$dc(Foo, base)', 'dynamic_cast<Foo>(base)')
+eq('$sc$u32$x$y', nil) -- too many operands
+eq('$sc(u32, x, y)', nil) -- too many operands
+
 -- rejected: bare unknown identifier (nonsense)
 eq('$sdfgfd', nil)
 eq('$Foo', nil)

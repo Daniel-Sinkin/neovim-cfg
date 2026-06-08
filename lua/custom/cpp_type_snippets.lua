@@ -19,7 +19,8 @@
 --   $^$Foo / $up$Foo / $sp$Foo -> std::unique_ptr<Foo> / shared_ptr<Foo>
 --   $um$K$V / $um(K, V) -> std::unordered_map<K, V>
 --   $map$K$V / $arr$T$N -> std::map<K, V> / std::array<T, N>
---   $sc$u32 / $sc(u32) -> static_cast<u32>   (also $rc / $cc / $dc casts)
+--   $sc$u32$x / $sc(u32, x) -> static_cast<u32>(x)   (also $rc / $cc / $dc casts;
+--                              bare $sc$u32 / $sc(u32) -> static_cast<u32>)
 --   $<T, S>         -> template <typename T, typename S>  (angle form, closing >)
 --   relations (concept ~-notation), prefix or infix:
 --   $~> / $~=       -> std::convertible_to / std::same_as
@@ -55,6 +56,10 @@ local unpack = table.unpack or unpack
 -- expand the same entry: prefix sigils `$um$K$V` and parens `$um(K, V)`.
 --   tbare: the bare form when a `$` follows but no operand is given -- `$?` is the
 --   value std::nullopt, but `$?$` (templated, no arg) is std::optional.
+--   fmt2: an optional one-larger form (arity + 1 operands). The casts use it for
+--   the wrapped-expression form: `$sc$u32` -> static_cast<u32> (fmt, 1 operand),
+--   `$sc$u32$x` -> static_cast<u32>(x) (fmt2, 2 operands). The fold prefers fmt2
+--   when the extra operand is available.
 local TEMPLATES = {
   ['?'] = { bare = 'std::nullopt', tbare = 'std::optional', arity = 1, fmt = 'std::optional<%s>' },
   ['<'] = { bare = 'std::vector', arity = 1, fmt = 'std::vector<%s>' },
@@ -65,9 +70,10 @@ local TEMPLATES = {
   um = { bare = 'std::unordered_map', arity = 2, fmt = 'std::unordered_map<%s, %s>' },
   map = { bare = 'std::map', arity = 2, fmt = 'std::map<%s, %s>' },
   arr = { bare = 'std::array', arity = 2, fmt = 'std::array<%s, %s>' },
-  sc = { bare = 'static_cast', arity = 1, fmt = 'static_cast<%s>' },
-  rc = { bare = 'reinterpret_cast', arity = 1, fmt = 'reinterpret_cast<%s>' },
-  cc = { bare = 'const_cast', arity = 1, fmt = 'const_cast<%s>' },
+  sc = { bare = 'static_cast', arity = 1, fmt = 'static_cast<%s>', fmt2 = 'static_cast<%s>(%s)' },
+  rc = { bare = 'reinterpret_cast', arity = 1, fmt = 'reinterpret_cast<%s>', fmt2 = 'reinterpret_cast<%s>(%s)' },
+  cc = { bare = 'const_cast', arity = 1, fmt = 'const_cast<%s>', fmt2 = 'const_cast<%s>(%s)' },
+  dc = { bare = 'dynamic_cast', arity = 1, fmt = 'dynamic_cast<%s>', fmt2 = 'dynamic_cast<%s>(%s)' },
 }
 
 -- Binary concept relations, infix-capable: `$~>` -> std::convertible_to. The
@@ -96,7 +102,7 @@ do
       local key = type(a[2]) == 'string' and a[2]:match '^%$([%w_]+)$'
       if key and ATOM[key] == nil and not TEMPLATES[key] then
         if type(a[1]) == 'string' and a[1]:match '_cast$' then
-          TEMPLATES[key] = { bare = a[1], arity = 1, fmt = a[1] .. '<%s>' }
+          TEMPLATES[key] = { bare = a[1], arity = 1, fmt = a[1] .. '<%s>', fmt2 = a[1] .. '<%s>(%s)' }
         else
           ATOM[key] = a[1]
         end
@@ -182,12 +188,17 @@ local function expand_fold(segs, templated)
     local seg = segs[i]
     local t = TEMPLATES[seg]
     if t then
-      if #stack >= t.arity then
+      local pop = function(count, fmt)
         local args = {}
-        for _ = 1, t.arity do
+        for _ = 1, count do
           args[#args + 1] = table.remove(stack)
         end
-        stack[#stack + 1] = string.format(t.fmt, unpack(args))
+        stack[#stack + 1] = string.format(fmt, unpack(args))
+      end
+      if t.fmt2 and #stack >= t.arity + 1 then
+        pop(t.arity + 1, t.fmt2) -- the one-larger form (cast type + expression)
+      elseif #stack >= t.arity then
+        pop(t.arity, t.fmt)
       elseif #stack == 0 then
         stack[#stack + 1] = (templated and t.tbare) or t.bare
       else
@@ -243,6 +254,8 @@ local function expand_paren(head, argstr)
     return t.bare
   elseif #args == t.arity then
     return string.format(t.fmt, unpack(args))
+  elseif t.fmt2 and #args == t.arity + 1 then
+    return string.format(t.fmt2, unpack(args))
   end
   return nil
 end
