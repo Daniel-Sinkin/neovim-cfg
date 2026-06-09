@@ -38,6 +38,7 @@ local ALIASES = {
   { 'DANS_PANICF', 'panicf!', 'DansMacro' },
   { 'DANS_PANIC', 'panic!', 'DansMacro' },
   { 'DANS_CHECK_VALID', 'check!', 'DansMacro' },
+  { 'DANS_VK_CHECK', 'check!', 'DansMacro' },
   { 'DANS_FORMAT_WITH_TO_STRING', 'format!', 'DansMacro' },
   { 'DANS_SCOPE_TIMER', 'time!', 'DansMacro' },
 }
