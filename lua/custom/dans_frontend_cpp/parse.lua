@@ -48,6 +48,15 @@ local MARKERS = { 'cpy' }
 -- are pure storage noise. `mut`/`mut_unchecked` and `[[maybe_unused]]` are dropped
 -- (mut is re-inferred from non-const; maybe_unused only matters when missing);
 -- `cpy` is kept as a visible prefix.
+-- Attribute-like leading modifiers dropped from the view (pure noise for the data
+-- model; only their absence ever matters). A whitelist, not a guess -- a leading
+-- macro/attribute NOT listed here stays part of the type, so add new ones here.
+local DROPPED_ATTRS = {
+  '%[%[maybe_unused%]%]',
+  '%[%[no_unique_address%]%]',
+  'DANS_NO_UNIQUE_ADDRESS',
+}
+
 function M.split_markers(s)
   local prefix = ''
   local rest = s
@@ -98,11 +107,14 @@ function M.split_markers(s)
     end
 
     if not matched then
-      -- [[maybe_unused]] is dropped entirely (not shown): the only time it matters
-      -- is when it's MISSING, which clang-tidy flags -- showing it is pure noise.
-      local after_mu = rest:match '^%[%[maybe_unused%]%]%s+(.*)$'
-      if after_mu then
-        rest, matched = after_mu, true
+      -- Drop a whitelisted attribute modifier ([[maybe_unused]], [[no_unique_address]],
+      -- DANS_NO_UNIQUE_ADDRESS, ...): the only time they matter is when MISSING.
+      for _, attr in ipairs(DROPPED_ATTRS) do
+        local a = rest:match('^' .. attr .. '%s+(.*)$')
+        if a then
+          rest, matched = a, true
+          break
+        end
       end
     end
 
