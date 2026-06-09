@@ -195,10 +195,14 @@ local function paint(bufnr, p, hl, prio)
   pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, p.cr, p.cc, { end_col = p.cc + 1, hl_group = hl, priority = prio })
 end
 
--- Per-row bracket marks for the overlay to recolor (raw col + hl), and the rows
--- that were marked last tick (so a cursor move can repaint the ones it left).
+local function paint_one(bufnr, row, col, hl, prio)
+  pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row, col, { end_col = col + 1, hl_group = hl, priority = prio })
+end
+
+-- Per-row marks the overlay recolors (raw col + hl), and last tick's marks so a
+-- cursor move can diff and repaint only the rows whose coloring actually changed.
 local row_marks_cache = {}
-local prev_marked = {}
+local prev_marks = {}
 
 local function update(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) or bufnr ~= vim.api.nvim_get_current_buf() then
@@ -216,40 +220,113 @@ local function update(bufnr)
     end)
   end
   local pos = vim.api.nvim_win_get_cursor(0)
-  local chain = pair_chain(liner(bufnr), bufnr, pos[1] - 1, pos[2], M.depth + 1)
+  local row, col = pos[1] - 1, pos[2]
+  local getline = liner(bufnr)
 
-  -- Paint the raw bracket chars (visible on revealed / non-overlay lines) and record
-  -- the same positions per row so the overlay can recolor the displayed bracket on
-  -- the lines it rewrites (where the raw char is concealed).
-  local marks = {}
+  -- The enclosing bracket chain, innermost out -- generous depth so we find the
+  -- enclosing brace and its ancestor braces, not just the innermost pair.
+  local chain = pair_chain(getline, bufnr, row, col, 64)
+  local region = chain[1] -- innermost enclosing bracket of any kind
+  local brace, brace_idx -- innermost enclosing { } scope
   for i, p in ipairs(chain) do
-    local hl = (i == 1) and 'DansScopeActive' or 'DansScopeParent'
-    paint(bufnr, p, hl, (i == 1) and 200 or 150)
-    marks[p.or_] = marks[p.or_] or {}
-    marks[p.or_][#marks[p.or_] + 1] = { col = p.oc, hl = hl }
-    marks[p.cr] = marks[p.cr] or {}
-    marks[p.cr][#marks[p.cr] + 1] = { col = p.cc, hl = hl }
+    if p.ch == '{' then
+      brace, brace_idx = p, i
+      break
+    end
   end
+
+  local marks = {}
+  local orange = {} -- "row:col" of the orange delimiters, excluded from the blue sweep
+  local function add_mark(r, c, hl)
+    marks[r] = marks[r] or {}
+    marks[r][#marks[r] + 1] = { col = c, hl = hl }
+  end
+  local function paint_pair(p, hl, prio)
+    paint(bufnr, p, hl, prio)
+    add_mark(p.or_, p.oc, hl)
+    add_mark(p.cr, p.cc, hl)
+  end
+  local function mark_orange(p)
+    paint_pair(p, 'DansScopeActive', 200)
+    orange[p.or_ .. ':' .. p.oc] = true
+    orange[p.cr .. ':' .. p.cc] = true
+  end
+
+  -- Orange: the enclosing brace scope is always active, and so is the paren/bracket
+  -- region the cursor sits in (when that isn't the brace itself).
+  if brace then
+    mark_orange(brace)
+  end
+  if region and (not brace or region.or_ ~= brace.or_ or region.oc ~= brace.oc) then
+    mark_orange(region)
+  end
+
+  -- Blue: every other delimiter inside the current brace scope, so its structure
+  -- reads at a glance. Visible rows only -- scanning a whole large scope on each
+  -- cursor move was the original cost.
+  if brace then
+    local vtop = math.max(brace.or_, (vim.fn.line 'w0') - 1)
+    local vbot = math.min(brace.cr, (vim.fn.line 'w$') - 1)
+    for r = vtop, vbot do
+      local line = getline(r) or ''
+      local startc = (r == brace.or_) and brace.oc + 1 or 0
+      local endc = (r == brace.cr) and brace.cc - 1 or #line - 1
+      for c = startc, endc do
+        local ch = line:sub(c + 1, c + 1)
+        if (OPEN[ch] or CLOSE[ch]) and not orange[r .. ':' .. c] and not vu.in_literal(bufnr, r, c) then
+          paint_one(bufnr, r, c, 'DansScopeParent', 150)
+          add_mark(r, c, 'DansScopeParent')
+        end
+      end
+    end
+  end
+
+  -- Blue: the ancestor brace scopes up the chain, capped at the configured depth.
+  local anc = 0
+  for i = (brace_idx or #chain) + 1, #chain do
+    if chain[i].ch == '{' then
+      if anc >= M.depth then
+        break
+      end
+      paint_pair(chain[i], 'DansScopeParent', 150)
+      anc = anc + 1
+    end
+  end
+
   row_marks_cache[bufnr] = marks
 
-  -- Repaint the overlay rows whose marks changed (left ∪ entered) so the displayed
-  -- brackets recolor. Only when the overlay is active; otherwise the raw paint is all.
+  -- Repaint only the overlay rows whose marks changed (the overlay shows the
+  -- brackets the raw paint can't reach). Diff per row so moving inside one scope
+  -- doesn't repaint its whole height.
   local vok, view = pcall(require, 'custom.dans_frontend_cpp.view')
   if vok and view.is_enabled and view.is_enabled(bufnr) then
-    local newset, changed = {}, {}
-    for row in pairs(marks) do
-      newset[row] = true
-      changed[row] = true
+    local function sig(rm)
+      if not rm then
+        return ''
+      end
+      local t = {}
+      for _, m in ipairs(rm) do
+        t[#t + 1] = m.col .. m.hl
+      end
+      table.sort(t)
+      return table.concat(t, ',')
     end
-    for row in pairs(prev_marked[bufnr] or {}) do
-      changed[row] = true
+    local old = prev_marks[bufnr] or {}
+    local rows = {}
+    for r in pairs(marks) do
+      rows[r] = true
     end
-    prev_marked[bufnr] = newset
-    for row in pairs(changed) do
-      pcall(view.render_row, bufnr, row)
+    for r in pairs(old) do
+      rows[r] = true
     end
+    for r in pairs(rows) do
+      if sig(marks[r]) ~= sig(old[r]) then
+        pcall(view.render_row, bufnr, r)
+      end
+    end
+    prev_marks[bufnr] = marks
   else
-    prev_marked[bufnr] = nil
+    prev_marks[bufnr] = nil
   end
 end
 

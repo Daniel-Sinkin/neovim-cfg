@@ -81,6 +81,39 @@ do
   ok('depth 0 yields only the active pair', #one == 1, '#=' .. #one)
 end
 
+-- Coloring model: the enclosing brace is always orange, the paren/bracket region
+-- the cursor is in is also orange, and every other in-scope delimiter is blue.
+do
+  local cl = { '{', '  if (  ())', '}' } -- outer( c5, inner( c8, inner) c9, outer) c10
+  local cb = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_set_current_buf(cb)
+  vim.api.nvim_buf_set_lines(cb, 0, -1, false, cl)
+  vim.bo[cb].filetype = 'cpp'
+  pcall(function()
+    vim.treesitter.get_parser(cb, 'cpp'):parse()
+  end)
+  local cns = vim.api.nvim_get_namespaces()['ds_cpp_scope']
+  local function at(r, c)
+    vim.api.nvim_win_set_cursor(0, { r, c })
+    S.refresh(cb)
+    local out = {}
+    for _, e in ipairs(vim.api.nvim_buf_get_extmarks(cb, cns, 0, -1, { details = true })) do
+      out[e[2] .. ',' .. e[3]] = e[4].hl_group == 'DansScopeActive' and 'O' or 'B'
+    end
+    return out
+  end
+  local function chk(desc, k, expect)
+    local all = true
+    for pos, want in pairs(expect) do
+      all = all and (k[pos] or '-') == want
+    end
+    ok(desc, all, vim.inspect(k):gsub('%s+', ' '))
+  end
+  chk('in-brace: brace orange, all parens blue', at(2, 0), { ['0,0'] = 'O', ['1,5'] = 'B', ['1,8'] = 'B', ['1,9'] = 'B', ['1,10'] = 'B' })
+  chk('outer paren: brace+outer orange, inner blue', at(2, 6), { ['0,0'] = 'O', ['1,5'] = 'O', ['1,10'] = 'O', ['1,8'] = 'B', ['1,9'] = 'B' })
+  chk('inner paren: brace+inner orange, outer blue', at(2, 9), { ['0,0'] = 'O', ['1,8'] = 'O', ['1,9'] = 'O', ['1,5'] = 'B', ['1,10'] = 'B' })
+end
+
 local report = { string.format('scope_spec: %d passed, %d failed', pass, fail) }
 for _, f in ipairs(fails) do
   report[#report + 1] = f
