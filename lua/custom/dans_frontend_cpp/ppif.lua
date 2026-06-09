@@ -42,6 +42,34 @@ local KNOWN = {
   __unix = { mac = true, linux = true },
 }
 
+-- Compiler axis. Conditions on the toolchain (`_MSC_VER`, `__GNUC__`, ...) and the
+-- `__has_cpp_attribute(...)` feature test are evaluated against THIS toolchain --
+-- clang, the compiler you build with. Flip COMPILER if you switch. clang defines
+-- `__GNUC__`/`__GNUG__` for compatibility, so those are true here too.
+local COMPILER = 'clang'
+local COMPILER_MACROS = {
+  __clang__ = { clang = true },
+  __llvm__ = { clang = true },
+  __GNUC__ = { clang = true, gcc = true },
+  __GNUG__ = { clang = true, gcc = true },
+  _MSC_VER = { msvc = true },
+  _MSC_FULL_VER = { msvc = true },
+  _MSVC_LANG = { msvc = true },
+  __MINGW32__ = { mingw = true },
+  __MINGW64__ = { mingw = true },
+  __INTEL_COMPILER = { intel = true },
+}
+
+-- Standard C++ attributes clang supports, so `__has_cpp_attribute(X)` is non-zero
+-- (active). An attribute NOT here is left undecided (nil), never assumed dead.
+local HAS_CPP_ATTR = {}
+for _, a in ipairs {
+  'noreturn', 'carries_dependency', 'deprecated', 'fallthrough', 'nodiscard',
+  'maybe_unused', 'likely', 'unlikely', 'no_unique_address', 'assume',
+} do
+  HAS_CPP_ATTR[a] = true
+end
+
 local _plat
 function M.platform()
   if _plat then
@@ -63,10 +91,14 @@ end
 -- true / false / nil(=unknown) for whether `macro` is defined on `plat`.
 local function eval_defined(macro, plat)
   local k = KNOWN[macro]
-  if not k then
-    return nil
+  if k then
+    return k[plat] == true
   end
-  return k[plat] == true
+  local c = COMPILER_MACROS[macro]
+  if c then
+    return c[COMPILER] == true
+  end
+  return nil
 end
 
 -- Evaluate a `#if`/`#elif` expression to true/false/nil. Handles a single term
@@ -80,8 +112,12 @@ local function eval_expr(expr, plat)
     neg, expr = true, vim.trim(inner)
   end
   local v
+  local attr = expr:match '^__has_cpp_attribute%s*%(%s*([%w_:]+)%s*%)$'
   local m = expr:match '^defined%s*%(%s*([%w_]+)%s*%)$' or expr:match '^defined%s+([%w_]+)$'
-  if m then
+  if attr then
+    -- a vendor-namespaced check (msvc::no_unique_address) tests the bare name.
+    v = HAS_CPP_ATTR[attr:gsub('^.*::', '')] and true or nil
+  elseif m then
     v = eval_defined(m, plat)
   elseif expr:match '^%d+$' then
     v = tonumber(expr) ~= 0
