@@ -273,14 +273,50 @@ local TYPE_ALIAS = {
   double = 'f64',
 }
 
+-- Replace every `optional<BALANCED>` with `BALANCED?`, nested ones included, so
+-- `vector<optional<V>>` -> `vector<V?>` and a trailing ref/ptr is kept naturally
+-- (it's just the text after the matched `>`). Word-boundary, so `my_optional<` is
+-- left alone.
+local function collapse_optional(t)
+  local from = 1
+  while true do
+    local s = t:find('optional<', from, true)
+    if not s then
+      return t
+    end
+    local before = s > 1 and t:sub(s - 1, s - 1) or ''
+    if before:match '[%w_]' then
+      from = s + 8
+    else
+      local depth, close = 0, nil
+      for i = s + 8, #t do
+        local c = t:sub(i, i)
+        if c == '<' then
+          depth = depth + 1
+        elseif c == '>' then
+          depth = depth - 1
+          if depth == 0 then
+            close = i
+            break
+          end
+        end
+      end
+      if not close then
+        return t
+      end
+      t = t:sub(1, s - 1) .. t:sub(s + 9, close - 1) .. '?' .. t:sub(close + 1)
+      from = s
+    end
+  end
+end
+
 function M.strip_type(typ)
   local t = typ:gsub('^constexpr%s+', ''):gsub('^inline%s+', ''):gsub('std::', ''):gsub('dans::', '')
   for from, to in pairs(TYPE_ALIAS) do
     t = t:gsub('%f[%w_]' .. from .. '%f[^%w_]', to)
   end
-  -- std::optional<T> -> T?, keeping any trailing ref/ptr after the `?`:
-  -- optional<T>& -> T?&, optional<T>* -> T?^ (once M.ptr rewrites the star).
-  t = t:gsub('^optional<(.+)>%s*([&*]*)$', '%1?%2')
+  -- std::optional<T> -> T?, at any nesting depth (vector<optional<V>> -> vector<V?>).
+  t = collapse_optional(t)
   -- std::expected<T, E> -> T?E (value, then `?`, then the error arm), keeping any
   -- trailing ref/ptr. Split at the top-level comma so a templated arm
   -- (expected<vector<int>, Error>) isn't broken on its inner comma.
