@@ -60,9 +60,9 @@ local function run(desc, ctx, body, expect)
 end
 
 -- ===================== value declarations (locals -> mut) =====================
-run('local value int', 'fn', { 'int x{7};' }, { 'x: mut int = 7;' })
-run('local value float', 'fn', { 'f32 y{1.0f};' }, { 'y: mut f32 = 1.0f;' })
-run('local value empty-init', 'fn', { 'Vec2 p{};' }, { 'p: mut Vec2;' })
+run('local value int', 'fn', { 'int x{7};' }, { 'mut x: int = 7;' })
+run('local value float', 'fn', { 'f32 y{1.0f};' }, { 'mut y: f32 = 1.0f;' })
+run('local value empty-init', 'fn', { 'Vec2 p{};' }, { 'mut p: Vec2;' })
 run('local const', 'fn', { 'const int x{7};' }, { 'x: int = 7;' })
 run('local constexpr', 'fn', { 'constexpr int x{7};' }, { 'x: int : 7;' })
 run('local static constexpr', 'fn', { 'static constexpr usize n{4};' }, { 'n: usize : 4;' })
@@ -80,7 +80,7 @@ run('vk function value', 'fn', { 'const auto r = vkCreateInstance(&info);' }, { 
 run('auto&& fwd (raw)', 'fn', { 'auto&& z = f();' }, { false })
 
 -- ===================== pointers / references =====================
-run('local pointer', 'fn', { 'int* p{};' }, { 'p: mut int^;' })
+run('local pointer', 'fn', { 'int* p{};' }, { 'mut p: int^;' })
 run('local const pointer', 'fn', { 'const char* s{};' }, { 's: CString;' })
 
 -- ===================== casts inside values =====================
@@ -139,8 +139,8 @@ run('multiline opener', 'fn', { 'auto big = compute(' }, { false })
 -- ===================== members (no mut on value) =====================
 run('member value', 'struct', { 'int x{7};' }, { 'x: int = 7;' })
 run('member empty', 'struct', { 'Vec2 pos{};' }, { 'pos: Vec2;' })
-run('member pointer', 'struct', { 'Foo* ptr{};' }, { 'ptr: mut Foo^;' })
-run('member glfw pointer', 'struct', { 'GLFWwindow* window_{};' }, { 'window_: mut window^;' })
+run('member pointer', 'struct', { 'Foo* ptr{};' }, { 'mut ptr: Foo^;' })
+run('member glfw pointer', 'struct', { 'GLFWwindow* window_{};' }, { 'mut window_: window^;' })
 run('member const pointer', 'struct', { 'const Foo* cptr{};' }, { 'cptr: const Foo^;' })
 run('member array', 'struct', { 'std::array<f32, 3> arr{};' }, { 'arr: [3]f32;' })
 run('member array no-init', 'struct', { 'std::array<f32, 3> arr;' }, { 'no_init arr: [3]f32;' })
@@ -149,8 +149,8 @@ run('member value no-init', 'struct', { 'GLFWbool x;' }, { 'no_init x: bool;' })
 run('member value default-init', 'struct', { 'GLFWbool x{};' }, { 'x: bool;' })
 run('member int no-init', 'struct', { 'int count;' }, { 'no_init count: int;' })
 -- a pointer member is uninitialized garbage too; a reference is ctor-bound, omit
-run('member pointer no-init', 'struct', { 'void* userPointer;' }, { 'no_init userPointer: mut void^;' })
-run('member ref no no_init', 'struct', { 'Foo& ref;' }, { 'ref: mut Foo&;' })
+run('member pointer no-init', 'struct', { 'void* userPointer;' }, { 'no_init userPointer: void^;' })
+run('member ref no no_init', 'struct', { 'Foo& ref;' }, { 'mut ref: Foo&;' })
 -- a bare local stays raw (deferred-init idiom), not flagged
 run('local value no-init stays raw', 'fn', { 'int x;' }, { false })
 
@@ -188,9 +188,9 @@ run('aligned members', 'struct', {
   'Color fill{white};',
   'Foo* ptr{};',
 }, {
-  'position: Vec2;',
-  'fill    : Color = white;',
-  'ptr     : mut Foo^;',
+  '    position: Vec2;',
+  '    fill    : Color = white;',
+  'mut ptr     : Foo^;',
 })
 
 -- ===================== top-level (raw) =====================
@@ -201,24 +201,24 @@ run('using alias (raw)', 'top', { 'using Vec3 = glm::vec3;' }, { false })
 run('multi declarator (raw)', 'fn', { 'int a, b;' }, { false })
 run('multi init (raw)', 'fn', { 'int a = 1, b = 2;' }, { false })
 run('function pointer (raw)', 'fn', { 'void (*fp)(int){};' }, { false })
-run('string init', 'fn', { 'std::string s{"hi"};' }, { 's: mut string = "hi";' })
-run('bool init', 'fn', { 'bool ok{true};' }, { 'ok: mut bool = true;' })
-run('negative init', 'fn', { 'int x{-1};' }, { 'x: mut int = -1;' })
+run('string init', 'fn', { 'std::string s{"hi"};' }, { 'mut s: string = "hi";' })
+run('bool init', 'fn', { 'bool ok{true};' }, { 'mut ok: bool = true;' })
+run('negative init', 'fn', { 'int x{-1};' }, { 'mut x: int = -1;' })
 run('ternary value', 'fn', { 'auto x = a ? b : c;' }, { 'mut x := a ? b : c;' })
-run('dans-namespaced type', 'fn', { 'dans::Foo f{};' }, { 'f: mut Foo;' })
-run('glm-namespaced type', 'fn', { 'glm::vec3 v{};' }, { 'v: mut glm::vec3;' })
-run('ref member', 'struct', { 'Foo& m;' }, { 'm: mut Foo&;' })
+run('dans-namespaced type', 'fn', { 'dans::Foo f{};' }, { 'mut f: Foo;' })
+run('glm-namespaced type', 'fn', { 'glm::vec3 v{};' }, { 'mut v: glm::vec3;' })
+run('ref member', 'struct', { 'Foo& m;' }, { 'mut m: Foo&;' })
 run('const ref member', 'struct', { 'const Foo& m;' }, { 'm: const Foo&;' })
-run('trailing comment', 'fn', { 'int x{7}; // count' }, { 'x: mut int = 7; // count' })
+run('trailing comment', 'fn', { 'int x{7}; // count' }, { 'mut x: int = 7; // count' })
 
 -- ===================== new features =====================
-run('optional local', 'fn', { 'std::optional<Foo> o{};' }, { 'o: mut Foo?;' })
+run('optional local', 'fn', { 'std::optional<Foo> o{};' }, { 'mut o: Foo?;' })
 run('optional pointer', 'struct', { 'std::optional<int> o{};' }, { 'o: int?;' })
-run('optional ref member', 'struct', { 'std::optional<int>& o;' }, { 'o: mut int?&;' })
+run('optional ref member', 'struct', { 'std::optional<int>& o;' }, { 'mut o: int?&;' })
 run('optional const ref member', 'struct', { 'const std::optional<int>& o;' }, { 'o: const int?&;' })
-run('optional ptr member', 'struct', { 'std::optional<int>* o{};' }, { 'o: mut int?^;' })
+run('optional ptr member', 'struct', { 'std::optional<int>* o{};' }, { 'mut o: int?^;' })
 run('expected member', 'struct', { 'std::expected<int, Error> r{};' }, { 'r: int?Error;' })
-run('expected local', 'fn', { 'std::expected<Foo, Err> r{};' }, { 'r: mut Foo?Err;' })
+run('expected local', 'fn', { 'std::expected<Foo, Err> r{};' }, { 'mut r: Foo?Err;' })
 run('expected const ref member', 'struct', { 'const std::expected<int, Err>& r;' }, { 'r: const int?Err&;' })
 run('expected nested arm', 'struct', { 'std::expected<std::vector<int>, Err> r{};' }, { 'r: vector<int>?Err;' })
 run('designated decl pun', 'fn', { 'const Ray r{.origin = origin, .direction = direction};' }, { 'r: Ray = origin, direction;' })
@@ -235,14 +235,14 @@ run('if let value-cmp drop', 'fn', { 'if (const auto res = find(x); res == 0)' }
 run('if let independent cond kept', 'fn', { 'if (auto res = f(); ready)' }, { 'if let res := f(); ready' })
 run('if let compound && kept', 'fn', { 'if (auto res = f(); res.has_value() && ready)' }, { 'if let res := f(); res.has_value() && ready' })
 run('if let compound and-keyword kept', 'fn', { 'if (auto res = m.find(k); res != m.end() and res->ok)' }, { 'if let res := m.find(k); res != m.end() and res->ok' })
-run('static thread_local', 'fn', { 'static thread_local std::mt19937_64 engine{std::random_device{}()};' }, { 'thread_local engine: mut mt19937_64 = random_device{}();' })
+run('static thread_local', 'fn', { 'static thread_local std::mt19937_64 engine{std::random_device{}()};' }, { 'thread_local mut engine: mt19937_64 = random_device{}();' })
 run('if plain (raw)', 'fn', { 'if (ready) {' }, { false })
 run('std move value', 'fn', { 'auto y = std::move(x);' }, { 'mut y := move(x);' })
 run('std forward value', 'fn', { 'auto y = std::forward<T>(x);' }, { 'mut y := forward<T>(x);' })
 run('cast pointer arg', 'fn', { 'auto y = reinterpret_cast<u8*>(p);' }, { 'mut y := $rcast<u8^>(p);' })
 run('cast nested pointer', 'fn', { 'auto z = static_cast<std::vector<int*>>(v);' }, { 'mut z := $scast<vector<int^>>(v);' })
-run('paren init', 'fn', { 'std::vector<stbtt_bakedchar> out(config.codepoint_count);' }, { 'out: mut vector<stbtt_bakedchar>(config.codepoint_count);' })
-run('paren init digit', 'fn', { 'Buffer buf(1024);' }, { 'buf: mut Buffer(1024);' })
+run('paren init', 'fn', { 'std::vector<stbtt_bakedchar> out(config.codepoint_count);' }, { 'mut out: vector<stbtt_bakedchar>(config.codepoint_count);' })
+run('paren init digit', 'fn', { 'Buffer buf(1024);' }, { 'mut buf: Buffer(1024);' })
 run('function decl raw', 'fn', { 'Foo make(Bar);' }, { false })
 
 -- std::move / forward must render red (DansMarkerMut); the text suite can't see hl

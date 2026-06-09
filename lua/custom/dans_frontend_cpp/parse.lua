@@ -709,10 +709,42 @@ function M.field_dims(line)
   return nm, disp
 end
 
--- Map row0 -> { nw, tw } so a run of consecutive explicit-type brace
--- declarations aligns its `:` (after the name) and `=`/`;` (after the type).
--- Singleton runs get no entry (nothing to align).
-function M.compute_align(lines, offset)
+-- Whether the declaration on `line` would render a `mut ` prefix: non-const,
+-- non-constexpr, and either a top-level pointer/reference or a local value. Lets
+-- compute_align reserve the left mut column for a block that has any mut binding.
+function M.field_is_mut(line, bufnr, row0)
+  local code = line:match '^(.-)%s*//.*$' or line
+  if not code:match ';%s*$' then
+    return false
+  end
+  local _, core, was_const, is_constexpr = M.split_markers((code:gsub(';%s*$', '')))
+  if was_const or is_constexpr then
+    return false
+  end
+  local typ = core:match '^(.-)%s+[%w_]+%s*{.*}$' or core:match '^(.-[%w_>][&*]+)%s*[%w_]+$'
+  if not typ or not M.looks_like_type(typ) then
+    return false
+  end
+  local disp = M.strip_type(typ)
+  local depth = 0
+  for i = 1, #disp do
+    local c = disp:sub(i, i)
+    if c == '<' or c == '(' or c == '[' then
+      depth = depth + 1
+    elseif c == '>' or c == ')' or c == ']' then
+      depth = depth - 1
+    elseif (c == '^' or c == '&') and depth == 0 then
+      return true -- top-level ptr/ref is mut regardless of scope
+    end
+  end
+  return bufnr ~= nil and M.decl_kind(bufnr, row0) == 'local'
+end
+
+-- Map row0 -> { nw, tw, has_mut } so a run of consecutive explicit-type brace
+-- declarations aligns its `:` (after the name) and `=`/`;` (after the type), and
+-- reserves the left mut column when any binding in the run is mut. Singleton runs
+-- get no entry (nothing to align).
+function M.compute_align(lines, offset, bufnr)
   offset = offset or 0
   local map = {}
   local i, n = 1, #lines
@@ -723,17 +755,19 @@ function M.compute_align(lines, offset)
       if not nm then
         break
       end
-      block[#block + 1] = { row0 = offset + i - 1, nw = vim.fn.strwidth(nm), tw = vim.fn.strwidth(ty) }
+      local row0 = offset + i - 1
+      block[#block + 1] = { row0 = row0, nw = vim.fn.strwidth(nm), tw = vim.fn.strwidth(ty), mut = M.field_is_mut(lines[i], bufnr, row0) }
       i = i + 1
     end
     if #block >= 2 then
-      local nw, tw = 0, 0
+      local nw, tw, has_mut = 0, 0, false
       for _, b in ipairs(block) do
         nw = math.max(nw, b.nw)
         tw = math.max(tw, b.tw)
+        has_mut = has_mut or b.mut
       end
       for _, b in ipairs(block) do
-        map[b.row0] = { nw = nw, tw = tw }
+        map[b.row0] = { nw = nw, tw = tw, has_mut = has_mut }
       end
     end
     if #block == 0 then

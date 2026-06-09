@@ -829,21 +829,29 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
     else
       disp_typ = shown_typ
     end
-    -- Uninitialized member: indeterminate value (no `{}`), flagged at the very
-    -- start in the mut red so the dangerous fields jump out at the line head.
+    -- The binding's own mutability sits in a left `mut` column, before the name --
+    -- a non-const local value, or any non-const pointer/reference, is `mut`; an
+    -- uninitialized one is `no_init`; in an aligned block the others get a blank
+    -- column so names line up. The pointee/referent const (`const T^`) is part of
+    -- the TYPE, so it stays after the colon with the type.
+    local is_mut = not is_cstring
+      and not sp_inner
+      and not was_const
+      and not is_constexpr
+      and not no_init
+      and (top_level_ptr_ref(shown_typ) or is_local())
     if no_init then
       add('no_init ', 'DansMarkerMut')
+    elseif is_mut then
+      add('mut ', 'DansMarkerMut')
+    elseif align and align.has_mut then
+      add '    ' -- blank mut column, so names align under their mut siblings
     end
     add(nm)
     if align then
       add(string.rep(' ', math.max(0, align.nw - vim.fn.strwidth(nm))))
     end
     add ': '
-    -- Pointers/references carry meaningful constness, so always mark it: `const`
-    -- (grayed) for a const pointee/referent, `mut` otherwise. Plain value types
-    -- keep the const-hidden default and only get `mut` on a non-const local
-    -- (value members/globals aren't marked -- would be noise). constexpr counts
-    -- as const. Placed after the colon like `-> mut T&` so names stay aligned.
     if is_cstring then
       add('CString', 'DansString')
       if #cstring_carets > 1 then
@@ -863,16 +871,9 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
         add('~', mk)
       end
     else
-      if top_level_ptr_ref(shown_typ) then
-        if was_const then
-          -- on a pointer/ref the const is part of the type (const T^ is its own
-          -- type), so color it like the type -- blue void, orange VkX -- not gray.
-          add('const ', type_hl(shown_typ))
-        elseif not is_constexpr then
-          add('mut ', 'DansMarkerMut')
-        end
-      elseif not was_const and not is_constexpr and is_local() and not no_init then
-        add('mut ', 'DansMarkerMut')
+      -- pointee/referent const is part of the type (`const T^`), colored like it.
+      if top_level_ptr_ref(shown_typ) and was_const then
+        add('const ', type_hl(shown_typ))
       end
       add_type(shown_typ)
     end

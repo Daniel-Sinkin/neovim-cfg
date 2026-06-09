@@ -55,7 +55,7 @@ local function align_for(bufnr)
   local c = align_cache[bufnr]
   if not (c and c.tick == tick and c.s0 == s0 and c.e0 == e0) then
     local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
-    c = { tick = tick, s0 = s0, e0 = e0, lines = lines, align = P.compute_align(lines, s0) }
+    c = { tick = tick, s0 = s0, e0 = e0, lines = lines, align = P.compute_align(lines, s0, bufnr) }
     align_cache[bufnr] = c
   end
   return c
