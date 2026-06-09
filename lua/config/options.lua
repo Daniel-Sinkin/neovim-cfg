@@ -70,7 +70,13 @@ vim.opt.timeoutlen = 300
 vim.opt.splitright = true
 vim.opt.splitbelow = true
 vim.opt.list = true
-vim.opt.listchars = { tab = '» ', trail = '·', nbsp = '␣' }
+vim.opt.listchars = { tab = '» ', trail = '·', nbsp = '␣', extends = '>', precedes = '<' }
+-- Never wrap -- long lines (and frontend overlays wider than the raw text) overflow
+-- horizontally instead. `extends` (>) marks a line running off the right edge,
+-- `precedes` (<) one scrolled past the left; sidescroll=1 pans a column at a time
+-- rather than jumping half the window.
+vim.opt.wrap = false
+vim.opt.sidescroll = 1
 vim.opt.inccommand = 'split'
 vim.opt.cursorline = true
 vim.opt.scrolloff = 10
