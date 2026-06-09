@@ -1077,17 +1077,26 @@ function M.recolor_ranges(chunks, line, start_col, ranges)
   local map = align_lcs(raw, disp)
   local add = {} -- 0-based display col -> hl
   for _, rg in ipairs(ranges) do
-    local df, dt
-    for c = rg.from, rg.to do
-      local d = map[c - start_col]
-      if d then
-        df = df and math.min(df, d) or d
-        dt = dt and math.max(dt, d) or d
-      end
-    end
-    if df then
-      for d = df, dt do
+    if rg.from <= start_col and rg.to >= #line - 1 then
+      -- Whole code line: flash the entire rendered text, including the injected and
+      -- reordered tokens (the flipped type, the `mut`/`:` markers, the `=` alignment
+      -- padding) that have no raw column to align to.
+      for d = 0, #disp - 1 do
         add[d] = rg.hl
+      end
+    else
+      local df, dt
+      for c = rg.from, rg.to do
+        local d = map[c - start_col]
+        if d then
+          df = df and math.min(df, d) or d
+          dt = dt and math.max(dt, d) or d
+        end
+      end
+      if df then
+        for d = df, dt do
+          add[d] = rg.hl
+        end
       end
     end
   end
