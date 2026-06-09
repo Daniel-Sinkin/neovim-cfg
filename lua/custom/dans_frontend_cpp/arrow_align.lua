@@ -40,8 +40,11 @@ local function code_of(line)
   return cut and line:sub(1, cut - 1) or line
 end
 
--- 1-based index of the trailing-return `->`, or nil. Skips an `operator->`
--- token if one precedes the real arrow.
+-- 1-based index of the trailing-return `->`, or nil. Skips `operator->` and a
+-- member-access arrow (`platform_->to_string`): a trailing-return arrow follows the
+-- param-list `)` or a qualifier (`const`/`noexcept`/...), never an identifier -- so
+-- a `->` glued to the end of an identifier is member access, not a return arrow.
+local TRAILING_QUAL = { const = true, noexcept = true, override = true, final = true, volatile = true, mutable = true }
 local function arrow_pos(code)
   local from = 1
   while true do
@@ -49,8 +52,15 @@ local function arrow_pos(code)
     if not s then
       return nil
     end
-    if not code:sub(1, s - 1):match 'operator%s*$' then
-      return s
+    local pre = code:sub(1, s - 1)
+    if not pre:match 'operator%s*$' then
+      if not is_word_char(code:sub(s - 1, s - 1)) then
+        return s -- after `)` or whitespace
+      end
+      local word = pre:match '([%w_]+)$'
+      if word and TRAILING_QUAL[word] then
+        return s -- after a qualifier written with no space (`noexcept->`)
+      end
     end
     from = s + 2
   end
