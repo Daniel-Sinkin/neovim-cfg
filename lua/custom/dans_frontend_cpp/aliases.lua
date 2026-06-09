@@ -545,8 +545,48 @@ local function flip_param(p)
   main = vim.trim(main or p)
   -- drop leading attributes ([[maybe_unused]] etc.) -- pure noise, like the decl path
   main = vim.trim(main:gsub('^%s*%[%[.-%]%]%s*', ''))
+  -- Auto-typed param: the type is deduced, so collapse `[cpy] [const] auto[&|&&]
+  -- name` to the sigil form -- `name` (value), `name&` (const ref), `mut name&`
+  -- (non-const ref), `name&&` (forwarding), `cpy name` (heavy value). This is what
+  -- lets a lambda's `const auto& as` read `as&`; concrete params fall through to the
+  -- `name: type` flip below, so lambda and function args stay aligned. Runs before
+  -- the constrained-auto branch, whose `([%w_:]+) auto` pattern would otherwise bind
+  -- a leading `const` as the "concept". `auto*` is left to the concrete path.
+  do
+    local rest = main
+    local has_cpy = rest:match '^cpy%f[%A]' ~= nil
+    if has_cpy then
+      rest = vim.trim(rest:gsub('^cpy%s+', ''))
+    end
+    local a_const = rest:match '^const%f[%A]' ~= nil
+    if a_const then
+      rest = vim.trim(rest:gsub('^const%s+', ''))
+    end
+    local sig, aname = rest:match '^auto%s*(&*)%s*([%w_]+)$'
+    if aname then
+      local chunks = {}
+      if has_cpy then
+        chunks[#chunks + 1] = { 'cpy ', 'DansMarkerCpy' }
+      end
+      if sig == '&' and not a_const then
+        chunks[#chunks + 1] = { 'mut ', 'DansMarkerMut' }
+      end
+      chunks[#chunks + 1] = { aname, 'Normal' }
+      if sig == '&' or sig == '&&' then
+        chunks[#chunks + 1] = { sig, 'Normal' }
+      end
+      if default then
+        chunks[#chunks + 1] = { ' = ', 'Normal' }
+        chunks[#chunks + 1] = { default, 'Normal' }
+      end
+      return chunks
+    end
+  end
+  -- Constrained-auto param `Concept auto[&*] name` -> `name: ~Concept` (+ mut/&/^).
+  -- `const` is excluded -- it's a cv-qualifier the auto-collapse above already ate,
+  -- not a concept.
   local concept, asig, cname = main:match '^([%w_:]+)%s+auto([&*]*)%s*([%w_]+)$'
-  if concept then
+  if concept and concept ~= 'const' then
     local chunks = { { cname, 'Normal' }, { ': ', 'Normal' } }
     if asig == '&' then
       chunks[#chunks + 1] = { 'mut ', 'DansMarkerMut' }
@@ -590,6 +630,10 @@ local function flip_param(p)
   end
   return chunks
 end
+
+-- Shared per-param renderer, reused by the lambda overlay (render.lua) so lambda
+-- and function arguments render identically.
+M.flip_param = flip_param
 
 -- Is the `(` at 1-based col `open` the parameter list of a function declaration
 -- (not a call / `if (...)`)? Treesitter: a function_declarator ancestor.

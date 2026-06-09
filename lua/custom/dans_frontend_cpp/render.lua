@@ -8,14 +8,17 @@ local P = require 'custom.dans_frontend_cpp.parse'
 local M = {}
 
 -- Experimental: render a lambda-assigned-to-auto as a function-style decl,
---   const auto f = [cap](params) -> R   ->   lambda f(cap, params) -> R
--- (intro line only; the body keeps its own indentation). Toggle :LambdaView.
+--   const auto f = [&c](int x) -> R   ->   lambda f(c& | x: int) -> R
+-- args flip like function params (shared aliases.flip_param), and `|` divides the
+-- captures from the params, shown only when the lambda captures (a non-capturing
+-- lambda reads as a plain nested function). Intro line only; the body keeps its
+-- own indentation. Toggle :DansFrontend lambda.
 local lambda_render = true
 local LAMBDA_KEYWORD = 'lambda'
--- Divider between a lambda's capture list and its params, shown whenever there
--- are params: lambda f(& : int x); no capture -> lambda f(: int x); no params
--- -> lambda f(&).
-local LAMBDA_CAP_SEP = ':'
+-- Divider between a lambda's capture list and its params -- shown iff the lambda
+-- captures, so it marks closure state: `lambda f(a& | x: int)`, capture-only
+-- `lambda f(& |)`, non-capturing `lambda f(x: int)` (reads as a nested function).
+local LAMBDA_CAP_SEP = '|'
 -- Range-for binding sigil position: true -> `vertex&` (after the name), false ->
 -- `&vertex` (before it). const is hidden; a non-const binding shows `mut`.
 local FOR_REF_SUFFIX = true
@@ -449,6 +452,89 @@ local function defer_chunks(core, had_semi, bufnr, row0)
   return nil
 end
 
+-- Top-level comma split (depth-aware over <> () [] {}) for lambda capture / param
+-- lists.
+local function split_commas(s)
+  local out, depth, start = {}, 0, 1
+  for i = 1, #s do
+    local c = s:sub(i, i)
+    if c == '<' or c == '(' or c == '[' or c == '{' then
+      depth = depth + 1
+    elseif c == '>' or c == ')' or c == ']' or c == '}' then
+      depth = depth - 1
+    elseif c == ',' and depth == 0 then
+      out[#out + 1] = s:sub(start, i - 1)
+      start = i + 1
+    end
+  end
+  out[#out + 1] = s:sub(start)
+  return out
+end
+
+-- Render a lambda capture list (the text inside `[...]`) to chunks. A by-ref
+-- capture of a simple name flips the `&` to a suffix (`&bs` -> `bs&`), matching the
+-- param ref style; everything else (by-value name, `=`, `&`, `this`, an init
+-- capture) is colorized verbatim.
+local function lambda_capture_chunks(cap)
+  local out = {}
+  if not cap or vim.trim(cap) == '' then
+    return out
+  end
+  local first = true
+  for _, c in ipairs(split_commas(cap)) do
+    local t = vim.trim(c)
+    if t ~= '' then
+      if not first then
+        out[#out + 1] = { ', ', 'Normal' }
+      end
+      first = false
+      local refname = t:match '^&%s*([%w_]+)$'
+      if refname then
+        out[#out + 1] = { refname, 'Normal' }
+        out[#out + 1] = { '&', 'Normal' }
+      else
+        for _, cc in ipairs(colorize(t)) do
+          out[#out + 1] = cc
+        end
+      end
+    end
+  end
+  return out
+end
+
+-- Render a lambda param list (inside `(...)`) to chunks, one per param via the
+-- shared function-param flip (aliases.flip_param) so lambda and function args read
+-- identically: `int x` -> `x: int`, `const auto& a` -> `a&`, `auto& a` -> `mut a&`.
+-- An unparseable param is colorized verbatim.
+local function lambda_param_chunks(params)
+  local out = {}
+  if not params or vim.trim(params) == '' then
+    return out
+  end
+  local ok, A = pcall(require, 'custom.dans_frontend_cpp.aliases')
+  local first = true
+  for _, p in ipairs(split_commas(params)) do
+    local t = vim.trim(p)
+    if t ~= '' then
+      if not first then
+        out[#out + 1] = { ', ', 'Normal' }
+      end
+      first = false
+      local pc = ok and A.flip_param(t) or nil
+      if pc then
+        for _, c in ipairs(pc) do
+          out[#out + 1] = c
+        end
+      else
+        for _, c in ipairs(colorize(t)) do
+          out[#out + 1] = c
+        end
+      end
+    end
+  end
+  return out
+end
+
 local function build_chunks(prefix, core, had_semi, type_hint, align, was_const, is_constexpr, bufnr, row0)
   local dc = defer_chunks(core, had_semi, bufnr, row0)
   if dc then
@@ -668,18 +754,26 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
       add_type(P.strip_type(rettype))
       add ' ='
     elseif lambda_render and cap ~= nil then
-      local has_cap = cap ~= ''
-      local has_params = params ~= nil and params ~= ''
       add(LAMBDA_KEYWORD .. ' ', 'DansLambda')
       add(name)
       add '('
-      if has_cap then
-        add_value(cap)
+      local cap_chunks = lambda_capture_chunks(cap)
+      local param_chunks = lambda_param_chunks(params)
+      local has_params = #param_chunks > 0
+      if #cap_chunks > 0 then
+        -- Captures present: render them, the `|` boundary (the marker of closure
+        -- state), then the params. A non-capturing lambda emits no `|` and reads as
+        -- a plain nested function `lambda f(x: int)`.
+        for _, c in ipairs(cap_chunks) do
+          add(c[1], c[2])
+        end
+        add(' ' .. LAMBDA_CAP_SEP)
+        if has_params then
+          add ' '
+        end
       end
-      if has_params then
-        -- ` : ` after a capture, `: ` without one (no leading space).
-        add(has_cap and (' ' .. LAMBDA_CAP_SEP .. ' ') or (LAMBDA_CAP_SEP .. ' '))
-        add_value(params)
+      for _, c in ipairs(param_chunks) do
+        add(c[1], c[2])
       end
       add ')'
       if rest ~= nil and rest ~= '' then

@@ -87,9 +87,29 @@ run('local const pointer', 'fn', { 'const char* s{};' }, { 's: CString;' })
 run('static_cast value', 'fn', { 'auto v = static_cast<int>(y);' }, { 'mut v := $scast<int>(y);' })
 
 -- ===================== lambdas =====================
-run('lambda cap+params', 'fn', { 'const auto f = [&](int a) { return a; };' }, { 'lambda f(& : int a) { return a; };' })
-run('lambda no cap/params', 'fn', { 'auto g = []() { run(); };' }, { 'lambda g() { run(); };' })
-run('lambda copy cap', 'fn', { 'const auto h = [=](int n) { return n; };' }, { 'lambda h(= : int n) { return n; };' })
+-- Captures and params render like a nested function: concrete params flip to
+-- `name: type`, auto params collapse to the ref-sigil form (`const auto& a` -> `a&`,
+-- `auto& a` -> `mut a&`, `auto&& x` -> `x&&`, `auto x` -> `x`), and `|` divides the
+-- capture list from the params -- shown only when the lambda captures, so a
+-- non-capturing lambda reads as `lambda f(x: int)`. `&a` captures flip to `a&`.
+run('lambda no cap no params', 'fn', { 'auto g = []() { run(); };' }, { 'lambda g() { run(); };' })
+run('lambda concrete param', 'fn', { 'const auto f = [](int x) { return x; };' }, { 'lambda f(x: int) { return x; };' })
+run('lambda const-ref auto param', 'fn', { 'const auto f = [](const auto& as) { return as; };' }, { 'lambda f(as&) { return as; };' })
+run('lambda mut-ref auto param', 'fn', { 'const auto f = [](auto& a) { return a; };' }, { 'lambda f(mut a&) { return a; };' })
+run('lambda fwd-ref auto param', 'fn', { 'const auto f = [](auto&& x) { return x; };' }, { 'lambda f(x&&) { return x; };' })
+run('lambda value auto param', 'fn', { 'const auto f = [](auto x) { return x; };' }, { 'lambda f(x) { return x; };' })
+run('lambda mixed auto+concrete', 'fn', { 'const auto f = [](const auto& as, int x) { return x; };' }, { 'lambda f(as&, x: int) { return x; };' })
+run('lambda concrete const ref', 'fn', { 'const auto f = [](const Foo& foo) { return foo; };' }, { 'lambda f(foo: const Foo&) { return foo; };' })
+run('lambda concrete mut ref', 'fn', { 'const auto f = [](Bar& rw) { return rw; };' }, { 'lambda f(rw: mut Bar&) { return rw; };' })
+run('lambda ref capture + param', 'fn', { 'const auto f = [&bs](auto& a) { return a; };' }, { 'lambda f(bs& | mut a&) { return a; };' })
+run('lambda two ref captures', 'fn', { 'const auto f = [&a, &b](int x, int y) { return x; };' }, { 'lambda f(a&, b& | x: int, y: int) { return x; };' })
+run('lambda value capture', 'fn', { 'const auto f = [count](int x) { return x; };' }, { 'lambda f(count | x: int) { return x; };' })
+run('lambda mixed captures', 'fn', { 'const auto f = [a, &b](int x) { return x; };' }, { 'lambda f(a, b& | x: int) { return x; };' })
+run('lambda blanket ref capture', 'fn', { 'const auto f = [&](int x) { return x; };' }, { 'lambda f(& | x: int) { return x; };' })
+run('lambda blanket copy capture', 'fn', { 'const auto h = [=](int n) { return n; };' }, { 'lambda h(= | n: int) { return n; };' })
+run('lambda capture no params', 'fn', { 'const auto f = [&state]() { return state; };' }, { 'lambda f(state& |) { return state; };' })
+run('lambda trailing return', 'fn', { 'const auto f = [](int x) -> bool { return x > 0; };' }, { 'lambda f(x: int) -> bool { return x > 0; };' })
+run('lambda mutable tail', 'fn', { 'const auto f = [count](u32 n) mutable { return n; };' }, { 'lambda f(count | n: u32) mutable { return n; };' })
 
 -- ===================== structured bindings =====================
 run('structured binding', 'fn', { 'auto [a, b] = pair;' }, { 'mut a, b := pair;' })
