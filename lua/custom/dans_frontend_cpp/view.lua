@@ -242,18 +242,18 @@ end
 
 local function frontend_yank_keymaps(bufnr)
   local o = { buffer = bufnr, silent = true }
-  -- operator: `<leader>y` + a motion / text object (e.g. `<leader>yib`).
-  vim.keymap.set('n', '<leader>y', function()
+  -- operator: `<F2>` + a motion / text object (e.g. `<F2>ib` for the scope).
+  vim.keymap.set('n', '<F2>', function()
     vim.o.operatorfunc = 'v:lua._dans_frontend_yank'
     return 'g@'
   end, vim.tbl_extend('force', o, { expr = true, desc = 'Frontend-copy (operator)' }))
-  -- `<leader>yy` (+count): the rendered view of N lines, like 3yy on the raw text.
-  vim.keymap.set('n', '<leader>yy', function()
+  -- `<F2><F2>` (+count): the rendered view of N lines, like 3yy on the raw text.
+  vim.keymap.set('n', '<F2><F2>', function()
     local r0 = vim.fn.line '.' - 1
     set_yank(M.rendered_text(vim.api.nvim_get_current_buf(), r0, r0 + vim.v.count1 - 1))
   end, vim.tbl_extend('force', o, { desc = 'Frontend-copy N lines' }))
   -- visual: the rendered view of the selected lines.
-  vim.keymap.set('x', '<leader>y', function()
+  vim.keymap.set('x', '<F2>', function()
     local r0, r1 = vim.fn.line 'v' - 1, vim.fn.line '.' - 1
     if r1 < r0 then
       r0, r1 = r1, r0
