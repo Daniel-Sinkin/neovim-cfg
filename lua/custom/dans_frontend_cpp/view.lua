@@ -72,6 +72,15 @@ local function render_one(bufnr, row0, line, set, cfoff, diag, cmt, align)
   end
   local start_col, chunks = R.render_line(line, type_for(bufnr, row0), align[row0], bufnr, row0)
   if start_col then
+    -- Scope highlighter coloring: the raw bracket chars it marks are concealed under
+    -- this overlay, so recolor the matching displayed brackets in our own chunks.
+    local sok, scope = pcall(require, 'custom.dans_frontend_cpp.scope')
+    if sok then
+      local sm = scope.row_marks(bufnr, row0)
+      if sm then
+        chunks = R.recolor(chunks, line, start_col, sm)
+      end
+    end
     pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, start_col, {
       end_col = #line,
       conceal = '',

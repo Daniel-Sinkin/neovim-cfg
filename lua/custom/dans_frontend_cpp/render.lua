@@ -956,4 +956,108 @@ function M.lambda_enabled()
   return lambda_render
 end
 
+-- LCS alignment of two strings: 0-based map from an index in `a` to the index in
+-- `b` it aligns to (nil where `a`'s char has no match). Used to find where a raw
+-- buffer column landed in the overlay's rendered text, so the scope highlighter can
+-- color the bracket you SEE (the overlay's) rather than the concealed raw one. The
+-- two strings are one screen line each, so the O(n*m) table is small.
+local function align_lcs(a, b)
+  local n, m = #a, #b
+  if n == 0 or m == 0 then
+    return {}
+  end
+  local dp = {}
+  for i = 0, n do
+    dp[i] = {}
+    dp[i][0] = 0
+  end
+  for j = 0, m do
+    dp[0][j] = 0
+  end
+  for i = 1, n do
+    local ai = a:sub(i, i)
+    for j = 1, m do
+      if ai == b:sub(j, j) then
+        dp[i][j] = dp[i - 1][j - 1] + 1
+      elseif dp[i - 1][j] >= dp[i][j - 1] then
+        dp[i][j] = dp[i - 1][j]
+      else
+        dp[i][j] = dp[i][j - 1]
+      end
+    end
+  end
+  local map, i, j = {}, n, m
+  while i > 0 and j > 0 do
+    if a:sub(i, i) == b:sub(j, j) and dp[i][j] == dp[i - 1][j - 1] + 1 then
+      map[i - 1] = j - 1
+      i, j = i - 1, j - 1
+    elseif dp[i - 1][j] >= dp[i][j - 1] then
+      i = i - 1
+    else
+      j = j - 1
+    end
+  end
+  return map
+end
+
+-- Recolor the rendered `chunks` so each scope mark lands on the displayed bracket.
+-- `marks` = { { col = raw 0-based buffer column, hl = group } }. Aligns the raw code
+-- (after the indent) to the displayed text, maps each mark's column to a display
+-- position, and -- only when that position is actually a bracket -- splits the
+-- covering chunk to recolor that one character. Returns the (possibly new) chunks;
+-- a mark whose bracket was transformed away by the overlay simply doesn't apply.
+function M.recolor(chunks, line, start_col, marks)
+  if not chunks or not marks or #marks == 0 then
+    return chunks
+  end
+  local parts = {}
+  for _, c in ipairs(chunks) do
+    parts[#parts + 1] = c[1]
+  end
+  local disp = table.concat(parts)
+  local raw = line:sub(start_col + 1)
+  local map = align_lcs(raw, disp)
+  local targets = {} -- 0-based display index -> hl
+  for _, mk in ipairs(marks) do
+    local di = map[mk.col - start_col]
+    if di and disp:sub(di + 1, di + 1):match '[%(%)%[%]{}]' then
+      targets[di] = mk.hl
+    end
+  end
+  if not next(targets) then
+    return chunks
+  end
+  local out, pos = {}, 0
+  for _, c in ipairs(chunks) do
+    local text, hl, len = c[1], c[2], #c[1]
+    local hit = false
+    for di in pairs(targets) do
+      if di >= pos and di < pos + len then
+        hit = true
+        break
+      end
+    end
+    if not hit then
+      out[#out + 1] = c
+    else
+      local seg = 1
+      for k = 1, len do
+        local g = targets[pos + (k - 1)]
+        if g then
+          if k > seg then
+            out[#out + 1] = { text:sub(seg, k - 1), hl }
+          end
+          out[#out + 1] = { text:sub(k, k), g }
+          seg = k + 1
+        end
+      end
+      if seg <= len then
+        out[#out + 1] = { text:sub(seg), hl }
+      end
+    end
+    pos = pos + len
+  end
+  return out
+end
+
 return M

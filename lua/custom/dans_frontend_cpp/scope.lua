@@ -195,6 +195,11 @@ local function paint(bufnr, p, hl, prio)
   pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, p.cr, p.cc, { end_col = p.cc + 1, hl_group = hl, priority = prio })
 end
 
+-- Per-row bracket marks for the overlay to recolor (raw col + hl), and the rows
+-- that were marked last tick (so a cursor move can repaint the ones it left).
+local row_marks_cache = {}
+local prev_marked = {}
+
 local function update(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) or bufnr ~= vim.api.nvim_get_current_buf() then
     return
@@ -212,13 +217,46 @@ local function update(bufnr)
   end
   local pos = vim.api.nvim_win_get_cursor(0)
   local chain = pair_chain(liner(bufnr), bufnr, pos[1] - 1, pos[2], M.depth + 1)
+
+  -- Paint the raw bracket chars (visible on revealed / non-overlay lines) and record
+  -- the same positions per row so the overlay can recolor the displayed bracket on
+  -- the lines it rewrites (where the raw char is concealed).
+  local marks = {}
   for i, p in ipairs(chain) do
-    if i == 1 then
-      paint(bufnr, p, 'DansScopeActive', 200)
-    else
-      paint(bufnr, p, 'DansScopeParent', 150)
-    end
+    local hl = (i == 1) and 'DansScopeActive' or 'DansScopeParent'
+    paint(bufnr, p, hl, (i == 1) and 200 or 150)
+    marks[p.or_] = marks[p.or_] or {}
+    marks[p.or_][#marks[p.or_] + 1] = { col = p.oc, hl = hl }
+    marks[p.cr] = marks[p.cr] or {}
+    marks[p.cr][#marks[p.cr] + 1] = { col = p.cc, hl = hl }
   end
+  row_marks_cache[bufnr] = marks
+
+  -- Repaint the overlay rows whose marks changed (left ∪ entered) so the displayed
+  -- brackets recolor. Only when the overlay is active; otherwise the raw paint is all.
+  local vok, view = pcall(require, 'custom.dans_frontend_cpp.view')
+  if vok and view.is_enabled and view.is_enabled(bufnr) then
+    local newset, changed = {}, {}
+    for row in pairs(marks) do
+      newset[row] = true
+      changed[row] = true
+    end
+    for row in pairs(prev_marked[bufnr] or {}) do
+      changed[row] = true
+    end
+    prev_marked[bufnr] = newset
+    for row in pairs(changed) do
+      pcall(view.render_row, bufnr, row)
+    end
+  else
+    prev_marked[bufnr] = nil
+  end
+end
+
+-- The overlay (view.render_one) reads this to recolor displayed brackets on a row.
+function M.row_marks(bufnr, row)
+  local m = row_marks_cache[bufnr]
+  return m and m[row]
 end
 
 M.refresh = update
