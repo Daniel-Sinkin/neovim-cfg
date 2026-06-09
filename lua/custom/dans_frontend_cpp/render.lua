@@ -609,17 +609,15 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
             -- bare value decl with no initializer (`Type name;`): the value is
             -- indeterminate (no `{}` default-init), so render `name: T` plus a red
             -- `no_init` marker. Array types additionally take the Odin `[N]T` form.
-            -- Non-array types are restricted to members/globals -- a bare local
-            -- (`int x;` assigned later) is an idiom, not worth flagging, and
-            -- widening it would grab two-word non-decl statements in fn bodies.
+            -- decl_kind gates to a real declaration (member/global/local), so a
+            -- statement like `return x;` is never grabbed. const decls aren't
+            -- "garbage" -- a const member is ctor-initialized -- so those stay raw.
+            -- Arrays render at every scope.
             local vtyp, vnm = core:match '^(.-)%s+([%w_]+)$'
             if vtyp and vnm and had_semi and P.looks_like_type(vtyp) then
               local is_array = P.strip_type(vtyp):match '^%[' ~= nil
               local kind = P.decl_kind(bufnr, row0)
-              -- const decls aren't "garbage": a const member is initialized in the
-              -- ctor init-list (or ill-formed), so it's never flagged and non-array
-              -- const stays raw as before. Arrays keep rendering at every scope.
-              if is_array or ((kind == 'member' or kind == 'global') and not was_const) then
+              if is_array or ((kind == 'member' or kind == 'global' or kind == 'local') and not was_const) then
                 typ, nm, no_init = vtyp, vnm, not was_const
               else
                 return nil
@@ -767,10 +765,9 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
         for _, c in ipairs(cap_chunks) do
           add(c[1], c[2])
         end
-        add(' ' .. LAMBDA_CAP_SEP)
-        if has_params then
-          add ' '
-        end
+        -- ` | ` between captures and params; capture-only gets a tight `|` (nothing
+        -- follows, so no surrounding space): `(a& | x: int)` vs `(&|)`.
+        add(has_params and (' ' .. LAMBDA_CAP_SEP .. ' ') or LAMBDA_CAP_SEP)
       end
       for _, c in ipairs(param_chunks) do
         add(c[1], c[2])
@@ -874,7 +871,7 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
         elseif not is_constexpr then
           add('mut ', 'DansMarkerMut')
         end
-      elseif not was_const and not is_constexpr and is_local() then
+      elseif not was_const and not is_constexpr and is_local() and not no_init then
         add('mut ', 'DansMarkerMut')
       end
       add_type(shown_typ)

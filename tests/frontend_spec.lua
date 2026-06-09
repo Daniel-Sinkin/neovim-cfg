@@ -107,7 +107,7 @@ run('lambda value capture', 'fn', { 'const auto f = [count](int x) { return x; }
 run('lambda mixed captures', 'fn', { 'const auto f = [a, &b](int x) { return x; };' }, { 'lambda f(a, b& | x: int) { return x; };' })
 run('lambda blanket ref capture', 'fn', { 'const auto f = [&](int x) { return x; };' }, { 'lambda f(& | x: int) { return x; };' })
 run('lambda blanket copy capture', 'fn', { 'const auto h = [=](int n) { return n; };' }, { 'lambda h(= | n: int) { return n; };' })
-run('lambda capture no params', 'fn', { 'const auto f = [&state]() { return state; };' }, { 'lambda f(state& |) { return state; };' })
+run('lambda capture no params', 'fn', { 'const auto f = [&state]() { return state; };' }, { 'lambda f(state&|) { return state; };' })
 run('lambda trailing return', 'fn', { 'const auto f = [](int x) -> bool { return x > 0; };' }, { 'lambda f(x: int) -> bool { return x > 0; };' })
 run('lambda mutable tail', 'fn', { 'const auto f = [count](u32 n) mutable { return n; };' }, { 'lambda f(count | n: u32) mutable { return n; };' })
 
