@@ -1060,4 +1060,67 @@ function M.recolor(chunks, line, start_col, marks)
   return out
 end
 
+-- Like recolor, but for column RANGES (a yank flash, an LSP reference highlight):
+-- map each raw range to its displayed span and APPEND `hl` to the covered chunks
+-- (the chunk's group becomes a list, so the original fg shows under the highlight's
+-- bg). ranges = { { from, to, hl } }, 0-based inclusive raw buffer columns.
+function M.recolor_ranges(chunks, line, start_col, ranges)
+  if not chunks or not ranges or #ranges == 0 then
+    return chunks
+  end
+  local parts = {}
+  for _, c in ipairs(chunks) do
+    parts[#parts + 1] = c[1]
+  end
+  local disp = table.concat(parts)
+  local raw = line:sub(start_col + 1)
+  local map = align_lcs(raw, disp)
+  local add = {} -- 0-based display col -> hl
+  for _, rg in ipairs(ranges) do
+    local df, dt
+    for c = rg.from, rg.to do
+      local d = map[c - start_col]
+      if d then
+        df = df and math.min(df, d) or d
+        dt = dt and math.max(dt, d) or d
+      end
+    end
+    if df then
+      for d = df, dt do
+        add[d] = rg.hl
+      end
+    end
+  end
+  if not next(add) then
+    return chunks
+  end
+  local function combine(hl, g)
+    if type(hl) == 'table' then
+      return vim.list_extend(vim.deepcopy(hl), { g })
+    end
+    return { hl, g }
+  end
+  local out, pos = {}, 0
+  for _, c in ipairs(chunks) do
+    local text, hl, len = c[1], c[2], #c[1]
+    if len == 0 then
+      out[#out + 1] = c
+    else
+      local seg_start, seg_g = 1, add[pos]
+      for k = 2, len do
+        local g = add[pos + (k - 1)]
+        if g ~= seg_g then
+          local seg = text:sub(seg_start, k - 1)
+          out[#out + 1] = seg_g and { seg, combine(hl, seg_g) } or { seg, hl }
+          seg_start, seg_g = k, g
+        end
+      end
+      local tail = text:sub(seg_start)
+      out[#out + 1] = seg_g and { tail, combine(hl, seg_g) } or { tail, hl }
+      pos = pos + len
+    end
+  end
+  return out
+end
+
 return M

@@ -81,6 +81,14 @@ local function render_one(bufnr, row0, line, set, cfoff, diag, cmt, align)
         chunks = R.recolor(chunks, line, start_col, sm)
       end
     end
+    -- Mirror transient highlights (yank flash, LSP reference) onto the chunks too.
+    local ook, ohl = pcall(require, 'custom.dans_frontend_cpp.overlay_hl')
+    if ook then
+      local rr = ohl.ranges_for(bufnr, row0)
+      if rr then
+        chunks = R.recolor_ranges(chunks, line, start_col, rr)
+      end
+    end
     pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, start_col, {
       end_col = #line,
       conceal = '',

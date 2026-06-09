@@ -90,13 +90,24 @@ return {
             vim.api.nvim_create_autocmd({ 'CursorHold', 'CursorHoldI' }, {
               buffer = event.buf,
               group = highlight_augroup,
-              callback = vim.lsp.buf.document_highlight,
+              callback = function()
+                vim.lsp.buf.document_highlight()
+                -- Mirror the reference highlight onto the frontend overlay too.
+                pcall(function()
+                  require('custom.dans_frontend_cpp.overlay_hl').update_references(event.buf)
+                end)
+              end,
             })
 
             vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
               buffer = event.buf,
               group = highlight_augroup,
-              callback = vim.lsp.buf.clear_references,
+              callback = function()
+                vim.lsp.buf.clear_references()
+                pcall(function()
+                  require('custom.dans_frontend_cpp.overlay_hl').clear_references(event.buf)
+                end)
+              end,
             })
 
             vim.api.nvim_create_autocmd('LspDetach', {

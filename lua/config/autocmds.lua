@@ -42,7 +42,11 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   desc = 'Highlight when yanking (copying) text',
   group = vim.api.nvim_create_augroup('dans-highlight-yank', { clear = true }),
   callback = function()
-    vim.highlight.on_yank()
+    vim.highlight.on_yank { higroup = 'IncSearch' }
+    -- Mirror the flash onto the frontend overlay (the raw flash is concealed there).
+    pcall(function()
+      require('custom.dans_frontend_cpp.overlay_hl').flash_yank(vim.api.nvim_get_current_buf())
+    end)
   end,
 })
 
