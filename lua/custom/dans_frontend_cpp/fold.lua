@@ -5,9 +5,9 @@
 -- header opens as a collapsed table of contents. Named non-detail namespaces are
 -- left open (their members fold individually). foldmethod=expr; folds nest.
 -- Folds are manual: they stay closed while you move or scroll; <CR> on a closed
--- fold (or a left click on it) opens one level. Opened folds stay open until you
--- switch files -- BufEnter re-folds, so a fold state never persists across a file
--- change.
+-- fold (or a left click on it) opens one level. A buffer folds once when first
+-- shown; after that its open/closed state is left alone, so manual opens persist
+-- for the session (a fresh reload folds again). A ripgrep jump opens all folds.
 
 local M = {}
 
@@ -390,15 +390,27 @@ local function set_fold_hl()
   require('custom.dans_frontend_cpp.highlights').apply()
 end
 
--- Re-fold a buffer to all-closed (the manual-open default). Folds only ever open
--- via <CR> / click, so re-closing on BufEnter is what makes opened folds not
--- persist across a file change.
+-- Fold a buffer to all-closed the FIRST time it's shown; afterwards leave its fold
+-- state alone, so manually opened folds persist for the session. The buffer-local
+-- flag is cleared when the buffer unloads, so a fresh load folds again.
 local cpp_ft = { c = true, cpp = true, cuda = true }
-local function refold()
+local function initial_fold()
   if not cpp_ft[vim.bo.filetype] then return end
-  if not vu.module_enabled(vim.api.nvim_get_current_buf(), 'fold') then return end
+  local buf = vim.api.nvim_get_current_buf()
+  if not vu.module_enabled(buf, 'fold') then return end
   if vim.wo.foldmethod ~= 'expr' then return end
+  if vim.b.dans_folded then return end
+  vim.b.dans_folded = true
   pcall(vim.cmd, 'normal! zM')
+end
+
+-- Open every fold and keep the buffer that way -- a ripgrep jump lands here, where
+-- the match would otherwise sit inside a closed fold. Marks it folded so the
+-- first-show fold doesn't re-close it.
+function M.open_all()
+  if not cpp_ft[vim.bo.filetype] then return end
+  vim.b.dans_folded = true
+  pcall(vim.cmd, 'normal! zR')
 end
 
 -- Recompute folds for a buffer after a :DansFrontend toggle: `zx` re-evaluates the
@@ -410,6 +422,7 @@ function M.refresh(bufnr)
   end
   pcall(vim.cmd, 'normal! zx')
   if vu.module_enabled(bufnr, 'fold') then
+    vim.b.dans_folded = true
     pcall(vim.cmd, 'normal! zM')
   end
 end
@@ -440,9 +453,9 @@ function M.setup()
       end, { buffer = true, desc = 'Open the fold under the click' })
     end,
   })
-  -- Re-fold on returning to a file so an opened fold never persists across a file
-  -- change. Replaces the old open-the-cursor's-fold-on-every-CursorMoved behavior.
-  vim.api.nvim_create_autocmd('BufEnter', { group = group, callback = refold })
+  -- Fold a buffer the first time it's shown; leave its state alone after, so opens
+  -- persist for the session.
+  vim.api.nvim_create_autocmd('BufEnter', { group = group, callback = initial_fold })
   vim.api.nvim_create_autocmd('ColorScheme', { group = group, callback = set_fold_hl })
 end
 
