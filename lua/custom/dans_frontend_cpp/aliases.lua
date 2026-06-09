@@ -32,6 +32,14 @@ local ALIASES = {
   { 'std::unique_ptr', '$up' },
   { 'std::shared_ptr', '$sp' },
   { 'VK_NULL_HANDLE', 'nullptr', 'DansVulkan' },
+  -- dans-core macros read as Rust-style bang-macros, kept in the macro color
+  -- (DansMacro) so they still scan as macros, not as gray keyword shorthands.
+  -- DANS_PANIC matches at a word boundary, so it won't fire inside DANS_PANICF.
+  { 'DANS_PANICF', 'panicf!', 'DansMacro' },
+  { 'DANS_PANIC', 'panic!', 'DansMacro' },
+  { 'DANS_CHECK_VALID', 'check!', 'DansMacro' },
+  { 'DANS_FORMAT_WITH_TO_STRING', 'format!', 'DansMacro' },
+  { 'DANS_SCOPE_TIMER', 'time!', 'DansMacro' },
 }
 
 -- Exposed so arrow_align.lua can mirror these widths when it computes the
