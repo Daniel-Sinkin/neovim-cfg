@@ -198,11 +198,77 @@ local function fetch_hints(bufnr)
   end)
 end
 
+-- Render one line as the frontend displays it (no align padding, ignoring the
+-- cursor reveal), for the frontend-copy operator. A non-declaration line has no
+-- overlay, so it comes back raw -- the closest frontend view of a statement.
+local function rendered_line(bufnr, row)
+  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ''
+  local start_col, chunks = R.render_line(line, nil, nil, bufnr, row)
+  if not start_col then
+    return line
+  end
+  local t = { line:sub(1, start_col) }
+  for _, c in ipairs(chunks) do
+    t[#t + 1] = c[1]
+  end
+  return table.concat(t)
+end
+
+-- The frontend view of rows [r0, r1] as a linewise string. Read-only.
+function M.rendered_text(bufnr, r0, r1)
+  local out = {}
+  for row = r0, r1 do
+    out[#out + 1] = rendered_line(bufnr, row)
+  end
+  return table.concat(out, '\n') .. '\n'
+end
+
+-- Put `text` on the unnamed register and `y` (the paste-split's yank side, so a
+-- later `p` pastes it), linewise.
+local function set_yank(text)
+  vim.fn.setreg('"', text, 'V')
+  vim.fn.setreg('y', text, 'V')
+end
+
+-- operatorfunc for `<leader>y{motion/textobj}`: yank the rendered view of the lines
+-- the motion spanned (the `[`..`]` marks). `<leader>yib` copies the scope's lines.
+function _G._dans_frontend_yank(_)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local r0, r1 = vim.fn.line "'[" - 1, vim.fn.line "']" - 1
+  if r1 >= r0 then
+    set_yank(M.rendered_text(bufnr, r0, r1))
+  end
+end
+
+local function frontend_yank_keymaps(bufnr)
+  local o = { buffer = bufnr, silent = true }
+  -- operator: `<leader>y` + a motion / text object (e.g. `<leader>yib`).
+  vim.keymap.set('n', '<leader>y', function()
+    vim.o.operatorfunc = 'v:lua._dans_frontend_yank'
+    return 'g@'
+  end, vim.tbl_extend('force', o, { expr = true, desc = 'Frontend-copy (operator)' }))
+  -- `<leader>yy` (+count): the rendered view of N lines, like 3yy on the raw text.
+  vim.keymap.set('n', '<leader>yy', function()
+    local r0 = vim.fn.line '.' - 1
+    set_yank(M.rendered_text(vim.api.nvim_get_current_buf(), r0, r0 + vim.v.count1 - 1))
+  end, vim.tbl_extend('force', o, { desc = 'Frontend-copy N lines' }))
+  -- visual: the rendered view of the selected lines.
+  vim.keymap.set('x', '<leader>y', function()
+    local r0, r1 = vim.fn.line 'v' - 1, vim.fn.line '.' - 1
+    if r1 < r0 then
+      r0, r1 = r1, r0
+    end
+    set_yank(M.rendered_text(vim.api.nvim_get_current_buf(), r0, r1))
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
+  end, vim.tbl_extend('force', o, { desc = 'Frontend-copy selection' }))
+end
+
 local function enable(bufnr)
   enabled[bufnr] = true
   vim.opt_local.conceallevel = 2
   -- Empty: cursor line is raw WYSIWYG, driven by cursor position not mode.
   vim.opt_local.concealcursor = ''
+  frontend_yank_keymaps(bufnr)
   refresh(bufnr)
   fetch_hints(bufnr)
 end
