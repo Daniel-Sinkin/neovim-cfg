@@ -72,12 +72,21 @@ function M.flash_yank(bufnr)
   if r0 < 0 or r1 < r0 then
     return
   end
+  -- The flash is visual: clamp to the on-screen rows so a whole-file yank
+  -- doesn't build (and 150ms later clear) one range + repaint per buffer line.
+  -- The original endpoints still decide which rows are partial (charwise cols).
+  local or0, or1 = r0, r1
+  local s0, e0 = require('custom.dans_frontend_cpp.util').visible_range(bufnr)
+  r0, r1 = math.max(r0, s0), math.min(r1, e0 - 1)
+  if r1 < r0 then
+    return -- yanked region is entirely off-screen
+  end
   local by_row = {}
   for row = r0, r1 do
     local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ''
     local last = math.max(0, #line - 1)
-    local from = (linewise or row > r0) and 0 or c0
-    local to = (linewise or row < r1) and last or math.min(c1, last)
+    local from = (linewise or row > or0) and 0 or c0
+    local to = (linewise or row < or1) and last or math.min(c1, last)
     by_row[row] = { { from = from, to = to, hl = YANK_HL } }
   end
   set(bufnr, 'yank', by_row)
@@ -102,14 +111,19 @@ function M.update_references(bufnr)
   local enc = clients[1].offset_encoding or 'utf-16'
   local params = vim.lsp.util.make_position_params(0, enc)
   vim.lsp.buf_request_all(bufnr, 'textDocument/documentHighlight', params, function(results)
+    -- Overlay rows only exist on screen; keep the mirror set clamped so a
+    -- symbol with hundreds of references doesn't trigger off-screen repaints.
+    local s0, e0 = require('custom.dans_frontend_cpp.util').visible_range(bufnr)
     local by_row = {}
     for _, res in pairs(results or {}) do
       for _, h in ipairs((res or {}).result or {}) do
         local rng = h.range
         if rng and rng.start.line == rng['end'].line and rng['end'].character > rng.start.character then
           local row = rng.start.line
-          by_row[row] = by_row[row] or {}
-          by_row[row][#by_row[row] + 1] = { from = rng.start.character, to = rng['end'].character - 1, hl = 'LspReferenceText' }
+          if row >= s0 and row < e0 then
+            by_row[row] = by_row[row] or {}
+            by_row[row][#by_row[row] + 1] = { from = rng.start.character, to = rng['end'].character - 1, hl = 'LspReferenceText' }
+          end
         end
       end
     end

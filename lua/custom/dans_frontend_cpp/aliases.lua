@@ -759,12 +759,103 @@ function M.member_mut_col(line, bufnr, row0)
   return close
 end
 
+-- Decorate one line: the concept notation, template-header compaction, the
+-- $-aliases, the param flip, and the mut markers. Shared by the full
+-- visible-range refresh and the two-row cursor repaint (render_rows below).
+local function decorate_line(bufnr, row0, line)
+  -- concept / type-trait `~`-notation (same_as -> ~=, convertible_to -> ~>,
+  -- RefOf/ValueOf/CharLike/..., invocable -> ~(...)). Before the generic loop.
+  concepts(bufnr, row0, line)
+  -- template headers -> compact `<...>` / `concept<...>` (drop template /
+  -- typename / class, color the params); concept def lines drop `concept `.
+  template_header(bufnr, row0, line)
+  concept_def_line(bufnr, row0, line)
+  -- `auto* const x` -> `const auto^ x` (pointer-const moved in front).
+  const_pointer_reorder(bufnr, row0, line)
+  -- ImGui assert macros -> their std spelling, grayed.
+  imgui_asserts(bufnr, row0, line)
+  for _, alias in ipairs(ALIASES) do
+    local keyword, replacement, hl = alias[1], alias[2], alias[3] or 'Comment'
+    local start_pos = 1
+    while true do
+      local s, e = line:find(keyword, start_pos, true)
+      if not s then
+        break
+      end
+      local before = s > 1 and line:sub(s - 1, s - 1) or nil
+      local after = e < #line and line:sub(e + 1, e + 1) or nil
+      -- the templated static_assert<...> is handled above, not as `$sa`.
+      local templated_sa = keyword == 'static_assert' and after == '<'
+      if not is_word_char(before) and not is_word_char(after) and not in_string_or_comment(line, s - 1) and not templated_sa then
+        if replacement == '' then
+          -- hide entirely: conceal the keyword plus one trailing space (if any)
+          -- so the following token doesn't shift, and inject nothing.
+          local ec = (line:sub(e + 1, e + 1) == ' ') and e + 1 or e
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, s - 1, { end_col = ec, conceal = '' })
+        else
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, s - 1, {
+            end_col = e,
+            conceal = '',
+            virt_text = { { replacement, hl } },
+            virt_text_pos = 'inline',
+          })
+        end
+      end
+      start_pos = e + 1
+    end
+  end
+
+  -- Inject `mut` before a non-const reference return type (`-> T&`): the
+  -- mutability can't be annotated in the return position. A const ref shows
+  -- as bare `T&` (const is hidden), so the marker's presence is the
+  -- mut/const distinction. Colored like the mut/mut_unchecked markers.
+  local pre, ws = line:match '^(.-%->)(%s*)'
+  if pre then
+    local rtyp = line:sub(#pre + #ws + 1):gsub('%s*[{;].*$', ''):gsub('%s*$', '')
+    if rtyp:match '&%s*$' and not rtyp:match '&&%s*$' and not rtyp:match '^const%f[%A]' then
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, #pre + #ws, {
+        virt_text = { { 'mut ', 'DansMarkerMut' } },
+        virt_text_pos = 'inline',
+      })
+    end
+  end
+
+  -- Flip the function params: `type name` -> `name: type` (types blue, mut on
+  -- non-const refs). arrow_align mirrors the rendered width via M.flip_params
+  -- so the trailing `->` columns still line up. Skip a special-member line
+  -- (a copy/move ctor collapsed to $copy/$move by special_members) -- flipping
+  -- its `const X&` param would double-render on top of that.
+  local sm_ok, sm = pcall(require, 'custom.dans_frontend_cpp.special_members')
+  local fp = not (sm_ok and sm.covers(bufnr, row0)) and M.flip_params(line, bufnr, row0)
+  if fp then
+    for _, ed in ipairs(fp.edits) do
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, ed.s0, {
+        end_col = ed.e0,
+        conceal = '',
+        virt_text = ed.chunks,
+        virt_text_pos = 'inline',
+      })
+    end
+  end
+
+  -- Inject `mut` right after the param `)` of a non-const member function
+  -- (where the trailing `const` would sit). Leading-space ` mut` so it reads
+  -- `) mut ...` and always lands before any following token -- in particular
+  -- before a `noexcept`, which is rendered as `$ne` at its own later column.
+  local mcol = M.member_mut_col(line, bufnr, row0)
+  if mcol then
+    pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, mcol, {
+      virt_text = { { ' mut', 'DansMarkerMut' } },
+      virt_text_pos = 'inline',
+    })
+  end
+end
+
 local function refresh(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
-  local ft = vim.bo[bufnr].filetype
-  if not vu.is_cpp(ft) then
+  if not vu.is_cpp(vim.bo[bufnr].filetype) then
     return
   end
   if vu.cold_gate(bufnr) then
@@ -778,100 +869,34 @@ local function refresh(bufnr)
 
   -- skip.skip hides our inline aliases on the cursor line (concealcursor shows
   -- the real text there, so the virt_text would otherwise double up like
-  -- `$scstatic_cast`), on diagnostic lines, and on lines the view overlay
-  -- already rewrites (it would orphan our alias to the end of the line).
+  -- `$scstatic_cast`), and on lines the view overlay already rewrites (it would
+  -- orphan our alias to the end of the line).
   local skip = vu.make_skipper(bufnr)
   local s0, e0 = vu.visible_range(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, s0, e0, false)
   for idx, line in ipairs(lines) do
     local row0 = s0 + idx - 1
     if not skip.skip(row0, line) then
-      -- concept / type-trait `~`-notation (same_as -> ~=, convertible_to -> ~>,
-      -- RefOf/ValueOf/CharLike/..., invocable -> ~(...)). Before the generic loop.
-      concepts(bufnr, row0, line)
-      -- template headers -> compact `<...>` / `concept<...>` (drop template /
-      -- typename / class, color the params); concept def lines drop `concept `.
-      template_header(bufnr, row0, line)
-      concept_def_line(bufnr, row0, line)
-      -- `auto* const x` -> `const auto^ x` (pointer-const moved in front).
-      const_pointer_reorder(bufnr, row0, line)
-      -- ImGui assert macros -> their std spelling, grayed.
-      imgui_asserts(bufnr, row0, line)
-      for _, alias in ipairs(ALIASES) do
-        local keyword, replacement, hl = alias[1], alias[2], alias[3] or 'Comment'
-        local start_pos = 1
-        while true do
-          local s, e = line:find(keyword, start_pos, true)
-          if not s then
-            break
-          end
-          local before = s > 1 and line:sub(s - 1, s - 1) or nil
-          local after = e < #line and line:sub(e + 1, e + 1) or nil
-          -- the templated static_assert<...> is handled above, not as `$sa`.
-          local templated_sa = keyword == 'static_assert' and after == '<'
-          if not is_word_char(before) and not is_word_char(after) and not in_string_or_comment(line, s - 1) and not templated_sa then
-            if replacement == '' then
-              -- hide entirely: conceal the keyword plus one trailing space (if any)
-              -- so the following token doesn't shift, and inject nothing.
-              local ec = (line:sub(e + 1, e + 1) == ' ') and e + 1 or e
-              pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, s - 1, { end_col = ec, conceal = '' })
-            else
-              pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, s - 1, {
-                end_col = e,
-                conceal = '',
-                virt_text = { { replacement, hl } },
-                virt_text_pos = 'inline',
-              })
-            end
-          end
-          start_pos = e + 1
-        end
-      end
+      decorate_line(bufnr, row0, line)
+    end
+  end
+end
 
-      -- Inject `mut` before a non-const reference return type (`-> T&`): the
-      -- mutability can't be annotated in the return position. A const ref shows
-      -- as bare `T&` (const is hidden), so the marker's presence is the
-      -- mut/const distinction. Colored like the mut/mut_unchecked markers.
-      local pre, ws = line:match '^(.-%->)(%s*)'
-      if pre then
-        local rtyp = line:sub(#pre + #ws + 1):gsub('%s*[{;].*$', ''):gsub('%s*$', '')
-        if rtyp:match '&%s*$' and not rtyp:match '&&%s*$' and not rtyp:match '^const%f[%A]' then
-          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, #pre + #ws, {
-            virt_text = { { 'mut ', 'DansMarkerMut' } },
-            virt_text_pos = 'inline',
-          })
-        end
-      end
-
-      -- Flip the function params: `type name` -> `name: type` (types blue, mut on
-      -- non-const refs). arrow_align mirrors the rendered width via M.flip_params
-      -- so the trailing `->` columns still line up. Skip a special-member line
-      -- (a copy/move ctor collapsed to $copy/$move by special_members) -- flipping
-      -- its `const X&` param would double-render on top of that.
-      local sm_ok, sm = pcall(require, 'custom.dans_frontend_cpp.special_members')
-      local fp = not (sm_ok and sm.covers(bufnr, row0)) and M.flip_params(line, bufnr, row0)
-      if fp then
-        for _, ed in ipairs(fp.edits) do
-          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, ed.s0, {
-            end_col = ed.e0,
-            conceal = '',
-            virt_text = ed.chunks,
-            virt_text_pos = 'inline',
-          })
-        end
-      end
-
-      -- Inject `mut` right after the param `)` of a non-const member function
-      -- (where the trailing `const` would sit). Leading-space ` mut` so it reads
-      -- `) mut ...` and always lands before any following token -- in particular
-      -- before a `noexcept`, which is rendered as `$ne` at its own later column.
-      local mcol = M.member_mut_col(line, bufnr, row0)
-      if mcol then
-        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row0, mcol, {
-          virt_text = { { ' mut', 'DansMarkerMut' } },
-          virt_text_pos = 'inline',
-        })
-      end
+-- Repaint just the given rows (the two reveal-flipped rows on a plain cursor
+-- move go through here). A row's decoration depends only on its own line, its
+-- neighbors (template header), and the skip set, so this matches what the full
+-- refresh would paint -- without re-running the ~40 keyword scans per visible
+-- line on every j/k.
+local function render_rows(bufnr, rows)
+  if not (vim.api.nvim_buf_is_valid(bufnr) and vu.is_cpp(vim.bo[bufnr].filetype) and vu.module_enabled(bufnr, 'aliases')) then
+    return
+  end
+  local skip = vu.make_skipper(bufnr)
+  for _, row0 in ipairs(rows) do
+    vim.api.nvim_buf_clear_namespace(bufnr, ns, row0, row0 + 1)
+    local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
+    if line and not skip.skip(row0, line) then
+      decorate_line(bufnr, row0, line)
     end
   end
 end
@@ -880,7 +905,9 @@ M.refresh = refresh
 
 function M.setup()
   local group = vim.api.nvim_create_augroup('ds_cpp_aliases', { clear = true })
-  vu.on_decorate(group, { 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI' }, refresh)
+  vu.on_decorate(group, { 'FileType', 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI' }, refresh, function(buf, row)
+    render_rows(buf, { row })
+  end)
 end
 
 return M

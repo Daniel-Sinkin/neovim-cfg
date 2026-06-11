@@ -83,12 +83,33 @@ end
 
 M.refresh = refresh
 
+-- Debounced: the whole-buffer declaration query is too heavy to run per
+-- TextChanged during normal-mode churn (dd spam, macro replay); the lint
+-- catching up ~200ms after the last change is imperceptible for diagnostics.
+local timers = {}
+local function schedule(buf)
+  local t = timers[buf]
+  if t then
+    t:stop()
+  else
+    t = (vim.uv or vim.loop).new_timer()
+    timers[buf] = t
+  end
+  t:start(
+    200,
+    0,
+    vim.schedule_wrap(function()
+      refresh(buf)
+    end)
+  )
+end
+
 function M.setup()
   local group = vim.api.nvim_create_augroup('ds_frontend_lint', { clear = true })
   vim.api.nvim_create_autocmd({ 'FileType', 'BufWritePost', 'InsertLeave', 'TextChanged' }, {
     group = group,
     callback = function(ev)
-      refresh(ev.buf)
+      schedule(ev.buf)
     end,
   })
 end

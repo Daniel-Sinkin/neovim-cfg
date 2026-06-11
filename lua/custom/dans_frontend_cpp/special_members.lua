@@ -128,14 +128,7 @@ M.refresh = refresh
 function M.setup()
   require('custom.dans_frontend_cpp.highlights').apply()
   local group = vim.api.nvim_create_augroup('ds_cpp_special_members', { clear = true })
-  vim.api.nvim_create_autocmd('FileType', {
-    group = group,
-    pattern = { 'c', 'cpp', 'cuda' },
-    callback = function(ev)
-      refresh(ev.buf)
-    end,
-  })
-  vu.on_decorate(group, { 'TextChanged', 'TextChangedI', 'BufEnter', 'CursorMoved', 'CursorMovedI' }, refresh)
+  vu.on_decorate(group, { 'FileType', 'TextChanged', 'TextChangedI', 'BufEnter', 'CursorMoved', 'CursorMovedI' }, refresh)
 end
 
 return M

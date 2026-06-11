@@ -237,13 +237,6 @@ function M.setup()
   scan() -- in case setup runs after VimEnter
 
   local group = vim.api.nvim_create_augroup('ds_macros', { clear = true })
-  vim.api.nvim_create_autocmd('FileType', {
-    group = group,
-    pattern = { 'c', 'cpp', 'cuda' },
-    callback = function(ev)
-      refresh(ev.buf)
-    end,
-  })
   -- a header save can introduce new macros: merge that file's defines, repaint.
   vim.api.nvim_create_autocmd('BufWritePost', {
     group = group,
@@ -253,8 +246,10 @@ function M.setup()
       refresh_all()
     end,
   })
-  -- repaint on edits / cursor moves and the debounced scroll-settled event.
-  vu.on_decorate(group, { 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI' }, refresh)
+  -- repaint on edits and the debounced scroll-settled event. No CursorMoved:
+  -- the coloring doesn't reveal on the cursor line (it conceals nothing), so a
+  -- pure cursor move changes none of its output.
+  vu.on_decorate(group, { 'FileType', 'BufEnter', 'TextChanged', 'TextChangedI' }, refresh)
 
   vim.api.nvim_create_user_command('DansMacrosRescan', scan, { desc = 'Re-scan the project for #define macros' })
   vim.api.nvim_create_user_command('DansMacros', function()
