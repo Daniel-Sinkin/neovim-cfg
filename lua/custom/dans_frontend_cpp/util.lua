@@ -53,6 +53,21 @@ function M.reveal_set(bufnr)
   return { [cur] = true }
 end
 
+-- Whole-buffer line snapshot, one fetch per changedtick. Several per-tick scans
+-- (clang-format-off, the fold map, ppif, the scope bracket index) each pulled
+-- the full buffer on every edit; sharing one snapshot cuts the API calls and
+-- the per-keystroke GC churn on big files.
+local lines_cache = {}
+function M.buf_lines(bufnr)
+  local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+  local c = lines_cache[bufnr]
+  if not (c and c.tick == tick) then
+    c = { tick = tick, lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false) }
+    lines_cache[bufnr] = c
+  end
+  return c.lines
+end
+
 -- 0-based rows inside a `// clang-format off` ... `// clang-format on` region.
 -- Those are hand-aligned (data encoded in code); the frontend leaves them
 -- verbatim so it never fights the manual layout. Cached per changedtick.
@@ -64,7 +79,7 @@ function M.clang_format_off(bufnr)
     return c.set
   end
   local set, off = {}, false
-  for i, line in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+  for i, line in ipairs(M.buf_lines(bufnr)) do
     if line:match '//%s*clang%-format%s+off' then
       off = true
     elseif line:match '//%s*clang%-format%s+on' then
@@ -108,12 +123,15 @@ end
 -- 0-based rows covered by a `static_assert(...)` declaration. Those are dedicated
 -- compile-time checks -- code you skim rarely and want to read with full fidelity
 -- when you do -- so the whole frontend leaves them verbatim (no conceals, sugar,
--- prefix-stripping). Cached per changedtick. Treesitter: `static_assert_declaration`.
+-- prefix-stripping). Cached per changedtick + visible range; every consumer only
+-- tests on-screen rows, and the range-limited query keeps the per-edit cost flat
+-- as the file grows (iter_captures yields any node intersecting the range).
 local sa_cache = {}
 function M.static_assert_lines(bufnr)
   local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+  local s0, e0 = M.visible_range(bufnr)
   local c = sa_cache[bufnr]
-  if c and c.tick == tick then
+  if c and c.tick == tick and c.s0 == s0 and c.e0 == e0 then
     return c.set
   end
   local set = {}
@@ -121,14 +139,14 @@ function M.static_assert_lines(bufnr)
     local parser = vim.treesitter.get_parser(bufnr)
     local tree = parser:parse()[1]
     local q = vim.treesitter.query.parse(parser:lang(), '(static_assert_declaration) @sa')
-    for _, node in q:iter_captures(tree:root(), bufnr, 0, -1) do
+    for _, node in q:iter_captures(tree:root(), bufnr, s0, e0) do
       local sr, _, er = node:range()
       for r = sr, er do
         set[r] = true
       end
     end
   end)
-  sa_cache[bufnr] = { tick = tick, set = set }
+  sa_cache[bufnr] = { tick = tick, s0 = s0, e0 = e0, set = set }
   return set
 end
 
@@ -136,12 +154,14 @@ end
 -- so the frontend leaves them untouched -- a comment is prose, not code. A row is
 -- included when the comment owns the line's first non-blank char (so `code; //
 -- tail` keeps its code, but ` * doc` and `/* ... */` block lines are skipped).
--- Cached per changedtick. Treesitter `(comment)`.
+-- Cached per changedtick + visible range; iterating every comment in the buffer
+-- per keystroke was the single largest slice of insert-mode latency on big files.
 local comment_cache = {}
 function M.comment_lines(bufnr)
   local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+  local s0, e0 = M.visible_range(bufnr)
   local c = comment_cache[bufnr]
-  if c and c.tick == tick then
+  if c and c.tick == tick and c.s0 == s0 and c.e0 == e0 then
     return c.set
   end
   local set = {}
@@ -150,9 +170,9 @@ function M.comment_lines(bufnr)
     local tree = parser:parse()[1]
     local q = vim.treesitter.query.parse(parser:lang(), '(comment) @c')
     local lines
-    for _, node in q:iter_captures(tree:root(), bufnr, 0, -1) do
+    for _, node in q:iter_captures(tree:root(), bufnr, s0, e0) do
       local sr, sc, er = node:range()
-      lines = lines or vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+      lines = lines or M.buf_lines(bufnr)
       local first = lines[sr + 1] and #(lines[sr + 1]:match '^%s*' or '') or 0
       if sc <= first then
         set[sr] = true -- the comment starts the line (no code before it)
@@ -162,7 +182,7 @@ function M.comment_lines(bufnr)
       end
     end
   end)
-  comment_cache[bufnr] = { tick = tick, set = set }
+  comment_cache[bufnr] = { tick = tick, s0 = s0, e0 = e0, set = set }
   return set
 end
 
@@ -386,6 +406,68 @@ function M.is_scrolling()
   return ((vim.uv or vim.loop).hrtime() - last_scroll_ns) < DECORATE_DEBOUNCE_MS * 1000000
 end
 
+-- Diagnostics generation per buffer, bumped on every DiagnosticChanged. Folded
+-- into the paint signature below so a diagnostic update repaints while two
+-- events with identical diagnostics can dedupe. Registered once, before any
+-- module's own DiagnosticChanged handler (the umbrella calls
+-- setup_viewport_debounce first), so the bump is visible to the same event.
+local diag_gen = {}
+local diag_gen_installed = false
+local function ensure_diag_gen()
+  if diag_gen_installed then
+    return
+  end
+  diag_gen_installed = true
+  vim.api.nvim_create_autocmd('DiagnosticChanged', {
+    group = vim.api.nvim_create_augroup('ds_decorate_diag_gen', { clear = true }),
+    callback = function(ev)
+      diag_gen[ev.buf] = (diag_gen[ev.buf] or 0) + 1
+    end,
+  })
+end
+
+-- Everything a decoration pass reads from, as one comparable string: buffer
+-- content (tick), the reveal row, the visible window, mode (visual selection),
+-- the diagnostics, macro-record suspension, and the cold-open state (a gated
+-- pass paints nothing, so the post-cold repaint must not dedupe against it).
+-- Two events with the same signature would paint identical extmarks, so the
+-- second is skipped -- this collapses the FileType+BufEnter double paint on
+-- every file open and repeated BufEnters into one pass per module.
+local function paint_sig(buf)
+  local s0, e0 = M.visible_range(buf)
+  return table.concat({
+    vim.api.nvim_buf_get_changedtick(buf),
+    M.cursor_row0(buf) or -1,
+    s0,
+    e0,
+    vim.fn.mode():sub(1, 1),
+    diag_gen[buf] or 0,
+    recording and 1 or 0,
+    tostring(cold[buf]),
+  }, ':')
+end
+
+-- bufnr-keyed dedup state would go stale when a wiped buffer's number is
+-- recycled (a colliding signature on the new buffer would skip its paint), so
+-- one autocmd clears every registered table's slot on wipe.
+local wipe_tables = {}
+local wipe_installed = false
+local function clear_on_wipe(t)
+  wipe_tables[#wipe_tables + 1] = t
+  if not wipe_installed then
+    wipe_installed = true
+    vim.api.nvim_create_autocmd({ 'BufWipeout', 'BufDelete' }, {
+      group = vim.api.nvim_create_augroup('ds_decorate_buf_wipe', { clear = true }),
+      callback = function(ev)
+        for _, tbl in ipairs(wipe_tables) do
+          tbl[ev.buf] = nil
+        end
+      end,
+    })
+  end
+  return t
+end
+
 -- Register decoration autocmds for `cb` (called with a bufnr): `events` fire it
 -- immediately; the debounced VIEWPORT_SETTLED event drives the scroll repaint.
 -- Do NOT pass WinScrolled in `events` -- scrolling goes through the settled event.
@@ -399,10 +481,23 @@ end
 --   * if `render_row` is given and it's a plain vertical move on unchanged text
 --     (normal mode), repaint ONLY the two flipped rows instead of the whole window.
 --   * otherwise (visual mode, an edit, first paint) fall back to the full `cb`.
+--
+-- Every other event runs through the paint signature: identical signature ->
+-- identical output -> skip.
 function M.on_decorate(group, events, cb, render_row)
-  local last = {} -- buf -> { tick, row }
-  local function note(buf)
-    last[buf] = { tick = vim.api.nvim_buf_get_changedtick(buf), row = M.cursor_row0(buf) }
+  ensure_diag_gen()
+  local last = clear_on_wipe {} -- buf -> { sig, tick, row }
+  local function run(buf)
+    if not vim.api.nvim_buf_is_valid(buf) then
+      return
+    end
+    local sig = paint_sig(buf)
+    local st = last[buf]
+    if st and st.sig == sig then
+      return
+    end
+    cb(buf)
+    last[buf] = { sig = sig, tick = vim.api.nvim_buf_get_changedtick(buf), row = M.cursor_row0(buf) }
   end
   vim.api.nvim_create_autocmd(events, {
     group = group,
@@ -412,29 +507,31 @@ function M.on_decorate(group, events, cb, render_row)
         if M.is_scrolling() then
           return
         end
-        local tick = vim.api.nvim_buf_get_changedtick(buf)
-        local row = M.cursor_row0(buf)
         local st = last[buf]
-        if st and st.tick == tick and st.row == row then
-          return -- nothing the decoration depends on changed
-        end
-        if render_row and st and st.tick == tick and row and st.row and vim.fn.mode():sub(1, 1) == 'n' then
-          render_row(buf, st.row) -- the row we left -> back to overlay
-          render_row(buf, row) -- the row we entered -> raw
-          last[buf] = { tick = tick, row = row }
-          return
+        if st then
+          local tick = vim.api.nvim_buf_get_changedtick(buf)
+          local row = M.cursor_row0(buf)
+          if st.tick == tick and st.row == row then
+            return -- nothing the decoration depends on changed
+          end
+          if render_row and st.tick == tick and row and st.row and vim.fn.mode():sub(1, 1) == 'n' then
+            render_row(buf, st.row) -- the row we left -> back to overlay
+            render_row(buf, row) -- the row we entered -> raw
+            -- sig=false: the incremental paint matches no future signature, so
+            -- the next full event repaints rather than wrongly deduping.
+            last[buf] = { sig = false, tick = tick, row = row }
+            return
+          end
         end
       end
-      cb(buf)
-      note(buf)
+      run(buf)
     end,
   })
   vim.api.nvim_create_autocmd('User', {
     group = group,
     pattern = M.VIEWPORT_SETTLED,
     callback = function(ev)
-      cb(ev.buf)
-      note(ev.buf)
+      run(ev.buf)
     end,
   })
 end
@@ -443,6 +540,7 @@ end
 -- scrolling has been quiet for DECORATE_DEBOUNCE_MS. Called once by the umbrella.
 local scroll_timer
 function M.setup_viewport_debounce()
+  ensure_diag_gen() -- registered before any module handler, so the gen bump runs first
   local group = vim.api.nvim_create_augroup('ds_viewport_debounce', { clear = true })
   vim.api.nvim_create_autocmd('WinScrolled', {
     group = group,
