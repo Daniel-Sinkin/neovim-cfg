@@ -40,37 +40,111 @@ local AROUND = { ['('] = 'a(', ['['] = 'a[', ['{'] = 'a{' }
 -- Ancestor (blue) depth. 0 = active pair only; 1 = + immediate parent (default).
 M.depth = (type(vim.g.dans_scope_depth) == 'number') and vim.g.dans_scope_depth or 1
 
--- A per-call line reader, cached so a back/forward scan touches each row once.
-local function liner(bufnr)
-  local cache = {}
-  return function(r)
-    local v = cache[r]
-    if v == nil then
-      v = vim.api.nvim_buf_get_lines(bufnr, r, r + 1, false)[1] or false
-      cache[r] = v
-    end
-    return v or nil
+-- Per-changedtick bracket index: for every row, the ascending {col, ch} list of
+-- bracket characters OUTSIDE string/char/comment literals. Built in one pass
+-- (a single treesitter query for the literal ranges + one line scan); every
+-- chain walk after that is pure table traversal. This replaces the per-character
+-- vu.in_literal calls (a treesitter node lookup each) that made a single cursor
+-- move cost tens of ms on a large file -- the chain always reaches the
+-- file-spanning namespace brace, so every j/k rescanned to EOF through them.
+local LITERAL_QUERY = [[
+  [(string_literal) (raw_string_literal) (char_literal) (comment) (system_lib_string)] @lit
+]]
+local index_cache = {} -- bufnr -> { tick, rows = { [row0] = { {col0, ch}, ... } } }
+
+local function bracket_index(bufnr)
+  local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+  local c = index_cache[bufnr]
+  if c and c.tick == tick then
+    return c.rows
   end
+  -- literal spans per row; a multi-line literal covers its middle rows whole.
+  local lit = {}
+  pcall(function()
+    local parser = vim.treesitter.get_parser(bufnr)
+    local tree = parser:parse()[1]
+    local q = vim.treesitter.query.parse(parser:lang(), LITERAL_QUERY)
+    for _, node in q:iter_captures(tree:root(), bufnr, 0, -1) do
+      local sr, sc, er, ec = node:range()
+      for r = sr, er do
+        local t = lit[r]
+        if not t then
+          t = {}
+          lit[r] = t
+        end
+        t[#t + 1] = { r == sr and sc or 0, r == er and ec or math.huge }
+      end
+    end
+  end)
+  local rows = {}
+  for i, line in ipairs(vu.buf_lines(bufnr)) do
+    local r = i - 1
+    local lt = lit[r]
+    local out
+    local from = 1
+    while true do
+      local s = line:find('[%(%)%[%]{}]', from)
+      if not s then
+        break
+      end
+      local col = s - 1
+      local in_lit = false
+      if lt then
+        for _, span in ipairs(lt) do
+          if col >= span[1] and col < span[2] then
+            in_lit = true
+            break
+          end
+        end
+      end
+      if not in_lit then
+        out = out or {}
+        out[#out + 1] = { col, line:sub(s, s) }
+      end
+      from = s + 1
+    end
+    rows[r] = out
+  end
+  index_cache[bufnr] = { tick = tick, rows = rows }
+  return rows
+end
+
+-- The indexed bracket char at (row, col), or nil -- nil also for a bracket
+-- inside a literal (absent from the index), which matches the old in_literal
+-- skip.
+local function index_at(rows, row, col)
+  local br = rows[row]
+  if br then
+    for i = 1, #br do
+      local c = br[i][1]
+      if c == col then
+        return br[i][2]
+      end
+      if c > col then
+        break
+      end
+    end
+  end
+  return nil
 end
 
 -- Nearest unmatched OPEN bracket strictly left of (fromr, fromc), i.e. the opener
 -- that encloses the gap just before that position. All bracket kinds share one
--- counter (valid C nests cleanly); literals are skipped. Returns r, c, char.
-local function enclosing_open(getline, bufnr, fromr, fromc)
+-- counter (valid C nests cleanly). Returns r, c, char.
+local function enclosing_open(rows, fromr, fromc)
   local skip = 0
   for r = fromr, 0, -1 do
-    local line = getline(r)
-    if line then
-      local startc = (r == fromr) and (fromc - 1) or (#line - 1)
-      for c = startc, 0, -1 do
-        local ch = line:sub(c + 1, c + 1)
-        if (OPEN[ch] or CLOSE[ch]) and not vu.in_literal(bufnr, r, c) then
+    local br = rows[r]
+    if br then
+      for i = #br, 1, -1 do
+        local col, ch = br[i][1], br[i][2]
+        if r < fromr or col < fromc then
           if CLOSE[ch] then
             skip = skip + 1
           elseif skip > 0 then
             skip = skip - 1
           else
-            return r, c, ch
+            return r, col, ch
           end
         end
       end
@@ -80,23 +154,22 @@ local function enclosing_open(getline, bufnr, fromr, fromc)
 end
 
 -- Type-matching close for the open at (or_, oc). One shared counter: every open
--- deepens, every close unwinds, the depth-0 close is the match. Literals skipped.
-local function match_close(getline, bufnr, or_, oc)
+-- deepens, every close unwinds, the depth-0 close is the match.
+local function match_close(rows, bufnr, or_, oc)
   local depth = 0
   local last = vim.api.nvim_buf_line_count(bufnr) - 1
   for r = or_, last do
-    local line = getline(r)
-    if line then
-      local startc = (r == or_) and oc or 0
-      for c = startc, #line - 1 do
-        local ch = line:sub(c + 1, c + 1)
-        if (OPEN[ch] or CLOSE[ch]) and not vu.in_literal(bufnr, r, c) then
+    local br = rows[r]
+    if br then
+      for i = 1, #br do
+        local col, ch = br[i][1], br[i][2]
+        if r > or_ or col >= oc then
           if OPEN[ch] then
             depth = depth + 1
           else
             depth = depth - 1
             if depth == 0 then
-              return r, c, ch
+              return r, col, ch
             end
           end
         end
@@ -107,21 +180,20 @@ local function match_close(getline, bufnr, or_, oc)
 end
 
 -- Matching open for a close at (cr, cc) -- the mirror of match_close, scanning back.
-local function match_open(getline, bufnr, cr, cc)
+local function match_open(rows, cr, cc)
   local depth = 0
   for r = cr, 0, -1 do
-    local line = getline(r)
-    if line then
-      local startc = (r == cr) and cc or (#line - 1)
-      for c = startc, 0, -1 do
-        local ch = line:sub(c + 1, c + 1)
-        if (OPEN[ch] or CLOSE[ch]) and not vu.in_literal(bufnr, r, c) then
+    local br = rows[r]
+    if br then
+      for i = #br, 1, -1 do
+        local col, ch = br[i][1], br[i][2]
+        if r < cr or col <= cc then
           if CLOSE[ch] then
             depth = depth + 1
           else
             depth = depth - 1
             if depth == 0 then
-              return r, c, ch
+              return r, col, ch
             end
           end
         end
@@ -131,24 +203,23 @@ local function match_open(getline, bufnr, cr, cc)
   return nil
 end
 
--- Innermost pair enclosing (row, col). If the cursor sits on a bracket, that
--- bracket's pair wins (matching native ib/% feel); otherwise the nearest enclosing
--- open and its match. Returns { or_, oc, cr, cc, ch } (0-based) or nil.
-local function innermost_at(getline, bufnr, row, col)
-  local line = getline(row) or ''
-  local cur = line:sub(col + 1, col + 1)
+-- Innermost pair enclosing (row, col). If the cursor sits on a (non-literal)
+-- bracket, that bracket's pair wins (matching native ib/% feel); otherwise the
+-- nearest enclosing open and its match. Returns { or_, oc, cr, cc, ch } or nil.
+local function innermost_at(rows, bufnr, row, col)
+  local cur = index_at(rows, row, col)
   local or_, oc, ch
-  if OPEN[cur] and not vu.in_literal(bufnr, row, col) then
+  if cur and OPEN[cur] then
     or_, oc, ch = row, col, cur
-  elseif CLOSE[cur] and not vu.in_literal(bufnr, row, col) then
-    or_, oc, ch = match_open(getline, bufnr, row, col)
+  elseif cur and CLOSE[cur] then
+    or_, oc, ch = match_open(rows, row, col)
   else
-    or_, oc, ch = enclosing_open(getline, bufnr, row, col)
+    or_, oc, ch = enclosing_open(rows, row, col)
   end
   if not or_ then
     return nil
   end
-  local cr, cc = match_close(getline, bufnr, or_, oc)
+  local cr, cc = match_close(rows, bufnr, or_, oc)
   if not cr then
     return nil
   end
@@ -157,24 +228,23 @@ end
 
 -- The cursor's scope chain, innermost first: the active pair plus up to `want - 1`
 -- ancestors. Each ancestor is the opener enclosing the previous opener.
-local function pair_chain(getline, bufnr, row, col, want)
+local function pair_chain(rows, bufnr, row, col, want)
   local out = {}
-  local p = innermost_at(getline, bufnr, row, col)
+  local p = innermost_at(rows, bufnr, row, col)
   while p do
     out[#out + 1] = p
     if #out >= want then
       break
     end
-    local nor, noc = enclosing_open(getline, bufnr, p.or_, p.oc)
+    local nor, noc, nch = enclosing_open(rows, p.or_, p.oc)
     if not nor then
       break
     end
-    local ncr, ncc = match_close(getline, bufnr, nor, noc)
+    local ncr, ncc = match_close(rows, bufnr, nor, noc)
     if not ncr then
       break
     end
-    -- The opener char is read off the source line; its kind implies the close.
-    p = { or_ = nor, oc = noc, cr = ncr, cc = ncc, ch = (getline(nor) or ''):sub(noc + 1, noc + 1) }
+    p = { or_ = nor, oc = noc, cr = ncr, cc = ncc, ch = nch }
   end
   return out
 end
@@ -182,12 +252,12 @@ end
 -- Public: the innermost pair around (row, col) in `bufnr`, or nil. For tests and
 -- the text-object dispatch.
 function M.innermost(bufnr, row, col)
-  return innermost_at(liner(bufnr), bufnr, row, col)
+  return innermost_at(bracket_index(bufnr), bufnr, row, col)
 end
 
 -- Public: the scope chain (innermost first), capped at `want`. For tests.
 function M.pair_chain(bufnr, row, col, want)
-  return pair_chain(liner(bufnr), bufnr, row, col, want or (M.depth + 1))
+  return pair_chain(bracket_index(bufnr), bufnr, row, col, want or (M.depth + 1))
 end
 
 local function paint(bufnr, p, hl, prio)
@@ -215,20 +285,14 @@ local function update(bufnr)
     return -- cold open: deferred first pass
   end
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
-  -- Parse so in_literal has a fresh tree (cheap; no-op if already current).
-  local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
-  if ok and parser then
-    pcall(function()
-      parser:parse()
-    end)
-  end
   local pos = vim.api.nvim_win_get_cursor(0)
   local row, col = pos[1] - 1, pos[2]
-  local getline = liner(bufnr)
+  -- The index parses internally when stale, so the tree is fresh here.
+  local rows = bracket_index(bufnr)
 
   -- The enclosing bracket chain, innermost out -- generous depth so we find the
   -- enclosing brace and its ancestor braces, not just the innermost pair.
-  local chain = pair_chain(getline, bufnr, row, col, 64)
+  local chain = pair_chain(rows, bufnr, row, col, 64)
   local region = chain[1] -- innermost enclosing bracket of any kind
   local brace, brace_idx -- innermost enclosing { } scope
   for i, p in ipairs(chain) do
@@ -271,14 +335,16 @@ local function update(bufnr)
     local vtop = math.max(brace.or_, (vim.fn.line 'w0') - 1)
     local vbot = math.min(brace.cr, (vim.fn.line 'w$') - 1)
     for r = vtop, vbot do
-      local line = getline(r) or ''
-      local startc = (r == brace.or_) and brace.oc + 1 or 0
-      local endc = (r == brace.cr) and brace.cc - 1 or #line - 1
-      for c = startc, endc do
-        local ch = line:sub(c + 1, c + 1)
-        if (OPEN[ch] or CLOSE[ch]) and not orange[r .. ':' .. c] and not vu.in_literal(bufnr, r, c) then
-          paint_one(bufnr, r, c, 'DansScopeParent', 150)
-          add_mark(r, c, 'DansScopeParent')
+      local br = rows[r]
+      if br then
+        for i = 1, #br do
+          local c, ch = br[i][1], br[i][2]
+          local after_open = r > brace.or_ or c > brace.oc
+          local before_close = r < brace.cr or c < brace.cc
+          if after_open and before_close and not orange[r .. ':' .. c] then
+            paint_one(bufnr, r, c, 'DansScopeParent', 150)
+            add_mark(r, c, 'DansScopeParent')
+          end
         end
       end
     end
@@ -350,7 +416,7 @@ local function dispatch(map)
   return function()
     local bufnr = vim.api.nvim_get_current_buf()
     local pos = vim.api.nvim_win_get_cursor(0)
-    local p = innermost_at(liner(bufnr), bufnr, pos[1] - 1, pos[2])
+    local p = M.innermost(bufnr, pos[1] - 1, pos[2])
     return (p and map[p.ch]) or ESC
   end
 end
