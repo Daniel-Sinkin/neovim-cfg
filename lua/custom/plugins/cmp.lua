@@ -55,7 +55,27 @@ return {
         vim.notify('LSP completion ' .. state, vim.log.levels.INFO)
       end, { desc = '[T]oggle LSP [C]ompletion' })
 
+      -- While a `$`-snippet block is being typed in C/C++/CUDA the popup would
+      -- only show buffer-word noise on top of the snippet preview
+      -- (cpp_type_snippets renders name + live expansion at eol), so the menu
+      -- yields to the preview for the duration of the block.
+      local cpp_ft = { c = true, cpp = true, cuda = true }
+      local function snippet_block_live()
+        if not cpp_ft[vim.bo.filetype] then
+          return false
+        end
+        local col = vim.api.nvim_win_get_cursor(0)[2]
+        local before = vim.api.nvim_get_current_line():sub(1, col)
+        return before:match '%$[%w_$?<>%^~=%[%]:]*$' ~= nil
+      end
+
       cmp.setup {
+        enabled = function()
+          if vim.bo.buftype == 'prompt' then
+            return false
+          end
+          return not snippet_block_live()
+        end,
         completion = { completeopt = 'menu,menuone,noinsert' },
 
         snippet = {

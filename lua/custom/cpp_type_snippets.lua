@@ -6,10 +6,12 @@
 --
 -- Two call syntaxes for the same templates: prefix sigils `$um$K$V` (outer to
 -- inner, so `$<$?$int` reads vector-of-optional-of-int) and explicit parens
--- `$um(K, V)` (whitespace-stripped, clearer arg count). Arity is enforced -- a
--- one-arg `$um` does nothing, since unordered_map takes two. A segment that isn't
--- a known atom is the literal inner type (`$?$Foo`); a bare unknown `$token` is
--- removed.
+-- `$um(K, V)` (whitespace-stripped, clearer arg count). UNDERSPECIFIED tokens
+-- still expand: every missing operand becomes a literal `$` -- `$um$K` ->
+-- std::unordered_map<K, $> -- so the expansion exists but fails the build until
+-- the `$` is filled in. Only OVERspecified tokens (too many operands) are
+-- rejected. A segment that isn't a known atom is the literal inner type
+-- (`$?$Foo`); a bare unknown `$token` is removed.
 --
 --   $str / $sv / $rv / $ra -> std::string / string_view / ranges::views / ranges
 --   $?              -> std::nullopt   ($?$ / $?(T) give the optional)
@@ -18,15 +20,21 @@
 --   $<$Foo / $>(Foo) -> std::vector<Foo>          (vector is `<`, alias `>`)
 --   $^$Foo / $up$Foo / $sp$Foo -> std::unique_ptr<Foo> / shared_ptr<Foo>
 --   $um$K$V / $um(K, V) -> std::unordered_map<K, V>
+--   $um$K / $um(K)  -> std::unordered_map<K, $>    (missing operand -> `$`)
 --   $map$K$V / $arr$T$N -> std::map<K, V> / std::array<T, N>
+--   $arr$arr$int$5$4 -> std::array<std::array<int, 5>, 4>  (operands fill the
+--                       templates left to right, innermost binding tightest)
+--   $[5]int         -> std::array<int, 5>          (Odin array sugar; nests:
+--   $[4][5]int      -> std::array<std::array<int, 5>, 4>; `$[5]` / `$[]int`
+--                       fill the missing part as `$`; the element may be a
+--                       $form: $[5]$<$int -> std::array<std::vector<int>, 5>)
 --   $sc$u32$x / $sc(u32, x) -> static_cast<u32>(x)   (also $rc / $cc / $dc casts;
 --                              bare $sc$u32 / $sc(u32) -> static_cast<u32>)
 --   $<T, S>         -> template <typename T, typename S>  (angle form, closing >)
 --   relations (concept ~-notation), prefix or infix:
 --   $~> / $~=       -> std::convertible_to / std::same_as
 --   $~>$T$S / $T$~>$S / $~>(T, S) -> std::convertible_to<T, S>
---   $~>$T          -> std::convertible_to<T,        (open, fill the 2nd arg)
---   $T$~>          -> std::convertible_to<T, $>      (literal $ fails the build)
+--   $~>$T / $T$~> / $~>(T) -> std::convertible_to<T, $>  (missing operand -> `$`)
 --   $copy / $copya / $move / $movea
 --                   -> the matching special member of the enclosing class, e.g.
 --                      $copy -> X(const X&), $copya -> def operator=(const X&) -> X&
@@ -36,6 +44,11 @@
 --                                                    type; unresolved $-blocks go)
 -- `$` inside a string is left alone. A block must end at the cursor, so `$sa(`
 -- (trailing non-snippet char) does nothing.
+--
+-- While a `$`-block is being typed, a preview floats at the end of the line:
+-- the snippet's brief name plus the expansion as it stands right now (missing
+-- parts shown as `$`). A partial head previews its prefix matches ($u -> um /
+-- up). See M.preview / the ds_snip_preview autocmds in setup().
 --
 -- This is the inverse of the dans_frontend_cpp view: type the short form, store
 -- real C++, read it back short (the frontend hides std:: and shows optional<T>
@@ -51,9 +64,11 @@ local SIGIL_PAT = vim.pesc(SIGIL)
 local unpack = table.unpack or unpack
 
 -- Templates: `$head` with a fixed arity. 0 operands -> the bare form; exactly
--- `arity` operands -> the `fmt`; any other count is rejected (so `$um$K`, one arg
--- for a two-arg map, does nothing -- proper usage is forced). Both call syntaxes
--- expand the same entry: prefix sigils `$um$K$V` and parens `$um(K, V)`.
+-- `arity` operands -> the `fmt`; FEWER operands fill the missing ones as a
+-- literal `$` (`$um$K` -> std::unordered_map<K, $> -- the expansion always
+-- works, the `$` fails the build until filled in); only MORE operands reject.
+-- Both call syntaxes expand the same entry: prefix sigils `$um$K$V` and parens
+-- `$um(K, V)`.
 --   tbare: the bare form when a `$` follows but no operand is given -- `$?` is the
 --   value std::nullopt, but `$?$` (templated, no arg) is std::optional.
 --   fmt2: an optional one-larger form (arity + 1 operands). The casts use it for
@@ -152,10 +167,11 @@ local function operands(segs, lo, hi)
 end
 
 -- A relation `~>` / `~=` at segment `idx`. Left/right operand counts pick a form:
---   $~>       convertible_to            $~>$T   convertible_to<T,   (open)
---   $~>$T$S   convertible_to<T, S>      $T$~>$S convertible_to<T, S> (infix)
---   $T$~>     convertible_to<T, $>  (the literal $ fails the build, flagging the
---                                    missing operand)
+--   $~>       convertible_to            $~>$T$S convertible_to<T, S> (prefix)
+--   $T$~>$S   convertible_to<T, S> (infix)
+--   $~>$T / $T$~>  convertible_to<T, $>  (the missing operand becomes a literal
+--                                         `$`, which fails the build until filled
+--                                         -- same rule as the templates)
 local function expand_relation(segs, idx)
   local name = RELATIONS[segs[idx]]
   local L = operands(segs, 1, idx - 1)
@@ -167,7 +183,7 @@ local function expand_relation(segs, idx)
   if nl == 0 and nr == 0 then
     return name
   elseif nl == 0 and nr == 1 then
-    return name .. '<' .. R[1] .. ', '
+    return name .. '<' .. R[1] .. ', $>'
   elseif nl == 0 and nr == 2 then
     return name .. '<' .. R[1] .. ', ' .. R[2] .. '>'
   elseif nl == 1 and nr == 1 then
@@ -180,8 +196,11 @@ end
 
 -- Prefix / Polish fold of the segments (right to left), so each template wraps
 -- the operand(s) to its right -- the outer-to-inner nesting (`$<$?$int` ->
--- vector(optional(int))). A template pops exactly its arity; a wrong count
--- rejects. `templated` (a trailing `$`) turns a bare `$?$` into the template.
+-- vector(optional(int))), and operands fill the templates left to right
+-- ($arr$arr$int$5$4 -> array<array<int, 5>, 4>). A template missing operands
+-- fills them as literal `$` ($um$K -> unordered_map<K, $>); zero operands give
+-- the bare name; LEFTOVER operands (too many) reject via the final stack check.
+-- `templated` (a trailing `$`) turns a bare `$?$` into the template.
 local function expand_fold(segs, templated)
   local stack, transformed = {}, false
   for i = #segs, 1, -1 do
@@ -191,18 +210,16 @@ local function expand_fold(segs, templated)
       local pop = function(count, fmt)
         local args = {}
         for _ = 1, count do
-          args[#args + 1] = table.remove(stack)
+          args[#args + 1] = table.remove(stack) or '$' -- missing operand -> `$`
         end
         stack[#stack + 1] = string.format(fmt, unpack(args))
       end
       if t.fmt2 and #stack >= t.arity + 1 then
         pop(t.arity + 1, t.fmt2) -- the one-larger form (cast type + expression)
-      elseif #stack >= t.arity then
-        pop(t.arity, t.fmt)
-      elseif #stack == 0 then
-        stack[#stack + 1] = (templated and t.tbare) or t.bare
+      elseif #stack > 0 then
+        pop(t.arity, t.fmt) -- underspecified operands fill as `$`
       else
-        return nil -- wrong operand count for this template
+        stack[#stack + 1] = (templated and t.tbare) or t.bare
       end
       transformed = true
     elseif ATOM[seg] then
@@ -245,6 +262,8 @@ local function expand_paren(head, argstr)
   if rel then
     if #args == 0 then
       return rel
+    elseif #args == 1 then
+      return rel .. '<' .. args[1] .. ', $>' -- missing operand -> `$`
     elseif #args == 2 then
       return rel .. '<' .. args[1] .. ', ' .. args[2] .. '>'
     end
@@ -256,6 +275,14 @@ local function expand_paren(head, argstr)
     return string.format(t.fmt, unpack(args))
   elseif t.fmt2 and #args == t.arity + 1 then
     return string.format(t.fmt2, unpack(args))
+  elseif #args < t.arity then
+    -- underspecified: fill the missing operands as literal `$` (same as the
+    -- sigil form), so $um(K) -> std::unordered_map<K, $>.
+    local filled = {}
+    for i = 1, t.arity do
+      filled[i] = args[i] or '$'
+    end
+    return string.format(t.fmt, unpack(filled))
   end
   return nil
 end
@@ -268,6 +295,42 @@ end
 function M.expand(token)
   if token:sub(1, #SIGIL) ~= SIGIL then
     return nil
+  end
+  -- Odin array sugar `$[N]T` -> std::array<T, N>. Dims nest left to right
+  -- ($[4][5]int -> std::array<std::array<int, 5>, 4>), a missing dim or element
+  -- fills as `$` ($[5] -> std::array<$, 5>, $[]int -> std::array<int, $>), and
+  -- the element may itself be a $form ($[5]$<$int -> array<vector<int>, 5>).
+  if token:sub(#SIGIL + 1, #SIGIL + 1) == '[' then
+    local rest = token:sub(#SIGIL + 1)
+    local dims = {}
+    while true do
+      local d, r = rest:match '^%[([^%[%]]*)%](.*)$'
+      if not d then
+        break
+      end
+      dims[#dims + 1] = vim.trim(d)
+      rest = r
+    end
+    if #dims == 0 then
+      return nil -- `$[` with no closing `]` isn't a complete block
+    end
+    local elem
+    if rest == '' then
+      elem = '$'
+    elseif rest:sub(1, #SIGIL) == SIGIL then
+      elem = M.expand(rest)
+      if not elem then
+        return nil
+      end
+    elseif rest:match '^[%w_:]+$' then
+      elem = rest
+    else
+      return nil
+    end
+    for i = #dims, 1, -1 do
+      elem = string.format('std::array<%s, %s>', elem, dims[i] == '' and '$' or dims[i])
+    end
+    return elem
   end
   -- angle form `$<T, S>` -> `template <typename T, typename S>`: each bare
   -- identifier becomes a `typename` param, a multi-token arg (e.g. `usize N`) is
@@ -383,6 +446,17 @@ end
 -- so nothing fires. Exposed for headless tests.
 function M.resolve(line, col, class_fn)
   local before = line:sub(1, col)
+  -- Odin array sugar `$[N]T` ending at the cursor: `[`/`]` are NOT in the
+  -- generic run class below (indexing like `m[$i]` must not be grabbed), so a
+  -- block that STARTS with `$[` is matched explicitly here.
+  local arr = before:match('(' .. SIGIL_PAT .. '%[[%w_$?<>%^~=%[%]:]*)$')
+  if arr then
+    local abs0 = col - #arr
+    if not in_string(line, abs0) then
+      local atext = M.expand(arr)
+      return { action = atext and 'expand' or 'remove', bs = abs0, text = atext }
+    end
+  end
   -- paren form `$head(...)` ending at the cursor: balanced parens, so it may hold
   -- spaces / commas the run scan below would stop at. Tried first.
   local paren = before:match('(' .. SIGIL_PAT .. '[%w_?<>%^~=]+%b())$')
@@ -433,6 +507,151 @@ function M.resolve(line, col, class_fn)
     return { action = 'expand', bs = bs, text = text }
   end
   return { action = 'remove', bs = bs }
+end
+
+-- The live `$`-block ending at 0-based `col` (the token being typed), or nil.
+-- Same scanning as resolve, minus the expansion: array sugar, paren form, angle
+-- form, then the plain sigil run. Used by the preview.
+local function block_at(line, col)
+  local before = line:sub(1, col)
+  for _, pat in ipairs {
+    SIGIL_PAT .. '%[[%w_$?<>%^~=%[%]:]*', -- array sugar `$[N]T`
+    SIGIL_PAT .. '[%w_?<>%^~=]+%b()', -- paren form `$head(...)`
+    SIGIL_PAT .. '<[^<>]*>', -- angle template form `$<T, S>`
+  } do
+    local b = before:match('(' .. pat .. ')$')
+    if b then
+      local bs = col - #b
+      if not in_string(line, bs) then
+        return b, bs
+      end
+      return nil
+    end
+  end
+  local run = before:match '([%w_$?<>%^~=]*)$'
+  if run and run ~= '' then
+    local p = run:find(SIGIL, 1, true)
+    if p then
+      local bs = col - #run + p - 1
+      if not in_string(line, bs) then
+        return run:sub(p), bs
+      end
+    end
+  end
+  return nil
+end
+
+-- Brief display name for a snippet head: the bare expansion minus std:: --
+-- arr -> array, um -> unordered_map, `?` -> optional, `~>` -> convertible_to.
+local function head_name(head)
+  local t = TEMPLATES[head]
+  if t then
+    return ((t.tbare or t.bare):gsub('std::', ''))
+  end
+  if RELATIONS[head] then
+    return (RELATIONS[head]:gsub('std::', ''))
+  end
+  if ATOM[head] then
+    return (ATOM[head]:gsub('std::', ''))
+  end
+  return nil
+end
+
+-- The block's leading snippet name, for the preview label.
+local function block_name(block)
+  if block:sub(#SIGIL + 1, #SIGIL + 1) == '[' then
+    return 'array'
+  end
+  local phead = block:match('^' .. SIGIL_PAT .. '([%w_?<>%^~=]+)%(')
+  if phead then
+    return head_name(phead) or phead
+  end
+  if block:match('^' .. SIGIL_PAT .. '<[^<>]*>$') then
+    return 'template'
+  end
+  local segs = vim.split(block:sub(#SIGIL + 1), SIGIL, { plain = true })
+  for _, seg in ipairs(segs) do
+    if RELATIONS[seg] then
+      return head_name(seg)
+    end
+  end
+  return head_name(segs[1]) or segs[1]
+end
+
+-- All snippet heads the last partial segment could become, sorted (templates,
+-- atoms, relations, special members). Exact matches are excluded -- those
+-- expand directly.
+local function head_candidates(partial)
+  if partial == '' then
+    return {}
+  end
+  local seen, out = {}, {}
+  local function collect(tbl)
+    for k in pairs(tbl) do
+      if type(k) == 'string' and #k > #partial and k:sub(1, #partial) == partial and not seen[k] then
+        seen[k] = true
+        out[#out + 1] = k
+      end
+    end
+  end
+  collect(TEMPLATES)
+  collect(ATOM)
+  collect(RELATIONS)
+  collect(SPECIAL)
+  table.sort(out)
+  return out
+end
+
+-- Preview for the `$`-block being typed at 0-based `col`, or nil. Forms:
+--   { name, text }   -- the block expands as it stands (missing parts as `$`)
+--   { candidates = { { head, name }, ... } } -- the final segment is a partial
+--                       head; its prefix matches, briefly named
+-- class_fn supplies the enclosing class for $copy/$move previews (falls back
+-- to `T` so the shape still shows outside a class).
+function M.preview(line, col, class_fn)
+  local block = block_at(line, col)
+  if not block or block == SIGIL then
+    return nil
+  end
+  local sm = SPECIAL[block:sub(#SIGIL + 1)]
+  if sm then
+    local x = (class_fn and class_fn()) or 'T'
+    return { name = block:sub(#SIGIL + 1), text = sm(x) }
+  end
+  local text = M.expand(block)
+  if text then
+    return { name = block_name(block), text = text }
+  end
+  -- the block doesn't expand yet: if the FINAL segment is a partial head,
+  -- preview its prefix matches ($u -> um / up; $arr$ar -> arr).
+  local segs = vim.split(block:sub(#SIGIL + 1), SIGIL, { plain = true })
+  local partial = segs[#segs]
+  if not partial or partial == '' or partial:find '%[' then
+    return nil
+  end
+  local cands = head_candidates(partial)
+  if #cands == 0 then
+    return nil
+  end
+  if #cands == 1 then
+    -- unique completion: expand the block as if the head were finished
+    segs[#segs] = cands[1]
+    local full = SIGIL .. table.concat(segs, SIGIL)
+    local t = M.expand(full)
+    if t then
+      return { name = block_name(full), text = t }
+    end
+    local sm1 = SPECIAL[cands[1]]
+    if sm1 and #segs == 1 then
+      return { name = cands[1], text = sm1((class_fn and class_fn()) or 'T') }
+    end
+    return nil
+  end
+  local out = {}
+  for i = 1, math.min(#cands, 4) do
+    out[#out + 1] = { head = cands[i], name = head_name(cands[i]) or (SPECIAL[cands[i]] and 'special member') or cands[i] }
+  end
+  return { candidates = out }
 end
 
 -- std symbol (after `std::`) -> the header that provides it. Used to auto-add an
@@ -585,9 +804,59 @@ local function on_space()
   end
 end
 
+-- Live preview of the `$`-block under the cursor: eol virt_text with the
+-- snippet's brief name and its expansion as typed so far (missing parts `$`).
+-- The buffer-word completion popup is suppressed while a block is live (see the
+-- `enabled` gate in plugins/cmp.lua) -- this preview replaces it.
+local pns = vim.api.nvim_create_namespace 'ds_snip_preview'
+local CPP_FT = { c = true, cpp = true, cuda = true }
+
+local function preview_clear(buf)
+  if vim.api.nvim_buf_is_valid(buf) then
+    vim.api.nvim_buf_clear_namespace(buf, pns, 0, -1)
+  end
+end
+
+local function preview_refresh()
+  local buf = vim.api.nvim_get_current_buf()
+  preview_clear(buf)
+  if not CPP_FT[vim.bo[buf].filetype] then
+    return
+  end
+  if vim.api.nvim_get_mode().mode:sub(1, 1) ~= 'i' then
+    return
+  end
+  local pos = vim.api.nvim_win_get_cursor(0)
+  local line = vim.api.nvim_get_current_line()
+  local p = M.preview(line, pos[2], enclosing_class_name)
+  if not p then
+    return
+  end
+  local chunks
+  if p.candidates then
+    chunks = { { '  $ ', 'Comment' } }
+    for i, c in ipairs(p.candidates) do
+      if i > 1 then
+        chunks[#chunks + 1] = { '  ', 'Comment' }
+      end
+      chunks[#chunks + 1] = { c.head, 'DansLambda' }
+      chunks[#chunks + 1] = { ':' .. c.name, 'Comment' }
+    end
+  else
+    chunks = {
+      { '  [', 'Comment' },
+      { p.name, 'DansLambda' },
+      { '] ', 'Comment' },
+      { p.text, 'DansInlayType' },
+    }
+  end
+  pcall(vim.api.nvim_buf_set_extmark, buf, pns, pos[1] - 1, 0, { virt_text = chunks, virt_text_pos = 'eol' })
+end
+
 function M.setup()
+  local group = vim.api.nvim_create_augroup('ds_cpp_type_dsl', { clear = true })
   vim.api.nvim_create_autocmd('FileType', {
-    group = vim.api.nvim_create_augroup('ds_cpp_type_dsl', { clear = true }),
+    group = group,
     pattern = { 'c', 'cpp', 'cuda' },
     callback = function(ev)
       -- Map <Space> AND <S-Space>: in a GUI (Neovide) Shift+Space is a distinct
@@ -597,6 +866,17 @@ function M.setup()
       for _, lhs in ipairs { '<Space>', '<S-Space>' } do
         vim.keymap.set('i', lhs, on_space, { buffer = ev.buf, desc = 'Expand $type shorthand or insert space' })
       end
+    end,
+  })
+  -- Snippet preview: follow insert-mode typing; clear once insert ends.
+  vim.api.nvim_create_autocmd({ 'TextChangedI', 'CursorMovedI' }, {
+    group = group,
+    callback = preview_refresh,
+  })
+  vim.api.nvim_create_autocmd({ 'InsertLeave', 'BufLeave' }, {
+    group = group,
+    callback = function(ev)
+      preview_clear(ev.buf)
     end,
   })
   vim.api.nvim_create_user_command('DansCppFormat', function()
