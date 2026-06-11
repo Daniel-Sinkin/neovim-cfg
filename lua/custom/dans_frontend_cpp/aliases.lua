@@ -554,6 +554,9 @@ local function flip_param(p)
   main = vim.trim(main or p)
   -- drop leading attributes ([[maybe_unused]] etc.) -- pure noise, like the decl path
   main = vim.trim(main:gsub('^%s*%[%[.-%]%]%s*', ''))
+  -- OPENBLAS_CONST (OpenBLAS's const macro, all over cblas.h prototypes) IS
+  -- const: normalize it so every const rule below applies unchanged.
+  main = main:gsub('%f[%w_]OPENBLAS_CONST%f[%W]', 'const')
   -- Auto-typed param: the type is deduced, so collapse `[cpy] [const] auto[&|&&]
   -- name` to the sigil form -- `name` (value), `name&` (const ref), `mut name&`
   -- (non-const ref), `name&&` (forwarding), `cpy name` (heavy value). This is what
@@ -764,6 +767,9 @@ local function refresh(bufnr)
   if not vu.is_cpp(ft) then
     return
   end
+  if vu.cold_gate(bufnr) then
+    return -- cold open: deferred first pass
+  end
 
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
   if not vu.module_enabled(bufnr, 'aliases') then
@@ -874,7 +880,7 @@ M.refresh = refresh
 
 function M.setup()
   local group = vim.api.nvim_create_augroup('ds_cpp_aliases', { clear = true })
-  vu.on_decorate(group, { 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI', 'DiagnosticChanged' }, refresh)
+  vu.on_decorate(group, { 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI' }, refresh)
 end
 
 return M

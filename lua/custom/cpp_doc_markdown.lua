@@ -344,6 +344,9 @@ local function refresh(bufnr)
   if not (vim.api.nvim_buf_is_valid(bufnr) and is_hpp(bufnr)) then
     return
   end
+  if vu.cold_gate(bufnr) then
+    return -- cold open: deferred first pass paints everything at once
+  end
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
   if not is_on(bufnr) then
     return

@@ -211,6 +211,9 @@ local function update(bufnr)
   if not CPP_FT[vim.bo[bufnr].filetype] then
     return
   end
+  if vu.cold_gate(bufnr) then
+    return -- cold open: deferred first pass
+  end
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
   -- Parse so in_literal has a fresh tree (cheap; no-op if already current).
   local ok, parser = pcall(vim.treesitter.get_parser, bufnr)

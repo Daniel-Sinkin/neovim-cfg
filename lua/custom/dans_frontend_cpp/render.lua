@@ -181,6 +181,8 @@ local function colorize(text)
           out[#out + 1] = { P.strip_glfw(word), 'DansVulkan' }
         elseif word:match '^stb' or word:match '^STB' then
           out[#out + 1] = { word, 'DansSTB' } -- stb*/STB*, matches markers (not stripped)
+        elseif word:match '^cblas_' or word:match '^CBLAS_' or word:match '^Cblas%u' or word:match '^openblas_' or word:match '^OPENBLAS_' or word:match '^lapacke?_' or word:match '^LAPACKE?_' or word == 'blasint' then
+          out[#out + 1] = { word, 'DansBLAS' } -- BLAS/LAPACK family, full name kept
         elseif word:match '^Im%u' or word:match '^IM_' then
           out[#out + 1] = { P.strip_glfw(word), 'DansImGui' } -- imgui prefix hidden
         elseif word:match '^SDL_' or word:match '^GLFW' or word:match '^glfw%u' or word:match '^_GLFW' or word:match '^_glfw' then
@@ -245,6 +247,28 @@ local function top_level_ptr_ref(t)
   return false
 end
 
+-- The top-level sigils separately (caret, amp): the mut rule distinguishes
+-- them -- a reference is a mutable borrow wherever it lives, but a pointer
+-- MEMBER is plain struct data, so only pointer locals/globals read as mut.
+local function top_level_sigils(t)
+  local depth, caret, amp = 0, false, false
+  for i = 1, #t do
+    local c = t:sub(i, i)
+    if c == '<' or c == '(' or c == '[' then
+      depth = depth + 1
+    elseif c == '>' or c == ')' or c == ']' then
+      depth = depth - 1
+    elseif depth == 0 then
+      if c == '^' then
+        caret = true
+      elseif c == '&' then
+        amp = true
+      end
+    end
+  end
+  return caret, amp
+end
+
 -- Highlight for a type in declaration position: Vulkan types (Vk*/VK_*) keep
 -- their purple even here, so a type doesn't flip blue<->purple as the cursor
 -- enters/leaves its line; everything else is the blue inlay-type color.
@@ -271,6 +295,9 @@ function type_hl(t)
   end
   if t:match '^stb' or t:match '^STB' then
     return 'DansSTB'
+  end
+  if t:match '^cblas_' or t:match '^CBLAS_' or t:match '^Cblas%u' or t:match '^openblas_' or t:match '^OPENBLAS_' or t:match '^lapacke?_' or t:match '^LAPACKE?_' or t:match '^blasint' then
+    return 'DansBLAS'
   end
   if t:match '^Im%u' or t:match '^IM_' then
     return 'DansImGui'
@@ -609,15 +636,16 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
             -- bare value decl with no initializer (`Type name;`): the value is
             -- indeterminate (no `{}` default-init), so render `name: T` plus a red
             -- `no_init` marker. Array types additionally take the Odin `[N]T` form.
-            -- decl_kind gates to a real declaration (member/global/local), so a
-            -- statement like `return x;` is never grabbed. const decls aren't
-            -- "garbage" -- a const member is ctor-initialized -- so those stay raw.
-            -- Arrays render at every scope.
+            -- decl_kind gates to a real declaration (member/global), so a statement
+            -- like `return x;` is never grabbed. const decls aren't "garbage" -- a
+            -- const member is ctor-initialized -- so those stay raw. A bare LOCAL
+            -- stays raw too (the deferred-init idiom: declare, then fill in a
+            -- branch); only arrays render at every scope.
             local vtyp, vnm = core:match '^(.-)%s+([%w_]+)$'
             if vtyp and vnm and had_semi and P.looks_like_type(vtyp) then
               local is_array = P.strip_type(vtyp):match '^%[' ~= nil
               local kind = P.decl_kind(bufnr, row0)
-              if is_array or ((kind == 'member' or kind == 'global' or kind == 'local') and not was_const) then
+              if is_array or ((kind == 'member' or kind == 'global') and not was_const) then
                 typ, nm, no_init = vtyp, vnm, not was_const
               else
                 return nil
@@ -830,16 +858,18 @@ local function build_chunks(prefix, core, had_semi, type_hint, align, was_const,
       disp_typ = shown_typ
     end
     -- The binding's own mutability sits in a left `mut` column, before the name --
-    -- a non-const local value, or any non-const pointer/reference, is `mut`; an
-    -- uninitialized one is `no_init`; in an aligned block the others get a blank
-    -- column so names line up. The pointee/referent const (`const T^`) is part of
-    -- the TYPE, so it stays after the colon with the type.
+    -- a non-const local value, a non-const reference anywhere, or a non-const
+    -- pointer OUTSIDE a struct is `mut`; a pointer MEMBER is plain data, so it
+    -- stays unmarked. An uninitialized one is `no_init`; in an aligned block the
+    -- others get a blank column so names line up. The pointee/referent const
+    -- (`const T^`) is part of the TYPE, so it stays after the colon with the type.
+    local tl_caret, tl_amp = top_level_sigils(shown_typ)
     local is_mut = not is_cstring
       and not sp_inner
       and not was_const
       and not is_constexpr
       and not no_init
-      and (top_level_ptr_ref(shown_typ) or is_local())
+      and (tl_amp or (tl_caret and P.decl_kind(bufnr, row0) ~= 'member') or is_local())
     if no_init then
       add('no_init ', 'DansMarkerMut')
     elseif is_mut then

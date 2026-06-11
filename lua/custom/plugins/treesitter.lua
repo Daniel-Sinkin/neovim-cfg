@@ -8,9 +8,14 @@
 -- The treesitter parser still runs so the brace-highlighter has its AST.
 return {
   {
-    -- VSCode-like sticky scope header.
+    -- VSCode-like sticky scope header. Loaded at idle (VeryLazy), NOT on the
+    -- c/cpp FileType: an ft load happens inside the first big-file `:edit`,
+    -- where its initial update pays the synchronous cold parse before the
+    -- frontend's cold-open gate can suspend it (~180 ms on a vk_core-sized
+    -- file). Loaded ahead of time, every cpp open -- including the first --
+    -- hits the gate's suspend/resume path instead.
     'nvim-treesitter/nvim-treesitter-context',
-    ft = { 'c', 'cpp', 'cuda' },
+    event = 'VeryLazy',
     main = 'treesitter-context',
     opts = {
       enable = true,
@@ -80,16 +85,15 @@ return {
       -- by bracket matching over the real buffer text.
       require('custom.dans_frontend_cpp.scope').setup()
 
-      -- C/C++/CUDA monochrome theme. Re-enables classic syntax, then flattens
-      -- nearly every group to Normal so only strings (+ comments in gray)
-      -- carry color. CUDA-specific groups are re-colored at the end so kernel
-      -- launches and __device__/__global__ markers stand out.
-      vim.api.nvim_create_autocmd('FileType', {
-        pattern = { 'c', 'cpp', 'cuda' },
-        callback = function(ev)
-          vim.cmd 'syntax clear'
-          vim.cmd 'syntax on'
-
+      -- C/C++/CUDA monochrome theme: flatten nearly every group to Normal so
+      -- only strings (+ comments in gray) carry color. The links are GLOBAL
+      -- highlight state, so they're applied once here and re-asserted on
+      -- ColorScheme -- NOT per FileType, where the old `syntax clear` +
+      -- `syntax on` re-sourced the whole syntax runtime on every cpp open
+      -- (a measurable slice of the open latency on big files). The classic
+      -- syntax itself loads through Neovim's normal FileType machinery, since
+      -- treesitter highlighting is disabled for these filetypes above.
+      local function flatten_monochrome()
           local function link(group, target)
             pcall(vim.api.nvim_set_hl, 0, group, { link = target })
           end
@@ -220,21 +224,31 @@ return {
           -- Distinguishable from comments (which are italic) but visually low
           -- priority so the meaningful code stands out.
           vim.api.nvim_set_hl(0, 'dansCppCast', { fg = '#6b7280' })
+
+          -- __device__ / __host__ / __global__ markers (CUDA; global groups,
+          -- harmless when no cuda buffer is open).
+          vim.api.nvim_set_hl(0, 'cudaStorageClass', { fg = '#9ece6a', bold = true })
+          vim.api.nvim_set_hl(0, 'cudaConstant', { fg = '#9ece6a', bold = true })
+          -- dim3, vector types, cudaError_t.
+          vim.api.nvim_set_hl(0, 'cudaType', { fg = '#7dcfff' })
+          -- gridDim, blockIdx, blockDim, threadIdx, warpSize.
+          vim.api.nvim_set_hl(0, 'cudaVariable', { fg = '#ff9e64' })
+          -- <<< grid, block, sharedMem, stream >>>.
+          vim.api.nvim_set_hl(0, 'cudaKernelBrackets', { fg = '#bb9af7', bold = true })
+          vim.api.nvim_set_hl(0, 'cudaKernelConfig', { fg = '#e0af68' })
+          vim.api.nvim_set_hl(0, 'cudaDunder', { link = 'cudaStorageClass' })
+      end
+
+      flatten_monochrome()
+      vim.api.nvim_create_autocmd('ColorScheme', { callback = flatten_monochrome })
+
+      -- Per-buffer syntax items only (cheap): the gray cast match, and the
+      -- CUDA-specific matches for cuda buffers.
+      vim.api.nvim_create_autocmd('FileType', {
+        pattern = { 'c', 'cpp', 'cuda' },
+        callback = function(ev)
           vim.cmd [[syntax match dansCppCast /\<\(static\|dynamic\|reinterpret\|const\)_cast\s*<[^>]*>/]]
-
           if ev.match == 'cuda' then
-            -- __device__ / __host__ / __global__ markers.
-            vim.api.nvim_set_hl(0, 'cudaStorageClass', { fg = '#9ece6a', bold = true })
-            vim.api.nvim_set_hl(0, 'cudaConstant', { fg = '#9ece6a', bold = true })
-            -- dim3, vector types, cudaError_t.
-            vim.api.nvim_set_hl(0, 'cudaType', { fg = '#7dcfff' })
-            -- gridDim, blockIdx, blockDim, threadIdx, warpSize.
-            vim.api.nvim_set_hl(0, 'cudaVariable', { fg = '#ff9e64' })
-            -- <<< grid, block, sharedMem, stream >>>.
-            vim.api.nvim_set_hl(0, 'cudaKernelBrackets', { fg = '#bb9af7', bold = true })
-            vim.api.nvim_set_hl(0, 'cudaKernelConfig', { fg = '#e0af68' })
-            vim.api.nvim_set_hl(0, 'cudaDunder', { link = 'cudaStorageClass' })
-
             vim.cmd [[syntax match cudaDunder /\<__\w\+__\>/]]
             vim.cmd [[syntax region cudaKernelConfig matchgroup=cudaKernelBrackets start=/<<</ end=/>>>/ oneline keepend contains=NONE]]
           end

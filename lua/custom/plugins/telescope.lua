@@ -69,6 +69,16 @@ return {
       builtin.live_grep(grep_unfold())
     end, { desc = '[S]earch by [G]rep' })
     vim.keymap.set('n', '<leader>sd', builtin.diagnostics, { desc = '[S]earch [D]iagnostics' })
+    -- The inlay error text is virtual (extmarks), so ripgrep can't see it; the
+    -- diagnostics picker is the greppable list of everything currently flagged.
+    -- `se` = this file, `sE` = every diagnosed file (clangd only reports for
+    -- files that have been opened, which matches "what I'd actually see").
+    vim.keymap.set('n', '<leader>se', function()
+      builtin.diagnostics(grep_unfold { bufnr = 0, prompt_title = 'Errors/warnings (this file)' })
+    end, { desc = '[S]earch [E]rrors in current file' })
+    vim.keymap.set('n', '<leader>sE', function()
+      builtin.diagnostics(grep_unfold { prompt_title = 'Errors/warnings (all files)' })
+    end, { desc = '[S]earch [E]rrors in all files' })
     vim.keymap.set('n', '<leader>sr', builtin.resume, { desc = '[S]earch [R]esume' })
     vim.keymap.set('n', '<leader>s.', builtin.oldfiles, { desc = '[S]earch Recent Files ("." for repeat)' })
     vim.keymap.set('n', '<leader><leader>', builtin.buffers, { desc = '[ ] Find existing buffers' })

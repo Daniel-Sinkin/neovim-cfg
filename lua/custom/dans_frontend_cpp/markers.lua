@@ -21,6 +21,7 @@ local MATCH_GROUPS = {
   DansVMA = true,
   DansSDL = true,
   DansSTB = true,
+  DansBLAS = true,
   DansLLDB = true,
   DansImGui = true,
   DansConcept = true,
@@ -140,6 +141,9 @@ local function conceal_refresh(bufnr)
   if not vu.is_cpp(ft) then
     return
   end
+  if vu.cold_gate(bufnr) then
+    return -- cold open: deferred first pass
+  end
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
   if not vu.module_enabled(bufnr, 'markers') then
     return
@@ -219,6 +223,9 @@ local function apply(ev)
   -- lines; this grays the ones that stay visible (args, trailing, and the
   -- leading one revealed on the cursor line).
   vim.fn.matchadd('DansConst', code_only [[\<const\>]], 20)
+  -- OPENBLAS_CONST is OpenBLAS's const macro: same gray const treatment.
+  -- Priority 26 so it beats the OPENBLAS_ DansBLAS library match below.
+  vim.fn.matchadd('DansConst', code_only [[\<OPENBLAS_CONST\>]], 26)
   -- Gray a lowercase `ns::` scope qualifier (std::/dans::/detail::...) -- those
   -- are namespace noise. A CamelCase `Type::` (e.g. ApiVersion::vulkan(), a static
   -- method, or VkResult::eFoo) is a TYPE, not a namespace, so it's left for the
@@ -266,6 +273,21 @@ local function apply(ev)
   -- and types (lowercase stb...+_), plus the STB*/STBI_/STBIDEF macros.
   vim.fn.matchadd('DansSTB', code_only [[\<stb[a-z0-9]*_[A-Za-z0-9_]*\>]], 25)
   vim.fn.matchadd('DansSTB', code_only [[\<STB[A-Za-z0-9_]*\>]], 25)
+  -- BLAS / LAPACK family -> yellow-green, one group for the whole numeric
+  -- stack: cblas_dgemm / CBLAS_ORDER / CblasRowMajor, openblas_set_num_threads /
+  -- OPENBLAS_*, lapack_int / LAPACK_* / LAPACKE_dgesv / lapacke_*, and the
+  -- blasint integer type. Priority 25 so the all-caps forms beat the generic
+  -- macro purple, like VK_/SDL_.
+  vim.fn.matchadd('DansBLAS', code_only [[\<cblas_[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansBLAS', code_only [[\<CBLAS_[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansBLAS', code_only [[\<Cblas[A-Z][A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansBLAS', code_only [[\<openblas_[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansBLAS', code_only [[\<OPENBLAS_[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansBLAS', code_only [[\<lapack_[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansBLAS', code_only [[\<LAPACK_[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansBLAS', code_only [[\<LAPACKE_[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansBLAS', code_only [[\<lapacke_[A-Za-z0-9_]*\>]], 25)
+  vim.fn.matchadd('DansBLAS', code_only [[\<blasint\>]], 25)
   -- LLDB identifiers -> orange: the LLDB_ macros, the SB* API classes
   -- (SBDebugger/SBTarget/...), and the bare StateType enum. Priority 25 so the
   -- all-caps LLDB_* wins over the generic macro purple (like VK_*/SDL_*).

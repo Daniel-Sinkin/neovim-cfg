@@ -46,6 +46,10 @@ function M.apply()
   -- moved off the bright cyan so concepts can claim that (and distinct from SDL's
   -- darker blue-teal and the string green).
   hi('DansSTB', { fg = '#73daca' })
+  -- BLAS / LAPACK family (cblas_*, CblasRowMajor, openblas_*, OPENBLAS_*,
+  -- lapack_*, LAPACK_*, LAPACKE_*, blasint) -- a yellow-green, one color for the
+  -- whole numeric-kernel group, clear of the string green and the cpy yellow.
+  hi('DansBLAS', { fg = '#b8bb26' })
   -- concept / type-trait `~`-notation (~> ~= ~v ~& ~(...)) and the `concept` /
   -- `requires` keywords -- the bright cyan stb used to have. Common in this code,
   -- so it gets the loud color.

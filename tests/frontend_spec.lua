@@ -139,11 +139,14 @@ run('multiline opener', 'fn', { 'auto big = compute(' }, { false })
 -- ===================== members (no mut on value) =====================
 run('member value', 'struct', { 'int x{7};' }, { 'x: int = 7;' })
 run('member empty', 'struct', { 'Vec2 pos{};' }, { 'pos: Vec2;' })
-run('member pointer', 'struct', { 'Foo* ptr{};' }, { 'mut ptr: Foo^;' })
-run('member glfw pointer', 'struct', { 'GLFWwindow* window_{};' }, { 'mut window_: window^;' })
+-- a pointer MEMBER is plain struct data: no mut (locals/globals keep it)
+run('member pointer', 'struct', { 'Foo* ptr{};' }, { 'ptr: Foo^;' })
+run('member glfw pointer', 'struct', { 'GLFWwindow* window_{};' }, { 'window_: window^;' })
 run('member const pointer', 'struct', { 'const Foo* cptr{};' }, { 'cptr: const Foo^;' })
 run('member array', 'struct', { 'std::array<f32, 3> arr{};' }, { 'arr: [3]f32;' })
 run('member array no-init', 'struct', { 'std::array<f32, 3> arr;' }, { 'no_init arr: [3]f32;' })
+-- nested arrays collapse fully: [outer][inner]Elem, not [outer]array<Elem, inner>
+run('member nested array', 'struct', { 'std::array<std::array<Color, k_width>, k_height> framebuffer{};' }, { 'framebuffer: [k_height][k_width]Color;' })
 -- uninitialized members get a red no_init marker at the start (vs `x{}` -> clean)
 run('member value no-init', 'struct', { 'GLFWbool x;' }, { 'no_init x: bool;' })
 run('member value default-init', 'struct', { 'GLFWbool x{};' }, { 'x: bool;' })
@@ -153,6 +156,13 @@ run('member pointer no-init', 'struct', { 'void* userPointer;' }, { 'no_init use
 run('member ref no no_init', 'struct', { 'Foo& ref;' }, { 'mut ref: Foo&;' })
 -- a bare local stays raw (deferred-init idiom), not flagged
 run('local value no-init stays raw', 'fn', { 'int x;' }, { false })
+
+-- an output-stream statement is not a decl: `out << a << k_newline;` must not be
+-- read as a `k_newline`-typed local with `out << a <<` as the type. The last line
+-- has no char literals, so only the `<<` guard (not a quote check) saves it.
+run('stream char literals stays raw', 'fn', { "out << 'P' << '6' << k_newline;" }, { false })
+run('stream mixed stays raw', 'fn', { "out << k_width << ' ' << k_height << k_newline;" }, { false })
+run('stream no literals stays raw', 'fn', { 'out << k_max_color_u8 << k_newline;' }, { false })
 
 -- raw / std fixed-width types render as the dans aliases (so Vulkan's uint32_t /
 -- float read the same as first-party u32 / f32)
@@ -164,6 +174,10 @@ run('member double', 'struct', { 'double ratio{};' }, { 'ratio: f64;' })
 -- [[maybe_unused]] is hidden entirely (only its absence matters); on a decl the
 -- overlay drops it via split_markers.
 run('maybe_unused dropped on decl', 'fn', { '[[maybe_unused]] constexpr int n{4};' }, { 'n: int : 4;' })
+
+-- OPENBLAS_CONST is OpenBLAS's const macro: peeled and hidden exactly like
+-- const (no mut, const invisible).
+run('OPENBLAS_CONST decl', 'fn', { 'OPENBLAS_CONST blasint lda{8};' }, { 'lda: blasint = 8;' })
 
 -- const char* const (const pointer to const char) -> const CString, not CString const
 run('span const cstring', 'struct', { 'std::span<const char* const> layers{};' }, { 'layers: span<const CString>;' })
@@ -183,19 +197,179 @@ run('member vk PFN kept', 'struct', { 'PFN_vkCreateInstance fn{};' }, { 'fn: PFN
 run('member static constexpr', 'struct', { 'static constexpr usize cap{16};' }, { 'cap: usize : 16;' })
 
 -- ===================== alignment block =====================
+-- a pointer member is not mut, so this block reserves no mut column; a local
+-- block with a pointer still does (see 'array member block widths' below for
+-- the member case and 'smart-ptr beside mut local' for the local case)
 run('aligned members', 'struct', {
   'Vec2 position{};',
   'Color fill{white};',
   'Foo* ptr{};',
 }, {
-  '    position: Vec2;',
-  '    fill    : Color = white;',
-  'mut ptr     : Foo^;',
+  'position: Vec2;',
+  'fill    : Color = white;',
+  'ptr     : Foo^;',
 })
+
+-- constexpr constants never share an alignment block with normal vars: the
+-- constexpr-ness flip splits the run, so the constants align among themselves
+-- (no mut column, ever) and the vars align separately with their own mut shift.
+-- Bodies indented like clang-format output: the const/constexpr detection must
+-- see through the indent (it once didn't, shifting all-const blocks).
+run('constexpr block split from vars', 'fn', {
+  '    constexpr blasint m{2};',
+  '    constexpr blasint k{3};',
+  '    constexpr blasint n{2};',
+  '    f64 alpha{1.0};',
+  '    f64 beta{0.0};',
+}, {
+  'm: blasint : 2;',
+  'k: blasint : 3;',
+  'n: blasint : 2;',
+  'mut alpha: f64 = 1.0;',
+  'mut beta : f64 = 0.0;',
+})
+
+-- a block with no actual mut binding gets no mut column at all
+run('all-const block unshifted', 'fn', {
+  '    const int width{800};',
+  '    const int height{600};',
+}, {
+  'width : int = 800;',
+  'height: int = 600;',
+})
+
+-- smart pointers render `T^` without mut; a block of only those (and consts)
+-- must not reserve the mut column
+run('smart-ptr block unshifted', 'fn', {
+  '    std::unique_ptr<Foo> a{};',
+  '    std::unique_ptr<Bar> b{};',
+}, {
+  'a: Foo^;',
+  'b: Bar^;',
+})
+
+-- ...but a real mut sibling still shifts the non-mut lines under it
+run('smart-ptr beside mut local', 'fn', {
+  '    std::unique_ptr<Foo> up{};',
+  '    int counter{0};',
+}, {
+  '    up     : Foo^;',
+  'mut counter: int  = 0;',
+})
+
+-- mixed const + mut locals, indented: the consts take the blank mut column so
+-- names align under their mut sibling; the constexpr neighbors stay unshifted
+run('mixed const/mut block', 'fn', {
+  '    constexpr f32 k_scale{2.0f};',
+  '    constexpr f32 k_bias{0.5f};',
+  '    const Vec2 origin{0.0f, 0.0f};',
+  '    Vec2 cursor{};',
+}, {
+  'k_scale: f32 : 2.0f;',
+  'k_bias : f32 : 0.5f;',
+  '    origin: Vec2 = 0.0f, 0.0f;',
+  'mut cursor: Vec2;',
+})
+
+-- static constexpr constants inside a struct split from the fields below them
+run('struct constants split from fields', 'struct', {
+  '    static constexpr u32 k_width{800};',
+  '    static constexpr u32 k_height{600};',
+  '    Vec2 pos{};',
+  '    Vec2 vel{};',
+}, {
+  'k_width : u32 : 800;',
+  'k_height: u32 : 600;',
+  'pos: Vec2;',
+  'vel: Vec2;',
+})
+
+-- a blank line splits alignment blocks: each pair aligns independently
+run('blank line splits blocks', 'fn', {
+  '    int aa{1};',
+  '    int bb{2};',
+  '',
+  '    f32 c{1.0f};',
+  '    f32 dd{2.0f};',
+}, {
+  [1] = 'mut aa: int = 1;',
+  [2] = 'mut bb: int = 2;',
+  [4] = 'mut c : f32 = 1.0f;',
+  [5] = 'mut dd: f32 = 2.0f;',
+})
+
+-- array members in a block: the [N]T display width drives the type column;
+-- pointer members carry no mut, so nothing shifts
+run('array member block widths', 'struct', {
+  '    std::array<f32, 3> a{};',
+  '    Foo* p{};',
+  '    GLFWwindow* win{};',
+}, {
+  'a  : [3]f32;',
+  'p  : Foo^;',
+  'win: window^;',
+})
+
+-- a smart pointer with a deleter renders `T^, Del~`; that full width is what
+-- the block's type column measures
+run('deleter width in block', 'fn', {
+  '    std::unique_ptr<Foo, FooDeleter> p{};',
+  '    int counter{0};',
+}, {
+  [1] = '    p      : Foo^, FooDeleter~;',
+  [2] = 'mut counter: int' .. (' '):rep(14) .. ' = 0;',
+})
+
+-- ===================== nested template rendering =====================
+run('array of pairs', 'struct', { 'std::array<std::pair<int, int>, 4> lut{};' }, { 'lut: [4]pair<int, int>;' })
+run('array of vectors', 'struct', { 'std::array<std::vector<f32>, 2> buckets{};' }, { 'buckets: [2]vector<f32>;' })
+run('triple nested array', 'struct', { 'std::array<std::array<std::array<u8, 2>, 3>, 4> voxels{};' }, { 'voxels: [4][3][2]u8;' })
+run('array of optionals', 'struct', { 'std::array<std::optional<int>, 4> os{};' }, { 'os: [4]int?;' })
+run('vector of arrays', 'struct', { 'std::vector<std::array<f32, 3>> tris{};' }, { 'tris: vector<[3]f32>;' })
+run('array of unique_ptr', 'struct', { 'std::array<std::unique_ptr<Foo>, 2> owners{};' }, { 'owners: [2]unique_ptr<Foo>;' })
+run('array of cstrings', 'struct', { 'std::array<const char*, 3> names{};' }, { 'names: [3]CString;' })
+run('unordered_map value array', 'struct', { 'std::unordered_map<u32, std::array<f32, 2>> uv{};' }, { 'uv: unordered_map<u32, [2]f32>;' })
 
 -- ===================== top-level (raw) =====================
 run('include', 'top', { '#include <vector>' }, { false })
 run('using alias (raw)', 'top', { 'using Vec3 = glm::vec3;' }, { false })
+
+-- ===================== diagnostics don't suppress the overlay =====================
+-- A diagnosed line renders like any other: the diagnostic shows as a first-cell
+-- mark + cursor-line virtual text, so `std::array<int, 5> xs{};` must still
+-- read as `[5]int` even while clangd flags something on that line.
+do
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, { 'auto fn() -> void', '{', '    std::array<int, 5> xs{};', '}' })
+  vim.bo[b].filetype = 'cpp'
+  vim.api.nvim_set_current_buf(b)
+  pcall(function()
+    vim.treesitter.get_parser(b, 'cpp'):parse()
+  end)
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+  local dns = vim.api.nvim_create_namespace 'spec_diag'
+  vim.diagnostic.set(dns, b, { { lnum = 2, col = 0, end_lnum = 2, end_col = 5, severity = vim.diagnostic.severity.ERROR, message = 'boom' } })
+  vim.cmd 'doautocmd FileType'
+  vim.cmd 'doautocmd BufEnter'
+  local got = overlay(b, 2)
+  if got == 'mut xs: [5]int;' then
+    pass = pass + 1
+  else
+    fail = fail + 1
+    fails[#fails + 1] = string.format('FAIL  overlay on diagnosed line\n        exp: mut xs: [5]int;\n        got: %s', got == nil and '<raw>' or got)
+  end
+  -- and the diagnostic itself lands as a first-cell mark (red bg on col 0)
+  require('custom.dans_diagmark').setup()
+  require('custom.dans_diagmark').refresh(b)
+  local dm = vim.api.nvim_buf_get_extmarks(b, vim.api.nvim_create_namespace 'ds_diagmark', { 2, 0 }, { 2, -1 }, { details = true })
+  if #dm == 1 and dm[1][4].hl_group == 'DansDiagMarkError' and dm[1][4].end_col == 1 then
+    pass = pass + 1
+  else
+    fail = fail + 1
+    fails[#fails + 1] = 'FAIL  diagmark first-cell extmark missing/wrong: ' .. vim.inspect(dm)
+  end
+  vim.diagnostic.reset(dns, b)
+end
 
 -- ===================== more edge cases =====================
 run('multi declarator (raw)', 'fn', { 'int a, b;' }, { false })
@@ -216,7 +390,7 @@ run('optional local', 'fn', { 'std::optional<Foo> o{};' }, { 'mut o: Foo?;' })
 run('optional pointer', 'struct', { 'std::optional<int> o{};' }, { 'o: int?;' })
 run('optional ref member', 'struct', { 'std::optional<int>& o;' }, { 'mut o: int?&;' })
 run('optional const ref member', 'struct', { 'const std::optional<int>& o;' }, { 'o: const int?&;' })
-run('optional ptr member', 'struct', { 'std::optional<int>* o{};' }, { 'mut o: int?^;' })
+run('optional ptr member', 'struct', { 'std::optional<int>* o{};' }, { 'o: int?^;' })
 run('expected member', 'struct', { 'std::expected<int, Error> r{};' }, { 'r: int?Error;' })
 run('expected local', 'fn', { 'std::expected<Foo, Err> r{};' }, { 'mut r: Foo?Err;' })
 run('expected const ref member', 'struct', { 'const std::expected<int, Err>& r;' }, { 'r: const int?Err&;' })
@@ -244,6 +418,13 @@ run('cast nested pointer', 'fn', { 'auto z = static_cast<std::vector<int*>>(v);'
 run('paren init', 'fn', { 'std::vector<stbtt_bakedchar> out(config.codepoint_count);' }, { 'mut out: vector<stbtt_bakedchar>(config.codepoint_count);' })
 run('paren init digit', 'fn', { 'Buffer buf(1024);' }, { 'mut buf: Buffer(1024);' })
 run('function decl raw', 'fn', { 'Foo make(Bar);' }, { false })
+-- most-vexing-parse with a cast argument: treesitter reads it as a function
+-- decl, but a "param" STARTING with a cast keyword is an argument -- the line
+-- is the variable it declares (and the decorations defer to this overlay
+-- instead of double-rendering the raw line)
+run('mvp cast arg is a variable', 'fn', { 'std::vector<f64> a(static_cast<usize>(m * k));' }, { 'mut a: vector<f64>($scast<usize>(m * k));' })
+-- ...but a cast in a DEFAULT argument is a real function: stays raw
+run('cast default arg stays function', 'fn', { 'void f(int x = static_cast<int>(y));' }, { false })
 
 -- std::move / forward must render red (DansMarkerMut); the text suite can't see hl
 do
@@ -267,6 +448,35 @@ do
   else
     fail = fail + 1
     fails[#fails + 1] = 'FAIL  std::move color: move hl = ' .. tostring(hl)
+  end
+end
+
+-- BLAS/LAPACK identifiers carry the DansBLAS yellow-green in the overlay: the
+-- blasint type and a cblas_ call in the value.
+do
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, { 'auto fn() -> void', '{', '    constexpr blasint m{2};', '    auto s = cblas_dsdot(n, x, 1, y, 1);', '}' })
+  vim.bo[b].filetype = 'cpp'
+  vim.api.nvim_set_current_buf(b)
+  pcall(function() vim.treesitter.get_parser(b, 'cpp'):parse() end)
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+  vim.cmd 'doautocmd FileType'
+  vim.cmd 'doautocmd BufEnter'
+  local function hl_of(row, text)
+    local m = vim.api.nvim_buf_get_extmarks(b, jns, { row, 0 }, { row, -1 }, { details = true })
+    for _, c in ipairs(m[1] and m[1][4].virt_text or {}) do
+      if c[1] == text then
+        return c[2]
+      end
+    end
+  end
+  local t_hl = hl_of(2, 'blasint')
+  local v_hl = hl_of(3, 'cblas_dsdot')
+  if t_hl == 'DansBLAS' and v_hl == 'DansBLAS' then
+    pass = pass + 1
+  else
+    fail = fail + 1
+    fails[#fails + 1] = string.format('FAIL  BLAS colors: blasint=%s cblas_dsdot=%s', tostring(t_hl), tostring(v_hl))
   end
 end
 

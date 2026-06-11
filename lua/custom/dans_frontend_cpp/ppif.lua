@@ -225,11 +225,8 @@ local function refresh(bufnr)
   if not vu.module_enabled(bufnr, 'ppif') then
     return
   end
-  local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
-  if ok and parser then
-    pcall(function()
-      parser:parse()
-    end)
+  if vu.cold_gate(bufnr) then
+    return -- cold open: deferred first pass
   end
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   for _, r in ipairs(M.inactive_ranges(lines)) do

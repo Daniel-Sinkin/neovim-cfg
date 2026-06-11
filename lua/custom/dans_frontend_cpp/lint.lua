@@ -37,6 +37,9 @@ local function refresh(bufnr)
     vim.diagnostic.reset(ns, bufnr)
     return
   end
+  if vu.cold_gate(bufnr) then
+    return -- cold open: deferred first pass
+  end
   local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
   if not ok or not parser then
     return

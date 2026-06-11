@@ -80,6 +80,15 @@ function M.split_markers(s)
     end
 
     if not matched then
+      -- OPENBLAS_CONST is OpenBLAS's const macro (cblas.h prototypes). It IS
+      -- const, so it's peeled and hidden exactly the same way.
+      after = rest:match '^OPENBLAS_CONST%s+(.*)$'
+      if after then
+        rest, is_const, matched = after, true, true
+      end
+    end
+
+    if not matched then
       -- thread_local is kept as a shown prefix: rare and notable storage duration.
       after = rest:match '^thread_local%s+(.*)$'
       if after then
@@ -145,6 +154,24 @@ function M.looks_like_type(t)
   end
   if t:find('->', 1, true) then
     return false
+  end
+  -- `<<` never appears in a C++ type, so a `name` preceded by a `<<` run is an
+  -- output-stream statement (`out << a << name;`), not a `name`-typed decl.
+  if t:find('<<', 1, true) then
+    return false
+  end
+  -- a TOP-LEVEL comma is never part of one type: `int a, b;` must not read as a
+  -- `b` of type `int a,`. Template commas (`pair<int, int>`) are nested in <>.
+  local depth = 0
+  for i = 1, #t do
+    local c = t:sub(i, i)
+    if c == '<' then
+      depth = depth + 1
+    elseif c == '>' then
+      depth = depth - 1
+    elseif c == ',' and depth == 0 then
+      return false
+    end
   end
   local first = t:match '^([%w_]+)'
   if first and STMT_KEYWORDS[first] then
@@ -322,8 +349,71 @@ local function collapse_optional(t)
   end
 end
 
+-- Every `array<T, N>` -> `[N]T` (Odin), at ANY nesting depth -- top level,
+-- nested in another array (array<array<Color, k_width>, k_height> ->
+-- [k_height][k_width]Color), or buried in some other template
+-- (vector<array<f32, 3>> -> vector<[3]f32>). Word-boundary, so `my_array<` is
+-- left alone; the element/count split at the top-level comma so a templated
+-- element (array<pair<int, int>, 3>) isn't broken on its inner comma. After a
+-- rewrite the scan resumes at the same spot, so the element of a collapsed
+-- array gets its own pass.
+local function collapse_array(t)
+  local from = 1
+  while true do
+    local s = t:find('array<', from, true)
+    if not s then
+      return t
+    end
+    local before = s > 1 and t:sub(s - 1, s - 1) or ''
+    if before:match '[%w_]' then
+      from = s + 6
+    else
+      local depth, close = 0, nil
+      for i = s + 5, #t do
+        local c = t:sub(i, i)
+        if c == '<' then
+          depth = depth + 1
+        elseif c == '>' then
+          depth = depth - 1
+          if depth == 0 then
+            close = i
+            break
+          end
+        end
+      end
+      if not close then
+        return t
+      end
+      local inner = t:sub(s + 6, close - 1)
+      local d2, comma = 0, nil
+      for i = 1, #inner do
+        local c = inner:sub(i, i)
+        if c == '<' or c == '(' or c == '[' then
+          d2 = d2 + 1
+        elseif c == '>' or c == ')' or c == ']' then
+          d2 = d2 - 1
+        elseif c == ',' and d2 == 0 then
+          comma = i
+          break
+        end
+      end
+      if not comma then
+        from = s + 6 -- `array<T>` with no count: not the std::array shape
+      else
+        local elem = vim.trim(inner:sub(1, comma - 1))
+        local n = vim.trim(inner:sub(comma + 1))
+        t = t:sub(1, s - 1) .. '[' .. n .. ']' .. elem .. t:sub(close + 1)
+        from = s
+      end
+    end
+  end
+end
+
 function M.strip_type(typ)
-  local t = typ:gsub('^constexpr%s+', ''):gsub('^inline%s+', ''):gsub('std::', ''):gsub('dans::', '')
+  -- OPENBLAS_CONST -> const first (at any position, so a nested
+  -- `OPENBLAS_CONST char*` still reads as CString below).
+  local t = typ:gsub('%f[%w_]OPENBLAS_CONST%f[%W]', 'const')
+  t = t:gsub('^constexpr%s+', ''):gsub('^inline%s+', ''):gsub('std::', ''):gsub('dans::', '')
   for from, to in pairs(TYPE_ALIAS) do
     t = t:gsub('%f[%w_]' .. from .. '%f[^%w_]', to)
   end
@@ -347,23 +437,7 @@ function M.strip_type(typ)
       end
     end
   end
-  -- std::array<T, N> -> [N]T (Odin array syntax). Split at the top-level comma so
-  -- a templated element (array<pair<int, int>, 3>) isn't broken.
-  local inner = t:match '^array<(.+)>$'
-  if inner then
-    local depth = 0
-    for i = 1, #inner do
-      local c = inner:sub(i, i)
-      if c == '<' or c == '(' or c == '[' then
-        depth = depth + 1
-      elseif c == '>' or c == ')' or c == ']' then
-        depth = depth - 1
-      elseif c == ',' and depth == 0 then
-        t = '[' .. vim.trim(inner:sub(i + 1)) .. ']' .. vim.trim(inner:sub(1, i - 1))
-        break
-      end
-    end
-  end
+  t = collapse_array(t)
   -- const char* (an immutable C string) -> CString, wherever it appears -- incl
   -- nested in a template (vector<const char*> -> vector<CString>). A top-level
   -- const-char* member is handled in build_chunks (the const is peeled there, so
@@ -375,6 +449,9 @@ function M.strip_type(typ)
     return 'CString' .. stars:sub(2)
   end)
   t = M.ptr(t)
+  -- the caret binds tight: C-style `double *X` arrives as `f64 ^` -- drop the
+  -- gap so every pointer reads `T^` regardless of the source's star placement.
+  t = t:gsub('%s+%^', '^')
   -- `const char* const` (a const pointer to const char) -> `CString const` after
   -- the rewrites above; move the pointer-const in front, like the leading-const
   -- rule for pointers, so it reads `const CString` (`span<const char* const>` ->
@@ -616,6 +693,37 @@ function M.classic_function(bufnr, row0)
   if not fnode or fnode:type() ~= 'function_declarator' then
     return nil
   end
+  -- The most-vexing-parse cuts both ways: `vector<f64> a(static_cast<usize>(n));`
+  -- parses as a function declaration, but a "parameter" that BEGINS with a cast
+  -- keyword is provably an ARGUMENT -- report nil so the paren-init branch
+  -- renders the variable this line actually declares (and the decoration
+  -- modules defer to that overlay instead of garbling the raw line). Only a
+  -- cast at a parameter's start counts: a cast in a DEFAULT argument
+  -- (`void f(int x = static_cast<int>(y))`) is a real function.
+  local params = fnode:field('parameters')[1]
+  if params then
+    local ptext = vim.treesitter.get_node_text(params, bufnr):gsub('^%(', ''):gsub('%)$', '')
+    local depth, start = 0, 1
+    local function value_arg(chunk)
+      return vim.trim(chunk):match '^[%w_:]*_cast%s*<' ~= nil
+    end
+    for i = 1, #ptext do
+      local c = ptext:sub(i, i)
+      if c == '<' or c == '(' or c == '[' or c == '{' then
+        depth = depth + 1
+      elseif c == '>' or c == ')' or c == ']' or c == '}' then
+        depth = depth - 1
+      elseif c == ',' and depth == 0 then
+        if value_arg(ptext:sub(start, i - 1)) then
+          return nil
+        end
+        start = i + 1
+      end
+    end
+    if value_arg(ptext:sub(start)) then
+      return nil
+    end
+  end
   local _, _, fe_row = fnode:range()
   if fe_row ~= row0 then
     return nil -- single-line declarations only
@@ -690,8 +798,9 @@ function M.smart_ptr(t)
 end
 
 -- For an explicit-type brace declaration (`T name{init}`), return the rendered
--- name and type strings, else nil. Mirrors build_chunks' explicit branch so the
--- alignment pass measures exactly what gets rendered.
+-- name and type strings (plus constexpr-ness, so the alignment pass can group
+-- constant bindings separately), else nil. Mirrors build_chunks' explicit branch
+-- so the alignment pass measures exactly what gets rendered.
 function M.field_dims(line)
   local indent = line:match '^%s*'
   local body = line:sub(#indent + 1)
@@ -700,7 +809,7 @@ function M.field_dims(line)
   end
   local code = body:match '^(.-)%s*//.*$' or body
   local had_semi = code:match ';%s*$' ~= nil
-  local _, core, was_const = M.split_markers((code:gsub(';%s*$', '')))
+  local _, core, was_const, is_constexpr = M.split_markers((code:gsub(';%s*$', '')))
   local typ, nm = core:match '^(.-)%s+([%w_]+)%s*{.*}$'
   if not (nm and had_semi and M.looks_like_type(typ)) then
     -- no-brace reference/pointer member: `T& name` / `T* name`
@@ -718,14 +827,22 @@ function M.field_dims(line)
     -- what's shown, not the stripped `char^`.
     disp = 'CString' .. (disp:gsub('^char%^', ''))
   end
-  return nm, disp
+  return nm, disp, is_constexpr
 end
 
--- Whether the declaration on `line` would render a `mut ` prefix: non-const,
--- non-constexpr, and either a top-level pointer/reference or a local value. Lets
--- compute_align reserve the left mut column for a block that has any mut binding.
+-- Whether the declaration on `line` would render a `mut ` prefix -- the EXACT
+-- condition build_chunks uses, so the reserved mut column never exists without a
+-- real mut in the block: non-const, non-constexpr, not a smart pointer (those
+-- render `T^` with an ownership caret, no mut), not an uninitialized pointer
+-- (those render `no_init`), and either a top-level pointer/reference or a local
+-- value. Lets compute_align reserve the left mut column for a block that has any
+-- mut binding.
 function M.field_is_mut(line, bufnr, row0)
-  local code = line:match '^(.-)%s*//.*$' or line
+  -- peel the indent first (like field_dims): split_markers anchors at ^, so a
+  -- clang-format-indented `    const T x{};` would otherwise hide its const and
+  -- read as mut -- the phantom mut column on all-const blocks.
+  local body = line:sub(#(line:match '^%s*') + 1)
+  local code = body:match '^(.-)%s*//.*$' or body
   if not code:match ';%s*$' then
     return false
   end
@@ -733,39 +850,66 @@ function M.field_is_mut(line, bufnr, row0)
   if was_const or is_constexpr then
     return false
   end
-  local typ = core:match '^(.-)%s+[%w_]+%s*{.*}$' or core:match '^(.-[%w_>][&*]+)%s*[%w_]+$'
+  local typ = core:match '^(.-)%s+[%w_]+%s*{.*}$'
   if not typ or not M.looks_like_type(typ) then
-    return false
+    typ = core:match '^(.-[%w_>][&*]+)%s*[%w_]+$'
+    if not typ or not M.looks_like_type(typ) then
+      return false
+    end
+    -- no-brace `T* name;` renders a no_init marker, not mut.
+    local sigil = typ:match '([&*]+)%s*$'
+    if sigil and sigil:sub(-1) == '*' then
+      return false
+    end
   end
   local disp = M.strip_type(typ)
-  local depth = 0
+  if M.smart_ptr(disp) then
+    return false -- renders `T^` with an ownership-colored caret, never mut
+  end
+  local depth, caret = 0, false
   for i = 1, #disp do
     local c = disp:sub(i, i)
     if c == '<' or c == '(' or c == '[' then
       depth = depth + 1
     elseif c == '>' or c == ')' or c == ']' then
       depth = depth - 1
-    elseif (c == '^' or c == '&') and depth == 0 then
-      return true -- top-level ptr/ref is mut regardless of scope
+    elseif depth == 0 then
+      if c == '&' then
+        return true -- a reference is a mutable borrow at any scope
+      elseif c == '^' then
+        caret = true
+      end
     end
+  end
+  if caret then
+    -- a pointer is mut everywhere EXCEPT a struct member (plain data there)
+    return bufnr ~= nil and M.decl_kind(bufnr, row0) ~= 'member'
   end
   return bufnr ~= nil and M.decl_kind(bufnr, row0) == 'local'
 end
 
 -- Map row0 -> { nw, tw, has_mut } so a run of consecutive explicit-type brace
 -- declarations aligns its `:` (after the name) and `=`/`;` (after the type), and
--- reserves the left mut column when any binding in the run is mut. Singleton runs
--- get no entry (nothing to align).
+-- reserves the left mut column ONLY when a binding in the run actually renders
+-- mut. constexpr declarations (`name: T : value` constant bindings) never mix
+-- with normal vars: a constexpr-ness flip ends the run, so a constant block
+-- aligns among itself and is never shifted right by a neighbor's mut column.
+-- Singleton runs get no entry (nothing to align).
 function M.compute_align(lines, offset, bufnr)
   offset = offset or 0
   local map = {}
   local i, n = 1, #lines
   while i <= n do
-    local block = {}
+    local block, block_cx = {}, nil
     while i <= n do
-      local nm, ty = M.field_dims(lines[i])
+      local nm, ty, cx = M.field_dims(lines[i])
       if not nm then
         break
+      end
+      if block_cx == nil then
+        block_cx = cx
+      elseif cx ~= block_cx then
+        break -- constexpr-ness flipped: this line starts a new block
       end
       local row0 = offset + i - 1
       block[#block + 1] = { row0 = row0, nw = vim.fn.strwidth(nm), tw = vim.fn.strwidth(ty), mut = M.field_is_mut(lines[i], bufnr, row0) }

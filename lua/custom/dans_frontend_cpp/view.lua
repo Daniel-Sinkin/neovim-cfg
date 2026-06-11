@@ -61,13 +61,16 @@ local function align_for(bufnr)
   return c
 end
 
--- Render the overlay for one row (or leave it raw if revealed / a diagnostic /
--- clang-format-off line). The row's namespace must already be cleared by the
--- caller. Shared by the full refresh and the per-row incremental path.
-local function render_one(bufnr, row0, line, set, cfoff, diag, cmt, align)
+-- Render the overlay for one row (or leave it raw if revealed / a
+-- clang-format-off line). Diagnosed lines render like any other: the
+-- diagnostic shows as a first-cell mark (custom.dans_diagmark) plus
+-- cursor-line virtual text, neither of which the overlay collides with.
+-- The row's namespace must already be cleared by the caller. Shared by the
+-- full refresh and the per-row incremental path.
+local function render_one(bufnr, row0, line, set, cfoff, cmt, align)
   -- a comment line that happens to parse like a decl (e.g. a `void (*PFN)(...)`
   -- inside a /* */ block) must stay raw -- comments are prose, never overlaid.
-  if set[row0] or diag[row0] or cfoff[row0] or cmt[row0] then
+  if set[row0] or cfoff[row0] or cmt[row0] then
     return
   end
   local start_col, chunks = R.render_line(line, type_for(bufnr, row0), align[row0], bufnr, row0)
@@ -102,6 +105,9 @@ local function refresh(bufnr)
   if not (enabled[bufnr] and vim.api.nvim_buf_is_valid(bufnr)) then
     return
   end
+  if vu.cold_gate(bufnr) then
+    return -- cold open: the deferred first pass paints everything at once
+  end
   clear(bufnr)
   if vu.is_recording() then
     return -- macro recording: show raw text so recorded motions use real columns
@@ -109,11 +115,10 @@ local function refresh(bufnr)
   -- reveal_set (cursor + visual selection) and clang-format-off both stay raw.
   local set = vu.reveal_set(bufnr)
   local cfoff = vu.clang_format_off(bufnr)
-  local diag = vu.diagnostic_lines(bufnr)
   local cmt = vu.comment_lines(bufnr)
   local c = align_for(bufnr)
   for idx, line in ipairs(c.lines) do
-    render_one(bufnr, c.s0 + idx - 1, line, set, cfoff, diag, cmt, c.align)
+    render_one(bufnr, c.s0 + idx - 1, line, set, cfoff, cmt, c.align)
   end
 end
 
@@ -122,6 +127,9 @@ end
 function M.render_row(bufnr, row0)
   if not (enabled[bufnr] and vim.api.nvim_buf_is_valid(bufnr)) then
     return
+  end
+  if vu.cold_gate(bufnr) then
+    return -- cold open: deferred first pass
   end
   vim.api.nvim_buf_clear_namespace(bufnr, ns, row0, row0 + 1)
   if vu.is_recording() then
@@ -133,7 +141,7 @@ function M.render_row(bufnr, row0)
   end
   local line = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)[1]
   if line then
-    render_one(bufnr, row0, line, vu.reveal_set(bufnr), vu.clang_format_off(bufnr), vu.diagnostic_lines(bufnr), vu.comment_lines(bufnr), c.align)
+    render_one(bufnr, row0, line, vu.reveal_set(bufnr), vu.clang_format_off(bufnr), vu.comment_lines(bufnr), c.align)
   end
 end
 
@@ -369,9 +377,11 @@ function M.setup()
   -- reveal (CursorMoved / ModeChanged recompute reveal_set). Scrolling is driven
   -- by the debounced VIEWPORT_SETTLED event, not WinScrolled, so a scroll burst
   -- repaints once instead of per notch. Cheap: it only touches on-screen lines.
+  -- (DiagnosticChanged used to be here: diagnosed lines were skipped, so a new
+  -- diagnostic forced a repaint. They render normally now.)
   vu.on_decorate(
     group,
-    { 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI', 'ModeChanged', 'DiagnosticChanged' },
+    { 'BufEnter', 'TextChanged', 'TextChangedI', 'CursorMoved', 'CursorMovedI', 'ModeChanged' },
     refresh,
     M.render_row -- a plain cursor move repaints only the two reveal-flipped rows
   )

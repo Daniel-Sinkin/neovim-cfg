@@ -74,6 +74,14 @@ local function is_library(t)
     or t:match '^Im%u' ~= nil
     or t:match '^stb' ~= nil
     or t:match '^STB' ~= nil
+    or t:match '^cblas_' ~= nil
+    or t:match '^CBLAS_' ~= nil
+    or t:match '^Cblas%u' ~= nil
+    or t:match '^openblas_' ~= nil
+    or t:match '^OPENBLAS_' ~= nil
+    or t:match '^lapacke?_' ~= nil
+    or t:match '^LAPACKE?_' ~= nil
+    or t == 'blasint'
     or t:match '^LLDB_' ~= nil
     or t:match '^SB%u' ~= nil
     or t == 'StateType'
@@ -138,6 +146,9 @@ end
 local function refresh(bufnr)
   if not (vim.api.nvim_buf_is_valid(bufnr) and CPP_FT[vim.bo[bufnr].filetype]) then
     return
+  end
+  if vu.cold_gate(bufnr) then
+    return -- cold open: deferred first pass
   end
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
   if not is_on(bufnr) then

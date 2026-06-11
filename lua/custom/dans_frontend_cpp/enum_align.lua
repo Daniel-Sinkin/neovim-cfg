@@ -21,6 +21,9 @@ local function refresh(bufnr)
   if not vu.is_cpp(vim.bo[bufnr].filetype) then
     return
   end
+  if vu.cold_gate(bufnr) then
+    return -- cold open: deferred first pass
+  end
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
   if not vu.module_enabled(bufnr, 'enum_align') then
     return
@@ -86,7 +89,7 @@ function M.setup()
       refresh(ev.buf)
     end,
   })
-  vu.on_decorate(group, { 'TextChanged', 'TextChangedI', 'BufEnter', 'CursorMoved', 'CursorMovedI', 'DiagnosticChanged' }, refresh)
+  vu.on_decorate(group, { 'TextChanged', 'TextChangedI', 'BufEnter', 'CursorMoved', 'CursorMovedI' }, refresh)
 end
 
 return M

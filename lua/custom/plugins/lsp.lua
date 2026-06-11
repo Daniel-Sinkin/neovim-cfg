@@ -142,18 +142,14 @@ return {
             [vim.diagnostic.severity.HINT] = '󰌶 ',
           },
         } or {},
+        -- Full message only on the CURSOR line (hover a line to read it);
+        -- every other diagnosed line gets a first-cell mark from
+        -- custom.dans_diagmark instead of end-of-line text, so diagnostics
+        -- never push code around or suppress the frontend overlay.
         virtual_text = {
+          current_line = true,
           source = 'if_many',
           spacing = 2,
-          format = function(diagnostic)
-            local diagnostic_message = {
-              [vim.diagnostic.severity.ERROR] = diagnostic.message,
-              [vim.diagnostic.severity.WARN] = diagnostic.message,
-              [vim.diagnostic.severity.INFO] = diagnostic.message,
-              [vim.diagnostic.severity.HINT] = diagnostic.message,
-            }
-            return diagnostic_message[diagnostic.severity]
-          end,
         },
       }
 

@@ -148,9 +148,10 @@ do
 end
 
 do
-  -- non-const `char*` is NOT a CString: stays `mut char^`.
+  -- non-const `char*` is NOT a CString: stays a char^. A pointer MEMBER is
+  -- plain struct data, so no mut marker.
   local b, off = build('struct', { 'char* raw{};' })
-  chk('non-const char* stays ptr', overlay(b, off), 'raw: mut char^;')
+  chk('non-const char* stays ptr', overlay(b, off), 'raw: char^;')
 end
 
 -- ===================== report =====================

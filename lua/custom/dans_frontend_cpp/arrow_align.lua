@@ -289,6 +289,9 @@ local function refresh(bufnr)
   if not (vim.api.nvim_buf_is_valid(bufnr) and is_hpp(bufnr)) then
     return
   end
+  if vu.cold_gate(bufnr) then
+    return -- cold open: deferred first pass
+  end
   vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
   if not vu.module_enabled(bufnr, 'arrow_align') then
     cache[bufnr] = nil

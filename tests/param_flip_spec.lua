@@ -52,6 +52,23 @@ ok('constrained-auto concept-colored', has('~SizeLike', 'DansConcept'))
 -- a const ref keeps its const (no mut), colored as the type
 ok('const ref has no separate mut on ro', not has('mut Foo', 'DansMarkerMut'))
 
+-- OPENBLAS_CONST (OpenBLAS's const macro, all over cblas.h) is const: the
+-- flip must render it exactly like the literal keyword.
+do
+  local A = require 'custom.dans_frontend_cpp.aliases'
+  local function text_of(chunks)
+    local t = {}
+    for _, c in ipairs(chunks or {}) do
+      t[#t + 1] = c[1]
+    end
+    return table.concat(t)
+  end
+  local oc = text_of(A.flip_param 'OPENBLAS_CONST blasint M')
+  ok('OPENBLAS_CONST value param == const param', oc ~= '' and oc == text_of(A.flip_param 'const blasint M'))
+  local op = text_of(A.flip_param 'OPENBLAS_CONST double *A')
+  ok('OPENBLAS_CONST ptr param == const ptr param', op ~= '' and op == text_of(A.flip_param 'const double *A'))
+end
+
 local report = { string.format('param_flip_spec: %d passed, %d failed', pass, fail) }
 for _, f in ipairs(fails) do
   report[#report + 1] = f

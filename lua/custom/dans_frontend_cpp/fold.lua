@@ -309,6 +309,9 @@ function _G.dans_cpp_foldexpr()
   if not vu.module_enabled(buf, 'fold') then
     return '0'
   end
+  if vu.cold_gate(buf) then
+    return '0' -- cold open: fold.refresh re-folds after the deferred pass
+  end
   local tick = vim.api.nvim_buf_get_changedtick(buf)
   local c = cache[buf]
   if not c or c.tick ~= tick then

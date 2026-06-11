@@ -18,9 +18,11 @@ function M.cursor_row0(bufnr)
   return nil
 end
 
--- Set of 0-based rows carrying a diagnostic (clangd / clang-tidy / etc). The view
--- modules skip these lines so their overlay doesn't collide with the diagnostic's
--- own inline virtual text (which would garble both).
+-- Set of 0-based rows carrying a diagnostic (clangd / clang-tidy / etc). The
+-- view modules used to skip these to dodge the end-of-line virtual text; that
+-- text is now cursor-line-only (diagnosed lines get a first-cell mark from
+-- custom.dans_diagmark instead), so nothing skips them anymore. Kept for any
+-- caller that wants the set.
 function M.diagnostic_lines(bufnr)
   local set = {}
   for _, d in ipairs(vim.diagnostic.get(bufnr)) do
@@ -178,8 +180,10 @@ function M.visible_range(bufnr)
 end
 
 -- Per-refresh skip predicate, capturing the reveal set (cursor + visual
--- selection), diagnostic rows, clang-format-off rows, and view-overlay coverage
--- once (so a module computes them a single time, not per line/capture). A
+-- selection), clang-format-off rows, and view-overlay coverage once (so a
+-- module computes them a single time, not per line/capture). Diagnosed rows
+-- are NOT skipped: diagnostics render as a first-cell mark + cursor-line text
+-- (custom.dans_diagmark), which the decorations don't collide with. A
 -- decoration skips any row it returns true for. `line` is optional, fetched only
 -- if a coverage check needs it. `.skip` / `.skip_conceal` are kept as distinct
 -- names for call-site readability though they now coincide.
@@ -188,7 +192,6 @@ function M.make_skipper(bufnr)
   local cfoff = M.clang_format_off(bufnr)
   local sa = M.static_assert_lines(bufnr)
   local cmt = M.comment_lines(bufnr)
-  local diag = M.diagnostic_lines(bufnr)
   local view_ok, view = pcall(require, 'custom.dans_frontend_cpp.view')
   local view_on = view_ok and view.is_enabled(bufnr)
   local function covered(row0, line)
@@ -201,9 +204,136 @@ function M.make_skipper(bufnr)
     return line ~= nil and view.covers(line, bufnr, row0)
   end
   local function any(row0, line)
-    return reveal[row0] or diag[row0] == true or cfoff[row0] or sa[row0] or cmt[row0] or covered(row0, line)
+    return reveal[row0] or cfoff[row0] or sa[row0] or cmt[row0] or covered(row0, line)
   end
   return { skip = any, skip_conceal = any }
+end
+
+-- ------------------------------------------------------------- cold open ---
+-- First-paint deferral. Opening a never-seen buffer fires the whole decoration
+-- stack synchronously (FileType + BufEnter run BEFORE the first paint); on a
+-- vk_core-sized file the treesitter cold parse plus a dozen full-file queries
+-- block the open for ~500 ms. Every decoration refresh asks cold_gate first:
+-- while the buffer is cold it returns true (skip everything -- the raw file
+-- paints instantly), and one deferred pass then decorates the whole stack at
+-- once. Small buffers never go cold (their first pass costs a few ms, so the
+-- decorated view appearing instantly is worth more than the deferral).
+-- Re-entering an already-loaded buffer is warm by definition -- the gate arms
+-- once per buffer load (re-armed on unload, so :e! defers again).
+local COLD_OPEN_MS = 40
+local COLD_MIN_LINES = 400
+local cold = {}
+
+-- treesitter-context suspension across cold opens: its update autocmds fire
+-- inside the open cascade and would pay the synchronous cold parse themselves
+-- (measured ~180 ms on a 4.4k-line file), defeating the gate. Counted, since
+-- several cold opens can overlap.
+local tsc_suspended = 0
+local function tsc_suspend()
+  if not package.loaded['treesitter-context'] then
+    return -- not loaded yet; requiring it HERE would force the lazy plugin
+    -- load (and its initial update) into the open cascade we're deferring
+  end
+  local ok = pcall(function()
+    require('treesitter-context').disable()
+  end)
+  if ok then
+    tsc_suspended = tsc_suspended + 1
+  end
+end
+local function tsc_resume()
+  if tsc_suspended > 0 then
+    tsc_suspended = tsc_suspended - 1
+    if tsc_suspended == 0 then
+      pcall(function()
+        require('treesitter-context').enable()
+      end)
+    end
+  end
+end
+
+function M.cold_gate(bufnr)
+  local state = cold[bufnr]
+  if state ~= nil then
+    return state
+  end
+  if vim.api.nvim_buf_line_count(bufnr) < COLD_MIN_LINES then
+    cold[bufnr] = false
+    return false
+  end
+  cold[bufnr] = true
+  tsc_suspend()
+  -- exactly one resume per arm, whichever path gets there first (the deferred
+  -- finish, or an unload racing it).
+  local resumed = false
+  local function resume_once()
+    if not resumed then
+      resumed = true
+      tsc_resume()
+    end
+  end
+  -- pcall: the first gate ask can come from the foldexpr, whose evaluation
+  -- context restricts some API calls; losing the unload re-arm there only
+  -- means a reopened buffer decorates eagerly once.
+  pcall(vim.api.nvim_create_autocmd, 'BufUnload', {
+    buffer = bufnr,
+    once = true,
+    callback = function()
+      cold[bufnr] = nil
+      resume_once()
+    end,
+  })
+  local function finish()
+    if cold[bufnr] ~= true then
+      return -- unloaded (and possibly re-armed) in the meantime
+    end
+    cold[bufnr] = false
+    resume_once()
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      return
+    end
+    if vim.api.nvim_get_current_buf() == bufnr then
+      -- one repaint of the whole stack: the settled event drives the view and
+      -- every on_decorate module; the few that don't listen to it run directly.
+      for _, mod in ipairs { 'lint', 'arrow_align', 'fold' } do
+        pcall(function()
+          require('custom.dans_frontend_cpp.' .. mod).refresh(bufnr)
+        end)
+      end
+      vim.api.nvim_exec_autocmds('User', { pattern = M.VIEWPORT_SETTLED })
+    else
+      -- the user hopped away before the deferral fired: drop the folded flag
+      -- so the return trip's BufEnter folds the (by then computable) outline.
+      pcall(vim.api.nvim_buf_del_var, bufnr, 'dans_folded')
+    end
+  end
+  vim.defer_fn(function()
+    if cold[bufnr] ~= true then
+      return -- unloaded first; that path already resumed
+    end
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      cold[bufnr] = false
+      resume_once()
+      return
+    end
+    -- Warm the tree asynchronously (time-sliced on the main loop) so neither
+    -- the repaint below nor any later consumer pays the ~200 ms cold parse in
+    -- one synchronous block. Falls back to the sync path on older runtimes.
+    local started = false
+    pcall(function()
+      local parser = vim.treesitter.get_parser(bufnr)
+      if parser then
+        parser:parse(true, function()
+          vim.schedule(finish)
+        end)
+        started = true
+      end
+    end)
+    if not started then
+      finish()
+    end
+  end, COLD_OPEN_MS)
+  return true
 end
 
 -- While a macro is recording, every column-shifting view transform is suspended
