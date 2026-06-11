@@ -302,7 +302,11 @@ function M.compute_fold_levels(lines)
 end
 
 -- Cached per buffer + changedtick: the foldexpr is called per line, so compute
--- the whole map once per change and look up by line.
+-- the whole map once per change and look up by line. During insert the previous
+-- map is served as-is -- rebuilding the whole-buffer map on every keystroke was
+-- a fifth of insert latency on a big file, and a fold appearing only on
+-- InsertLeave is invisible in practice. The InsertLeave hook below re-evaluates
+-- against the fresh map (reassigning foldmethod, which keeps manual opens).
 local cache = {}
 function _G.dans_cpp_foldexpr()
   local buf = vim.api.nvim_get_current_buf()
@@ -314,8 +318,12 @@ function _G.dans_cpp_foldexpr()
   end
   local tick = vim.api.nvim_buf_get_changedtick(buf)
   local c = cache[buf]
+  if c and c.tick ~= tick and vim.api.nvim_get_mode().mode:sub(1, 1) == 'i' then
+    c.stale = true
+    return c.levels[vim.v.lnum] or '0'
+  end
   if not c or c.tick ~= tick then
-    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    local lines = vu.buf_lines(buf)
     local ranges = contract_ranges(lines)
     for _, r in ipairs(doc_ranges(lines)) do
       ranges[#ranges + 1] = r
@@ -324,8 +332,9 @@ function _G.dans_cpp_foldexpr()
       ranges[#ranges + 1] = r
     end
     -- platform-dead `#if` branches fold (and gray, via ppif's own extmarks), in
-    -- every c/cpp/cuda buffer -- not just headers.
-    for _, r in ipairs(require('custom.dans_frontend_cpp.ppif').inactive_ranges(lines)) do
+    -- every c/cpp/cuda buffer -- not just headers. Shared per-tick cache: ppif's
+    -- own refresh reads the same ranges without a second whole-buffer scan.
+    for _, r in ipairs(require('custom.dans_frontend_cpp.ppif').buf_inactive_ranges(buf)) do
       ranges[#ranges + 1] = r
     end
     if is_hpp(buf) then
@@ -456,9 +465,37 @@ function M.setup()
       end, { buffer = true, desc = 'Open the fold under the click' })
     end,
   })
+  -- A window that carried expr folds from a previous c/cpp/cuda buffer would
+  -- evaluate our foldexpr for every line of the incoming file DURING the read
+  -- (before its filetype is even known). Drop to manual; the FileType hook above
+  -- re-engages expr for c/cpp/cuda, and a non-cpp file in that window stops
+  -- paying the per-line v:lua bridge entirely. No foldexpr check: mid-:edit the
+  -- window's foldexpr already reads as the reset default '0' while foldmethod
+  -- still reads 'expr', and nothing else in this config uses expr folds.
+  vim.api.nvim_create_autocmd('BufReadPre', {
+    group = group,
+    callback = function()
+      if vim.wo.foldmethod == 'expr' then
+        vim.wo.foldmethod = 'manual'
+      end
+    end,
+  })
   -- Fold a buffer the first time it's shown; leave its state alone after, so opens
   -- persist for the session.
   vim.api.nvim_create_autocmd('BufEnter', { group = group, callback = initial_fold })
+  -- Folds went stale while the foldexpr served the old map during insert:
+  -- re-evaluate against the fresh buffer. The foldmethod reassignment re-runs
+  -- the expr buffer-wide and preserves manually opened folds.
+  vim.api.nvim_create_autocmd('InsertLeave', {
+    group = group,
+    callback = function(ev)
+      local c = cache[ev.buf]
+      if c and c.stale and vim.wo.foldmethod == 'expr' then
+        c.stale = nil
+        vim.opt_local.foldmethod = 'expr'
+      end
+    end,
+  })
   vim.api.nvim_create_autocmd('ColorScheme', { group = group, callback = set_fold_hl })
 end
 

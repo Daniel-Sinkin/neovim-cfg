@@ -217,6 +217,20 @@ function M.inactive_ranges(lines, plat)
   return out
 end
 
+-- inactive_ranges over the buffer, cached per changedtick. Both this module's
+-- refresh and the foldexpr (fold.lua) consume the ranges on the same tick, so
+-- the whole-buffer directive scan runs once per edit instead of twice.
+local range_cache = {}
+function M.buf_inactive_ranges(bufnr)
+  local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+  local c = range_cache[bufnr]
+  if not (c and c.tick == tick) then
+    c = { tick = tick, ranges = M.inactive_ranges(vu.buf_lines(bufnr)) }
+    range_cache[bufnr] = c
+  end
+  return c.ranges
+end
+
 local function refresh(bufnr)
   if not (vim.api.nvim_buf_is_valid(bufnr) and vu.is_cpp(vim.bo[bufnr].filetype)) then
     return
@@ -228,8 +242,7 @@ local function refresh(bufnr)
   if vu.cold_gate(bufnr) then
     return -- cold open: deferred first pass
   end
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  for _, r in ipairs(M.inactive_ranges(lines)) do
+  for _, r in ipairs(M.buf_inactive_ranges(bufnr)) do
     -- one multi-line highlight over the dead branch; high priority so it overrides
     -- syntax / treesitter and reads as one uniform gray.
     pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, r[1] - 1, 0, {
@@ -246,14 +259,7 @@ M.refresh = refresh
 
 function M.setup()
   local group = vim.api.nvim_create_augroup('ds_ppif', { clear = true })
-  vim.api.nvim_create_autocmd('FileType', {
-    group = group,
-    pattern = { 'c', 'cpp', 'cuda' },
-    callback = function(ev)
-      refresh(ev.buf)
-    end,
-  })
-  vu.on_decorate(group, { 'BufEnter', 'TextChanged', 'TextChangedI' }, refresh)
+  vu.on_decorate(group, { 'FileType', 'BufEnter', 'TextChanged', 'TextChangedI' }, refresh)
 end
 
 return M
