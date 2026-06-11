@@ -216,7 +216,13 @@ return {
         'lua_ls',
         'stylua',
       }
-      require('mason-tool-installer').setup { ensure_installed = ensure_installed }
+      -- The mason-nvim-dap integration is on by default and its require() makes
+      -- lazy.nvim pull the whole DAP stack into startup; nothing DAP-shaped is in
+      -- ensure_installed, so turn it (and null-ls) off.
+      require('mason-tool-installer').setup {
+        ensure_installed = ensure_installed,
+        integrations = { ['mason-lspconfig'] = true, ['mason-null-ls'] = false, ['mason-nvim-dap'] = false },
+      }
       require('mason-lspconfig').setup {
         ensure_installed = {},
         automatic_installation = false,

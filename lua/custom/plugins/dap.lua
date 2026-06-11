@@ -1,7 +1,77 @@
 -- Debug Adapter Protocol. Prefers CodeLLDB on macOS, falls back to lldb-dap.
 -- nvim-dap-julia wires DebugAdapter.jl into its pinned Julia env on build.
+--
+-- Loaded on first debug keypress / :Dap* command: the eager load (dap + dapui +
+-- nio + virtual-text + mason-nvim-dap) cost ~140 ms of every startup, all of it
+-- for sessions that never debug.
 return {
   'mfussenegger/nvim-dap',
+  keys = {
+    {
+      '<F5>',
+      function()
+        require('dap').continue()
+      end,
+      desc = 'DAP: Continue',
+    },
+    {
+      '<F10>',
+      function()
+        require('dap').step_over()
+      end,
+      desc = 'DAP: Step over',
+    },
+    {
+      '<F11>',
+      function()
+        require('dap').step_into()
+      end,
+      desc = 'DAP: Step into',
+    },
+    {
+      '<F12>',
+      function()
+        require('dap').step_out()
+      end,
+      desc = 'DAP: Step out',
+    },
+    {
+      '<leader>db',
+      function()
+        require('dap').toggle_breakpoint()
+      end,
+      desc = 'DAP: Toggle breakpoint',
+    },
+    {
+      '<leader>dB',
+      function()
+        require('dap').set_breakpoint(vim.fn.input 'Breakpoint condition: ')
+      end,
+      desc = 'DAP: Conditional breakpoint',
+    },
+    {
+      '<leader>dr',
+      function()
+        require('dap').repl.open()
+      end,
+      desc = 'DAP: Open REPL',
+    },
+    {
+      '<leader>dl',
+      function()
+        require('dap').run_last()
+      end,
+      desc = 'DAP: Run last',
+    },
+    {
+      '<leader>du',
+      function()
+        require('dapui').toggle()
+      end,
+      desc = 'DAP: Toggle UI',
+    },
+  },
+  cmd = { 'DapContinue', 'DapToggleBreakpoint', 'DapStepOver', 'DapStepInto', 'DapStepOut', 'DapTerminate' },
   dependencies = {
     {
       'rcarriga/nvim-dap-ui',
@@ -159,17 +229,5 @@ return {
     pcall(function()
       require('nvim-dap-julia').setup()
     end)
-
-    vim.keymap.set('n', '<F5>', dap.continue, { desc = 'DAP: Continue' })
-    vim.keymap.set('n', '<F10>', dap.step_over, { desc = 'DAP: Step over' })
-    vim.keymap.set('n', '<F11>', dap.step_into, { desc = 'DAP: Step into' })
-    vim.keymap.set('n', '<F12>', dap.step_out, { desc = 'DAP: Step out' })
-    vim.keymap.set('n', '<leader>db', dap.toggle_breakpoint, { desc = 'DAP: Toggle breakpoint' })
-    vim.keymap.set('n', '<leader>dB', function()
-      dap.set_breakpoint(vim.fn.input 'Breakpoint condition: ')
-    end, { desc = 'DAP: Conditional breakpoint' })
-    vim.keymap.set('n', '<leader>dr', dap.repl.open, { desc = 'DAP: Open REPL' })
-    vim.keymap.set('n', '<leader>dl', dap.run_last, { desc = 'DAP: Run last' })
-    vim.keymap.set('n', '<leader>du', dapui.toggle, { desc = 'DAP: Toggle UI' })
   end,
 }
