@@ -240,7 +240,15 @@ return {
       end
 
       flatten_monochrome()
-      vim.api.nvim_create_autocmd('ColorScheme', { callback = flatten_monochrome })
+      -- Re-flatten after every colorscheme load. Deferred: Neovide's
+      -- neovide_theme='auto' flips &background, whose OptionSet handler
+      -- (colorscheme.lua) re-picks tokyonight; running the relink nested inside
+      -- that chain doesn't stick (the base groups end up re-colored), so it has
+      -- to land after the cycle settles. Scheduling also coalesces the direct
+      -- :colorscheme path -- it just runs one tick later.
+      vim.api.nvim_create_autocmd('ColorScheme', {
+        callback = function() vim.schedule(flatten_monochrome) end,
+      })
 
       -- Per-buffer syntax items only (cheap): the gray cast match, and the
       -- CUDA-specific matches for cuda buffers.
