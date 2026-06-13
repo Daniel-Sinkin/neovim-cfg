@@ -2,6 +2,32 @@
 -- uses LanguageServer.jl in ~/.julia/environments/nvim-lspconfig with a custom
 -- root_dir picking the OUTERMOST Project.toml so nested layouts don't spawn
 -- duplicate clients (see private/AGENTS.md).
+
+-- clangd answers documentHighlight on a control-flow keyword with the whole
+-- related flow (every return of the function, a loop plus its continues and
+-- breaks), which reads as stray syntax coloring on the monochrome buffers.
+-- Keywords are never symbols, so the cursor-hold request skips them outright.
+local FLOW_KEYWORDS = {
+  ['return'] = true,
+  ['if'] = true,
+  ['else'] = true,
+  ['for'] = true,
+  ['while'] = true,
+  ['do'] = true,
+  ['switch'] = true,
+  ['case'] = true,
+  ['default'] = true,
+  ['break'] = true,
+  ['continue'] = true,
+  ['goto'] = true,
+  ['try'] = true,
+  ['catch'] = true,
+  ['throw'] = true,
+  ['co_return'] = true,
+  ['co_await'] = true,
+  ['co_yield'] = true,
+}
+
 return {
   {
     -- Lua LSP for Neovim config / runtime / plugins.
@@ -91,6 +117,8 @@ return {
               buffer = event.buf,
               group = highlight_augroup,
               callback = function()
+                if vim.b[event.buf].dans_token_mode then return end
+                if FLOW_KEYWORDS[vim.fn.expand '<cword>'] then return end
                 vim.lsp.buf.document_highlight()
                 -- Mirror the reference highlight onto the frontend overlay too.
                 pcall(function()
