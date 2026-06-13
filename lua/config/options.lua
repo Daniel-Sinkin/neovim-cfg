@@ -47,6 +47,9 @@ end
 vim.opt.number = true
 vim.opt.relativenumber = true
 vim.opt.mouse = 'a'
+-- Touchpad drift must not scroll the view sideways; vertical is handled by
+-- the wheel maps in keymaps.lua.
+vim.opt.mousescroll = 'ver:3,hor:0'
 vim.opt.showmode = false
 
 -- Indentation: 4 spaces, never tabs.

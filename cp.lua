@@ -159,6 +159,7 @@ vim.keymap.set('n', '<C-k>', '<C-w><C-k>', { desc = 'Move focus up' })
 -- Mousewheel (same as your init.lua)
 vim.keymap.set({ 'n', 'i', 'v' }, '<ScrollWheelUp>',   '<C-y><C-y><C-y>', { silent = true })
 vim.keymap.set({ 'n', 'i', 'v' }, '<ScrollWheelDown>', '<C-e><C-e><C-e>', { silent = true })
+vim.opt.mousescroll = 'ver:3,hor:0'
 
 -- Yank highlight
 vim.api.nvim_create_autocmd('TextYankPost', {
