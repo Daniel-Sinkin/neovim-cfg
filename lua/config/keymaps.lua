@@ -23,9 +23,9 @@ vim.keymap.set({ 'n', 'x' }, 'P', function()
 end, { expr = true, desc = 'Paste last change/delete (reg z)' })
 
 -- DANS frontend config menu: toggle modules + common settings (font size).
-vim.keymap.set('n', '<leader>da', function()
+vim.keymap.set('n', '<leader>dan', function()
   require('custom.dans_menu').open()
-end, { desc = 'D[A]NS frontend menu' })
+end, { desc = 'D[AN]S frontend menu' })
 
 -- Nuke stale diagnostics and refresh Neo-tree's view. Use when a closed file
 -- is still marked orange in the tree.

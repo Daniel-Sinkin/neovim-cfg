@@ -1,4 +1,4 @@
--- DANS config menu (<leader>da): one place to toggle every dans-cpp-frontend
+-- DANS config menu (<leader>dan): one place to toggle every dans-cpp-frontend
 -- module, flip the view/tool options (type hints, lambda view, perf overlay,
 -- profiler), and set the font size. A small floating grid.
 --
@@ -105,6 +105,13 @@ local function build_sections(tbuf, twin)
 
   local hints = checkbox('type hints', view.hints_enabled, view.toggle_hints)
   local lambda = checkbox('lambda view', view.lambda_enabled, view.toggle_lambda)
+  local tokens = checkbox('tokenizer view', function()
+    return require('custom.dans_tokenizer').is_enabled(tbuf)
+  end, function()
+    in_target(function()
+      require('custom.dans_tokenizer').toggle(tbuf)
+    end)
+  end)
 
   local mon = checkbox('perf overlay', perf.monitor_enabled, perf.monitor_toggle)
   local prof = checkbox('profiler', perf.profile_running, function()
@@ -150,7 +157,7 @@ local function build_sections(tbuf, twin)
 
   return {
     { title = 'Frontend modules', items = vim.list_extend({ all }, mods) },
-    { title = 'View', items = { hints, lambda } },
+    { title = 'View', items = { hints, lambda, tokens } },
     { title = 'Tools', items = { mon, prof, asm, keylog } },
     { title = 'Settings', items = { font } },
   }
