@@ -13,6 +13,8 @@
 --                            designated/fold/arrow_align) -- tab-completed
 --   :DansFrontend hints      toggle clangd deduced-type hints
 --   :DansFrontend lambda     toggle the lambda-as-function rendering
+--   :DansFrontend tokens     toggle the tokenizer coloring view (plain
+--                            text, every other coloring source suppressed)
 local M = {}
 
 -- setup() order preserved from the original flat layout (aliases before the
@@ -82,6 +84,8 @@ local function dispatch(cmd)
     mod('view').toggle_hints()
   elseif sub == 'lambda' then
     mod('view').toggle_lambda()
+  elseif sub == 'tokens' then
+    require('custom.dans_tokenizer').toggle(buf)
   elseif sub == '' then
     -- master: if anything is on, turn everything off; otherwise turn it all on.
     local any = false
@@ -105,7 +109,7 @@ local function dispatch(cmd)
 end
 
 local function complete(arglead)
-  local opts = vim.list_extend(vim.deepcopy(TOGGLEABLE), { 'hints', 'lambda' })
+  local opts = vim.list_extend(vim.deepcopy(TOGGLEABLE), { 'hints', 'lambda', 'tokens' })
   return vim.tbl_filter(function(s)
     return s:find(arglead, 1, true) == 1
   end, opts)
