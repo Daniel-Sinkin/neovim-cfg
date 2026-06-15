@@ -8,3 +8,5 @@ spell/
 *.bak-*
 
 private/
+
+lazy-lock.json
