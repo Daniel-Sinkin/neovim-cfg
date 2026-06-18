@@ -225,18 +225,16 @@ return {
           -- priority so the meaningful code stands out.
           vim.api.nvim_set_hl(0, 'dansCppCast', { fg = '#6b7280' })
 
-          -- __device__ / __host__ / __global__ markers (CUDA; global groups,
-          -- harmless when no cuda buffer is open).
-          vim.api.nvim_set_hl(0, 'cudaStorageClass', { fg = '#9ece6a', bold = true })
-          vim.api.nvim_set_hl(0, 'cudaConstant', { fg = '#9ece6a', bold = true })
-          -- dim3, vector types, cudaError_t.
-          vim.api.nvim_set_hl(0, 'cudaType', { fg = '#7dcfff' })
-          -- gridDim, blockIdx, blockDim, threadIdx, warpSize.
-          vim.api.nvim_set_hl(0, 'cudaVariable', { fg = '#ff9e64' })
-          -- <<< grid, block, sharedMem, stream >>>.
-          vim.api.nvim_set_hl(0, 'cudaKernelBrackets', { fg = '#bb9af7', bold = true })
-          vim.api.nvim_set_hl(0, 'cudaKernelConfig', { fg = '#e0af68' })
-          vim.api.nvim_set_hl(0, 'cudaDunder', { link = 'cudaStorageClass' })
+          -- CUDA groups (built-in cuda.vim types/constants/variables plus the
+          -- __dunder__ and <<<>>> matches below): flatten to Normal so .cu/.cuh
+          -- read monochrome like c/cpp. cuda.vim otherwise default-links these to
+          -- colored standard groups and a kernel-heavy file lights up everywhere.
+          for _, g in ipairs {
+            'cudaStorageClass', 'cudaConstant', 'cudaType', 'cudaVariable',
+            'cudaKernelBrackets', 'cudaKernelConfig', 'cudaDunder',
+          } do
+            vim.api.nvim_set_hl(0, g, { link = 'Normal' })
+          end
       end
 
       flatten_monochrome()
