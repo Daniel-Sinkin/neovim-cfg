@@ -106,14 +106,17 @@ return {
           end
 
           local client = vim.lsp.get_client_by_id(event.data.client_id)
-          -- Drop LSP semantic tokens for C/C++; the monochrome theme in
+          -- Drop LSP semantic tokens for C/C++/CUDA; the monochrome theme in
           -- treesitter.lua re-introduces color via classic syntax instead.
           -- server_capabilities is shared across all of the client's buffers, so
           -- nilling it isn't enough: a highlighter that already started on
           -- another buffer keeps running and its next delta response indexes the
-          -- now-nil provider, throwing in a scheduled callback. Disable per
-          -- buffer too so any live highlighter is torn down.
-          if client and (vim.bo[event.buf].filetype == 'c' or vim.bo[event.buf].filetype == 'cpp') then
+          -- now-nil provider, throwing in a scheduled callback (a .cu file on
+          -- BufWinEnter after a cpp buffer nilled it). Disable per buffer too so
+          -- any live highlighter is torn down. cuda must be here, not just c/cpp:
+          -- clangd attaches to .cu and shares the same nilled provider.
+          local ft = vim.bo[event.buf].filetype
+          if client and (ft == 'c' or ft == 'cpp' or ft == 'cuda') then
             client.server_capabilities.semanticTokensProvider = nil
             local bufs = { [event.buf] = true }
             for buf in pairs(client.attached_buffers or {}) do bufs[buf] = true end
