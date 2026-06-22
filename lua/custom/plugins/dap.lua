@@ -1,5 +1,6 @@
 -- Debug Adapter Protocol. Prefers CodeLLDB on macOS, falls back to lldb-dap.
--- nvim-dap-julia wires DebugAdapter.jl into its pinned Julia env on build.
+-- nvim-dap-julia wires DebugAdapter.jl into its own Julia env on build
+-- (Pkg.update so it re-resolves for the local Julia version, not the shipped manifest).
 --
 -- Loaded on first debug keypress / :Dap* command: the eager load (dap + dapui +
 -- nio + virtual-text + mason-nvim-dap) cost ~140 ms of every startup, all of it
@@ -103,7 +104,7 @@ return {
     },
     {
       'kdheepak/nvim-dap-julia',
-      build = "julia --project=. -e 'using Pkg; Pkg.instantiate()'",
+      build = "julia --project=. -e 'using Pkg; Pkg.update()'",
     },
   },
   config = function()
