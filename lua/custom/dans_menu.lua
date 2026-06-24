@@ -112,6 +112,13 @@ local function build_sections(tbuf, twin)
       require('custom.dans_tokenizer').toggle(tbuf)
     end)
   end)
+  -- Global (not per-buffer): drops every custom display tweak and shows stock
+  -- tokyonight everywhere.
+  local vanilla = checkbox('vanilla theme', function()
+    return require('custom.dans_vanilla').is_enabled()
+  end, function()
+    require('custom.dans_vanilla').toggle()
+  end)
 
   local mon = checkbox('perf overlay', perf.monitor_enabled, perf.monitor_toggle)
   local prof = checkbox('profiler', perf.profile_running, function()
@@ -157,7 +164,7 @@ local function build_sections(tbuf, twin)
 
   return {
     { title = 'Frontend modules', items = vim.list_extend({ all }, mods) },
-    { title = 'View', items = { hints, lambda, tokens } },
+    { title = 'View', items = { hints, lambda, tokens, vanilla } },
     { title = 'Tools', items = { mon, prof, asm, keylog } },
     { title = 'Settings', items = { font } },
   }

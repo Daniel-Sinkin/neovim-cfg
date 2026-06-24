@@ -43,6 +43,9 @@ return {
       highlight = {
         enable = true,
         disable = function(_, bufnr)
+          -- Vanilla mode (dans menu) wants the stock treesitter theme, so don't
+          -- disable highlighting for c/cpp/cuda while it's on.
+          if vim.g.dans_vanilla then return false end
           local ft = vim.bo[bufnr].filetype
           return ft == 'c' or ft == 'cpp' or ft == 'cuda'
         end,
@@ -94,6 +97,8 @@ return {
       -- syntax itself loads through Neovim's normal FileType machinery, since
       -- treesitter highlighting is disabled for these filetypes above.
       local function flatten_monochrome()
+          -- Vanilla mode (dans menu) leaves the stock tokyonight theme alone.
+          if vim.g.dans_vanilla then return end
           local function link(group, target)
             pcall(vim.api.nvim_set_hl, 0, group, { link = target })
           end
