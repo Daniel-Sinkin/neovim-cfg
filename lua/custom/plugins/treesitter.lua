@@ -240,13 +240,6 @@ return {
           } do
             vim.api.nvim_set_hl(0, g, { link = 'Normal' })
           end
-
-          -- clangd tags dead stores / unused writes (e.g. `*ptr = v;` whose
-          -- value is never read) with DiagnosticTag.Unnecessary; neovim fades
-          -- that whole statement range via DiagnosticUnnecessary, which
-          -- tokyonight paints a dim gray, so the line reads as commented out.
-          -- Pin it to Normal so unused-code fading never grays real code.
-          vim.api.nvim_set_hl(0, 'DiagnosticUnnecessary', { link = 'Normal' })
       end
 
       flatten_monochrome()

@@ -343,8 +343,11 @@ local function apply(ev)
   -- library colors flash on a comment until the view settled. These are anchored
   -- to the line start, so they match every block-comment line on its own with no
   -- backward scan -- the opener `/*...`, and continuation/closer `* ...` / `*/`.
+  -- The continuation form requires the `*` to be followed by whitespace, `/`, or
+  -- end-of-line so it stays off pointer-deref statements (`*ptr = v;`, `*out`),
+  -- which start `\s*\*` too and would otherwise gray the whole line as a comment.
   vim.fn.matchadd('DansCommentMask', [[^\s*/\*.*]], 28)
-  vim.fn.matchadd('DansCommentMask', [[^\s*\*.*]], 28)
+  vim.fn.matchadd('DansCommentMask', [[^\s*\*\%(\s\|/\|$\).*]], 28)
   -- Quoted (not [[...]]): the trailing [>"] char class would close a long string.
   vim.fn.matchadd('DansIncludeMask', '^\\s*#\\s*include\\s*\\zs[<"].\\{-}[>"]', 28)
 end
